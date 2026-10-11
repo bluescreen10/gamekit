@@ -1,0 +1,29 @@
+# C and Objective-C formatting for the cgo bridges. Run: clang-format -i on the .c, .h
+# and .m files (see `git ls-files '*.c' '*.h' '*.m'`).
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 120
+# Include order can matter in C (platform headers before the ones that need them).
+SortIncludes: Never
+# Go reads //go:build constraints in C and Objective-C files too, and only without a
+# space after the slashes.
+CommentPragmas: '^go:'
+# Every if, else, for, while and do gets braces, one-liners included.
+InsertBraces: true
+# Every function and block body on lines of its own, as in the Go code.
+AllowShortFunctionsOnASingleLine: None
+AllowShortBlocksOnASingleLine: Never
+---
+Language: ObjC
+IndentWidth: 4
+ColumnLimit: 120
+SortIncludes: Never
+CommentPragmas: '^go:'
+InsertBraces: true
+# Every function and block body on lines of its own, as in the Go code.
+AllowShortFunctionsOnASingleLine: None
+AllowShortBlocksOnASingleLine: Never
+# The Metal bridge wraps each call in MB_BEGIN(...) { body } MB_END. MB_END ends a
+# statement without a semicolon: unannounced, clang-format runs it into the function's
+# closing brace and the next function, and loses the indentation of everything around.
+StatementMacros: ['MB_END']

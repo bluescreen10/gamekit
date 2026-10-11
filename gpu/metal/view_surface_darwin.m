@@ -6,7 +6,9 @@
 
 uintptr_t mbCocoaViewMetalLayer(uintptr_t pointer) {
     NSView *view = (NSView *)pointer;
-    if (!view) return 0;
+    if (!view) {
+        return 0;
+    }
     if (![view.layer isKindOfClass:CAMetalLayer.class]) {
         view.wantsLayer = YES;
         view.layer = [CAMetalLayer layer];
@@ -14,8 +16,7 @@ uintptr_t mbCocoaViewMetalLayer(uintptr_t pointer) {
     CAMetalLayer *layer = (CAMetalLayer *)view.layer;
     CGFloat scale = view.window ? view.window.backingScaleFactor : 1;
     layer.contentsScale = scale;
-    layer.drawableSize = CGSizeMake(view.bounds.size.width * scale,
-                                    view.bounds.size.height * scale);
+    layer.drawableSize = CGSizeMake(view.bounds.size.width * scale, view.bounds.size.height * scale);
     return (uintptr_t)layer;
 }
 
