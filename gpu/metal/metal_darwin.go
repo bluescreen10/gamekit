@@ -301,6 +301,8 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	defer dv()
 	f, df := cstr(entry(d.FragmentEntry))
 	defer df()
+	l, dl := cstr(d.Label)
+	defer dl()
 	desc := C.MBGraphicsPipelineDesc{
 		vertexShader:       shader(d.VertexShader),
 		vertexShaderSize:   C.uint64_t(len(d.VertexShader)),
@@ -317,6 +319,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 		depthWrite:         C.uint32_t(flag(d.DepthWrite)),
 		depthCompare:       C.uint32_t(d.DepthCompare),
 		colorCount:         C.uint32_t(len(d.ColorFormats)),
+		label:              l,
 	}
 	for i, x := range d.ColorFormats {
 		desc.colorFormats[i] = C.uint32_t(x)

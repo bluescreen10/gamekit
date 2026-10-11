@@ -65,6 +65,7 @@ typedef struct {
     uint64_t blend[8];
     const MBConstant *constants;
     uint32_t constantCount;
+    const char *label;
 } MBGraphicsPipelineDesc;
 
 typedef struct {

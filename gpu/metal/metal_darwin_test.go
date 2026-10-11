@@ -126,6 +126,50 @@ func TestTimestamps(t *testing.T) {
 		t.Fatalf("invalid timestamps: %v", times)
 	}
 }
+
+// TestTimestampsAroundEachDispatchMeasureIt: timestamps written around each of two
+// compute dispatches land around it, rather than where the encoder they share begins or
+// ends — or timing one piece of compute work among others measures all or nothing.
+func TestTimestampsAroundEachDispatchMeasureIt(t *testing.T) {
+	b := device(t)
+	pool := b.CreateTimestampPool(4)
+	if !pool.IsValid() {
+		t.Skip("timestamp counters unavailable")
+	}
+	defer b.DestroyTimestampPool(pool)
+	source := []byte(`#include <metal_stdlib>
+ using namespace metal;
+ struct Push {device float *out;};
+ kernel void spin(constant Push &p [[buffer(0)]], uint i [[thread_position_in_grid]]) {
+  float x = float(i);
+  for (int k = 0; k < 20000; k++) { x = fma(x, 1.000001, 0.5); }
+  p.out[i] = x;
+ }`)
+	pipeline := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: encodedShader(source, [3]uint32{64, 1, 1}), Entry: "spin"})
+	defer b.DestroyPipeline(pipeline)
+	const groups = 1024
+	out := b.Alloc(groups*64*4, gpu.MemoryDevice, "out")
+	outAddr := out.Addr
+
+	// Two pieces of work timed one after the other, as a profiler times consecutive
+	// steps: each between a start and an end of its own, with nothing in between.
+	c := b.Begin()
+	c.ResetTimestamps(pool, 4)
+	c.SetPipeline(pipeline)
+	c.WriteTimestamp(pool, 0, gpu.StageCompute)
+	c.Dispatch(utils.ToBytes(&outAddr), groups, 1, 1)
+	c.WriteTimestamp(pool, 1, gpu.StageAll)
+	c.WriteTimestamp(pool, 2, gpu.StageCompute)
+	c.Dispatch(utils.ToBytes(&outAddr), groups, 1, 1)
+	c.WriteTimestamp(pool, 3, gpu.StageAll)
+	b.Wait(b.Submit(c))
+
+	times := b.ReadTimestamps(pool, 4)
+	if times[0] >= times[1] || times[2] >= times[3] {
+		t.Fatalf("timestamps %v, want each dispatch's end after its start", times)
+	}
+}
+
 func TestInvalidShader(t *testing.T) {
 	b := device(t)
 	defer func() {

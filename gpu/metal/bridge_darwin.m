@@ -324,30 +324,29 @@ static void resumeRender(MBDevice *b,MBCommand *c,BOOL load) {
  [c.render setArgumentTable:argTable(b,c) atStages:MTLRenderStageVertex|MTLRenderStageFragment];
  if(c.hasViewport) [c.render setViewport:c.viewport]; if(c.hasScissor) [c.render setScissorRect:c.scissor];
 }
-// EXPERIMENTAL/INCOMPLETE (see mbCreateTimestampPool): Metal 4 replaces the classic
-// sample-buffer-attachment model this relied on with MTL4CounterHeap and
-// writeTimestampWithGranularity:intoHeap:atIndex:, a genuinely different API this
-// port has not adopted yet. MBPool always returns an invalid pool for now, so this
-// is unreachable — kept only so the shape of the deferred-sampling contract survives
-// for whoever picks the query system back up.
-// Unlike the classic API, MTL4 can write a timestamp directly into whatever encoder
-// is already open, at the exact point requested — no render-pass split needed. This
-// bridge doesn't yet map every RHI stage precisely. Fragment is the legal
-// "all rendering work has completed" stage and matches the precision of the classic
-// bridge, which sampled at an encoder's end.
+// Metal 4 writes a timestamp directly into whatever encoder is already open, at the
+// point requested — no render-pass split needed. This bridge doesn't yet map every RHI
+// stage precisely. Fragment is the legal "all rendering work has completed" stage and
+// matches the precision of the classic bridge, which sampled at an encoder's end.
+//
+// The granularity must be Precise. Relaxed lets Metal take the timestamp at the
+// encoder's boundary instead, which collapses every timestamp inside one compute
+// encoder onto it: timing consecutive dispatches gave the first all their time and the
+// rest none, or an end before its start (TestTimestampsAroundEachDispatchMeasureIt). In
+// pix it cost about 0.15 ms of a 10.5 ms frame, and only while profiling.
 static void sampleQuery(MBDevice *b,MBCommand *c,MBQuery *q) {
  id<MTL4CounterHeap> heap=q.pool.object;
  if(c.render) {
-  [c.render writeTimestampWithGranularity:MTL4TimestampGranularityRelaxed afterStage:MTLRenderStageFragment intoHeap:heap atIndex:q.index];
+  [c.render writeTimestampWithGranularity:MTL4TimestampGranularityPrecise afterStage:MTLRenderStageFragment intoHeap:heap atIndex:q.index];
  } else if(c.compute) {
-  [c.compute writeTimestampWithGranularity:MTL4TimestampGranularityRelaxed intoHeap:heap atIndex:q.index];
+  [c.compute writeTimestampWithGranularity:MTL4TimestampGranularityPrecise intoHeap:heap atIndex:q.index];
  } else {
   // No encoder open (e.g. prepareWork ran just before mbBeginRenderPass): a throwaway
   // compute encoder places the timestamp at this exact point in the command buffer's
   // GPU timeline, the same role a dedicated blit-with-sample-buffer played classically.
   id<MTL4ComputeCommandEncoder> e=[c.buffer computeCommandEncoder]; require(e!=nil,@"cannot create compute encoder for timestamp");
   [e waitForFence:b.fence beforeEncoderStages:kComputeStages];
-  [e writeTimestampWithGranularity:MTL4TimestampGranularityRelaxed intoHeap:heap atIndex:q.index];
+  [e writeTimestampWithGranularity:MTL4TimestampGranularityPrecise intoHeap:heap atIndex:q.index];
   [e updateFence:b.fence afterEncoderStages:kComputeStages];
   [e endEncoding];
  }
@@ -679,7 +678,7 @@ MBResult mbFunctionConstants(void *backend,const void *shader,uint64_t size,cons
 
 MBResult mbCreateComputePipeline(void *backend,const MBComputePipelineDesc *v) { MB_BEGIN(backend,0) {
   require(v!=NULL,@"nil compute pipeline descriptor");
-  MTL4ComputePipelineDescriptor *d=[MTL4ComputePipelineDescriptor new];
+  MTL4ComputePipelineDescriptor *d=[MTL4ComputePipelineDescriptor new]; d.label=str(v->label);
   d.computeFunctionDescriptor=specializedFunction(libraryFunction(b,v->shader,v->shaderSize,v->entry),v->constants,v->constantCount);
   d.options=[MTL4PipelineOptions new]; d.options.shaderReflection=MTL4ShaderReflectionBindingInfo; [d.options release];
   NSError *error=nil;
@@ -688,13 +687,13 @@ MBResult mbCreateComputePipeline(void *backend,const MBComputePipelineDesc *v) {
   MTLSize group=MTLSizeMake(MAX(v->groupX,1),MAX(v->groupY,1),MAX(v->groupZ,1));
   require(group.width*group.height*group.depth<=ps.maxTotalThreadsPerThreadgroup,@"workgroup too large");
   uint64_t h=add(b,ps,5); [ps release]; MBResource *r=resource(b,h,5);
-  r.group=group; r.rootSize=rootBytes(ps.reflection.bindings); (void)v->label; return mbSuccess(h,0);
+  r.group=group; r.rootSize=rootBytes(ps.reflection.bindings); return mbSuccess(h,0);
  } MB_END
 }
 
 MBResult mbCreateGraphicsPipeline(void *backend,const MBGraphicsPipelineDesc *v) { MB_BEGIN(backend,0) {
   require(v!=NULL && v->colorCount<=8,@"invalid graphics pipeline descriptor");
-  MTL4RenderPipelineDescriptor *d=[MTL4RenderPipelineDescriptor new];
+  MTL4RenderPipelineDescriptor *d=[MTL4RenderPipelineDescriptor new]; d.label=str(v->label);
   // Both stages share one set of constants, as on Vulkan; a stage ignores any it does not declare.
   d.vertexFunctionDescriptor=specializedFunction(libraryFunction(b,v->vertexShader,v->vertexShaderSize,v->vertexEntry),v->constants,v->constantCount);
   if(v->fragmentShaderSize) d.fragmentFunctionDescriptor=specializedFunction(libraryFunction(b,v->fragmentShader,v->fragmentShaderSize,v->fragmentEntry),v->constants,v->constantCount);
