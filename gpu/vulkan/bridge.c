@@ -531,6 +531,18 @@ static uint32_t vkbMin3(uint32_t a, uint32_t b, uint32_t c) {
     vkCmdCopyImageToBuffer(cb, img, VK_IMAGE_LAYOUT_GENERAL, buf, 1, &c);
 }
 
+ void vkbCopyImageToImage(VkCommandBuffer cb, VkImage src, VkImage dst, uint32_t w, uint32_t h, uint32_t d,
+                                 uint32_t mip, uint32_t layer, VkImageAspectFlags aspect) {
+    VkImageCopy c = {0};
+    c.srcSubresource.aspectMask = aspect;
+    c.srcSubresource.mipLevel = mip;
+    c.srcSubresource.baseArrayLayer = layer;
+    c.srcSubresource.layerCount = 1;
+    c.dstSubresource = c.srcSubresource;
+    c.extent.width = w; c.extent.height = h; c.extent.depth = d;
+    vkCmdCopyImage(cb, src, VK_IMAGE_LAYOUT_GENERAL, dst, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
+}
+
  void vkbCopyBufferToImage(VkCommandBuffer cb, VkBuffer buf, uint64_t srcOffset, VkImage img,
                                  uint32_t w, uint32_t h, uint32_t d, uint32_t mip, uint32_t layer, VkImageAspectFlags aspect) {
     VkBufferImageCopy c = {0};

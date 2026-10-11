@@ -791,4 +791,8 @@ type CommandBuffer interface {
 	CopyBuffer(dst, src Buffer, dstOffset, srcOffset, size uint64)
 	CopyBufferToTexture(dst Texture, mip, layer uint32, src Buffer, srcOffset uint64)
 	CopyTextureToBuffer(dst Buffer, src Texture, mip, layer uint32) // readback/screenshot
+	// CopyTextureToTexture copies one mip and layer of src into the same mip and layer of
+	// dst, which must be of the same size and format, and neither multisampled. Both need
+	// TextureTransfer usage; a swapchain image may be dst.
+	CopyTextureToTexture(dst, src Texture, mip, layer uint32)
 }

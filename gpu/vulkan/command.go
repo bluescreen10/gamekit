@@ -347,6 +347,14 @@ func (c *cmdBuffer) CopyTextureToBuffer(dst gpu.Buffer, src gpu.Texture, mip, la
 		C.uint32_t(w), C.uint32_t(h), C.uint32_t(d), C.uint32_t(mip), C.uint32_t(layer), aspectOf(e))
 }
 
+func (c *cmdBuffer) CopyTextureToTexture(dst, src gpu.Texture, mip, layer uint32) {
+	c.initializeImages()
+	s, d := c.b.tex(src), c.b.tex(dst)
+	w, h, depth := mipExtent(s, mip)
+	C.vkbCopyImageToImage(c.cb, s.img, d.img,
+		C.uint32_t(w), C.uint32_t(h), C.uint32_t(depth), C.uint32_t(mip), C.uint32_t(layer), aspectOf(s))
+}
+
 // mipExtent returns a texture's extent at level: each level halves every dimension,
 // floored at 1 (so a 4x1 image's level 2 is 1x1, not 1x0). Copying the base extent into
 // a smaller level would overrun it. A 3D texture's copy covers its whole depth, as a

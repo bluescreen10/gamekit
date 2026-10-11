@@ -670,6 +670,10 @@ func (c *command) CopyTextureToBuffer(dst gpu.Buffer, src gpu.Texture, m, l uint
 	c.ready()
 	result(C.mbCopyTextureToBuffer(c.b.native, C.uint64_t(c.h), C.uint64_t(dst.H), C.uint64_t(src.H), C.uint32_t(m), C.uint32_t(l)))
 }
+func (c *command) CopyTextureToTexture(dst, src gpu.Texture, m, l uint32) {
+	c.ready()
+	result(C.mbCopyTextureToTexture(c.b.native, C.uint64_t(c.h), C.uint64_t(dst.H), C.uint64_t(src.H), C.uint32_t(m), C.uint32_t(l)))
+}
 func (c *command) ResetTimestamps(p gpu.QueryPool, n uint32) {
 	c.ready()
 	result(C.mbResetTimestamps(c.b.native, C.uint64_t(c.h), C.uint64_t(p.H), C.uint32_t(n)))

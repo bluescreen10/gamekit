@@ -105,6 +105,25 @@ func (c *commandBuffer) CopyTextureToBuffer(dst gpu.Buffer, src gpu.Texture, mip
 	copy(d.data[:end-start], t.data[start:end])
 }
 
+func (c *commandBuffer) CopyTextureToTexture(dst, src gpu.Texture, mip, layer uint32) {
+	c.backend.mu.Lock()
+	defer c.backend.mu.Unlock()
+	d, ok := c.backend.textures[dst.H]
+	if !ok {
+		panic("gpu/test: CopyTextureToTexture: dst is not a live texture")
+	}
+	s, ok := c.backend.textures[src.H]
+	if !ok {
+		panic("gpu/test: CopyTextureToTexture: src is not a live texture")
+	}
+	start, end := s.mipRange(mip)
+	dstStart, dstEnd := d.mipRange(mip)
+	if end-start != dstEnd-dstStart {
+		panic("gpu/test: CopyTextureToTexture: src and dst mips differ in size")
+	}
+	copy(d.data[dstStart:dstEnd], s.data[start:end])
+}
+
 // mipRange is the byte range mip m occupies within t.data. Array layers and cube
 // faces are folded into it rather than addressed individually — see texture's doc
 // comment — so layer is not part of the range.

@@ -899,6 +899,18 @@ MBResult mbCopyTextureToBuffer(void *backend,uint64_t command,uint64_t buffer,ui
  } MB_END
 }
 
+MBResult mbCopyTextureToTexture(void *backend,uint64_t command,uint64_t destination,uint64_t source,uint32_t mip,uint32_t layer) { MB_BEGIN(backend,command) {
+ outside(b,c); prepareWork(b,c); id<MTLTexture> dst=resource(b,destination,2).object; id<MTLTexture> src=resource(b,source,2).object;
+ require(src.pixelFormat==dst.pixelFormat && src.width==dst.width && src.height==dst.height && src.depth==dst.depth,@"texture copy needs textures of one size and format");
+ require(mip<src.mipmapLevelCount && mip<dst.mipmapLevelCount && src.sampleCount==1 && dst.sampleCount==1,@"invalid copy mip or multisampled texture");
+ NSUInteger layers=src.arrayLength*((src.textureType==MTLTextureTypeCube||src.textureType==MTLTextureTypeCubeArray)?6:1); require(layer<layers,@"copy layer out of bounds");
+ if(!c.compute) { c.compute=[c.buffer computeCommandEncoder]; require(c.compute!=nil,@"cannot create compute encoder"); [c.compute waitForFence:b.fence beforeEncoderStages:kComputeStages]; }
+ MTLSize size=MTLSizeMake(MAX(src.width>>mip,1),MAX(src.height>>mip,1),MAX(src.depth>>mip,1)); MTLOrigin origin=MTLOriginMake(0,0,0);
+ [c.compute copyFromTexture:src sourceSlice:layer sourceLevel:mip sourceOrigin:origin sourceSize:size toTexture:dst destinationSlice:layer destinationLevel:mip destinationOrigin:origin];
+ return mbSuccess(0,0);
+ } MB_END
+}
+
 MBResult mbCreateSwapchain(void *backend,uintptr_t surface,uint32_t width,uint32_t height,uint32_t pixelFormat) { MB_BEGIN(backend,0) {
   CAMetalLayer *layer=(CAMetalLayer*)surface; require([layer isKindOfClass:CAMetalLayer.class],@"surface must be a CAMetalLayer");
   layer.device=b.device; layer.pixelFormat=format(pixelFormat); layer.framebufferOnly=NO; layer.drawableSize=CGSizeMake(width,height); return mbSuccess(add(b,layer,6),0);

@@ -155,6 +155,8 @@ MBResult mbCopyBufferToTexture(void *backend, uint64_t command,
     uint64_t offset);
 MBResult mbCopyTextureToBuffer(void *backend, uint64_t command,
     uint64_t buffer, uint64_t texture, uint32_t mip, uint32_t layer);
+MBResult mbCopyTextureToTexture(void *backend, uint64_t command,
+    uint64_t destination, uint64_t source, uint32_t mip, uint32_t layer);
 MBResult mbResetTimestamps(void *backend, uint64_t command, uint64_t pool,
     uint32_t count);
 MBResult mbWriteTimestamp(void *backend, uint64_t command, uint64_t pool,

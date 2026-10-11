@@ -104,6 +104,9 @@ void vkbBeginRendering(VkCommandBuffer cb, uint32_t w, uint32_t h,
 void vkbCopyImageToBuffer(VkCommandBuffer cb, VkImage img, VkBuffer buf, uint32_t w, uint32_t h, uint32_t d,
                                  uint32_t mip, uint32_t layer, VkImageAspectFlags aspect);
 
+void vkbCopyImageToImage(VkCommandBuffer cb, VkImage src, VkImage dst, uint32_t w, uint32_t h, uint32_t d,
+                                 uint32_t mip, uint32_t layer, VkImageAspectFlags aspect);
+
 void vkbCopyBufferToImage(VkCommandBuffer cb, VkBuffer buf, uint64_t srcOffset, VkImage img,
                                  uint32_t w, uint32_t h, uint32_t d, uint32_t mip, uint32_t layer, VkImageAspectFlags aspect);
 
