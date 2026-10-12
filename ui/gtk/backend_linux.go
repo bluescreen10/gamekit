@@ -27,25 +27,38 @@ import (
 	"github.com/bluescreen10/gamekit/keyboard"
 	"github.com/bluescreen10/gamekit/pointer"
 	"github.com/bluescreen10/gamekit/ui"
+	"github.com/bluescreen10/gamekit/ui/internal/pointerstate"
 )
 
 type window struct {
-	mu          sync.RWMutex
-	native      unsafe.Pointer
-	title       string
-	theme       ui.Theme
-	size        ui.Size
-	content     ui.Widget
-	panels      []ui.Panel
-	shouldClose bool
+	mu       sync.RWMutex
+	native   unsafe.Pointer
+	handle   uintptr
+	title    string
+	kind     ui.WindowKind
+	owner    *window
+	children map[*window]struct{}
+	theme    ui.Theme
+	size     ui.Size
+	content  ui.Widget
+	moves    listeners[ui.MoveHandler]
+	pointer  pointerstate.State
 }
 
 func createWindow(options ui.WindowOptions) (ui.Window, error) {
-	if !options.Size.IsValid() {
-		return nil, errors.New("ui/gtk: window size must be positive")
-	}
-	if err := options.Theme.Validate(); err != nil {
+	if err := options.Validate(); err != nil {
 		return nil, err
+	}
+	var owner *window
+	if options.Owner != nil {
+		var ok bool
+		owner, ok = options.Owner.(*window)
+		if !ok {
+			return nil, errors.New("ui/gtk: owner belongs to another backend")
+		}
+		if owner.nativePointer() == nil {
+			return nil, ui.ErrClosed
+		}
 	}
 	title := C.CString(options.Title)
 	defer C.free(unsafe.Pointer(title))
@@ -68,6 +81,9 @@ func createWindow(options ui.WindowOptions) (ui.Window, error) {
 	if options.TransparentFramebuffer {
 		flags |= 1 << 5
 	}
+	if options.Kind == ui.WindowUtility {
+		flags |= 1 << 6
+	}
 	var message [512]C.char
 	native := C.gkGTKWindowCreate(
 		title,
@@ -75,7 +91,9 @@ func createWindow(options ui.WindowOptions) (ui.Window, error) {
 		C.int(options.Size.Height),
 		flags,
 		C.int(options.Theme),
-		0,
+		ownerNative(owner),
+		C.int(options.Position.X),
+		C.int(options.Position.Y),
 		&message[0],
 		C.size_t(len(message)),
 	)
@@ -86,12 +104,30 @@ func createWindow(options ui.WindowOptions) (ui.Window, error) {
 		}
 		return nil, fmt.Errorf("ui/gtk: %s", detail)
 	}
-	return &window{
-		native: native,
-		title:  options.Title,
-		theme:  options.Theme,
-		size:   options.Size,
-	}, nil
+	result := &window{
+		native:   native,
+		title:    options.Title,
+		kind:     options.Kind,
+		owner:    owner,
+		children: make(map[*window]struct{}),
+		theme:    options.Theme,
+		size:     options.Size,
+	}
+	result.handle = uintptr(cgo.NewHandle(result))
+	C.gkGTKWindowSetHandle(native, C.uintptr_t(result.handle))
+	if owner != nil {
+		owner.mu.Lock()
+		owner.children[result] = struct{}{}
+		owner.mu.Unlock()
+	}
+	return result, nil
+}
+
+func ownerNative(owner *window) unsafe.Pointer {
+	if owner == nil {
+		return nil
+	}
+	return owner.nativePointer()
 }
 
 func (w *window) Close() {
@@ -104,17 +140,34 @@ func (w *window) Close() {
 		return
 	}
 	native := w.native
+	handle := w.handle
 	content := w.content
-	panels := w.panels
+	children := make([]*window, 0, len(w.children))
+	for child := range w.children {
+		children = append(children, child)
+	}
+	owner := w.owner
 	w.native = nil
+	w.handle = 0
 	w.content = nil
-	w.panels = nil
+	w.children = nil
+	w.owner = nil
 	w.mu.Unlock()
+	w.pointer.Reset()
 	if content != nil {
 		content.Close()
 	}
-	for _, panel := range panels {
-		panel.Close()
+	for _, child := range children {
+		child.Close()
+	}
+	if owner != nil {
+		owner.mu.Lock()
+		delete(owner.children, w)
+		owner.mu.Unlock()
+	}
+	C.gkGTKWindowSetHandle(native, 0)
+	if handle != 0 {
+		cgo.Handle(handle).Delete()
 	}
 	C.gkGTKWindowDestroy(native)
 }
@@ -132,6 +185,12 @@ func (w *window) Title() string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.title
+}
+
+func (w *window) Kind() ui.WindowKind {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.kind
 }
 
 func (w *window) SetTitle(title string) {
@@ -185,6 +244,71 @@ func (w *window) Size() ui.Size {
 	w.size = size
 	w.mu.Unlock()
 	return size
+}
+
+func (w *window) SetSize(size ui.Size) error {
+	if !size.IsValid() {
+		return errors.New("ui/gtk: window size must be positive")
+	}
+	native := w.nativePointer()
+	if native == nil {
+		return ui.ErrClosed
+	}
+	C.gkGTKWindowSetSize(native, C.int(size.Width), C.int(size.Height))
+	w.mu.Lock()
+	w.size = size
+	w.mu.Unlock()
+	return nil
+}
+
+func (w *window) Position() ui.Point {
+	native := w.nativePointer()
+	if native == nil {
+		return ui.Point{}
+	}
+	var x, y C.int
+	C.gkGTKWindowPosition(native, &x, &y)
+	return ui.Point{X: int(x), Y: int(y)}
+}
+
+func (w *window) SetPosition(position ui.Point) {
+	native := w.nativePointer()
+	if native == nil {
+		return
+	}
+	C.gkGTKWindowSetPosition(native, C.int(position.X), C.int(position.Y))
+}
+
+func (w *window) IsVisible() bool {
+	native := w.nativePointer()
+	return native != nil && C.gkGTKWindowVisible(native) != 0
+}
+
+func (w *window) SetVisible(visible bool) {
+	native := w.nativePointer()
+	if native == nil {
+		return
+	}
+	C.gkGTKWindowSetVisible(native, boolInt(visible))
+}
+
+func (w *window) BringToFront() {
+	if native := w.nativePointer(); native != nil {
+		C.gkGTKWindowBringToFront(native)
+	}
+}
+
+func (w *window) OnMove(handler ui.MoveHandler) ui.Unsubscribe {
+	if handler == nil {
+		return noOpUnsubscribe
+	}
+	return w.moves.add(handler)
+}
+
+func (w *window) dispatchMove(position ui.Point) {
+	for _, handler := range w.moves.snapshot() {
+		handler(position)
+	}
 }
 
 func (w *window) FramebufferSize() ui.Size {
@@ -244,9 +368,6 @@ func (w *window) SetContent(content ui.Widget) error {
 	if !ok || child.base().window != w {
 		return errors.New("ui/gtk: content belongs to another backend or window")
 	}
-	if _, floating := child.(*panel); floating {
-		return errors.New("ui/gtk: floating panel cannot be window content")
-	}
 	if child.base().parent != nil {
 		return errors.New("ui/gtk: content already has a parent")
 	}
@@ -263,9 +384,6 @@ func (w *window) SetContent(content ui.Widget) error {
 	w.mu.Unlock()
 	content.SetVisible(true)
 	content.SetBounds(ui.Rect{Size: w.Size()})
-	for _, floating := range w.panels {
-		floating.BringToFront()
-	}
 	return nil
 }
 
@@ -348,14 +466,6 @@ func (w *widgetBase) SetBounds(bounds ui.Rect) {
 	w.mu.Unlock()
 	C.gkGTKWidgetSetFrame(native, C.int(bounds.Position.X), C.int(bounds.Position.Y),
 		C.int(bounds.Size.Width), C.int(bounds.Size.Height))
-}
-
-func (w *widgetBase) setPositionFromNative(position ui.Point) {
-	w.mu.Lock()
-	if !w.closed {
-		w.bounds.Position = position
-	}
-	w.mu.Unlock()
 }
 
 func (w *widgetBase) PreferredSize() ui.Size {
@@ -1096,8 +1206,17 @@ func (s *slider) nativeEvent(event int) {
 
 type canvas struct {
 	*widgetBase
+	pointerstate.State
 	resizes listeners[ui.ResizeHandler]
 	redraw  atomic.Bool
+}
+
+func (c *canvas) Close() {
+	if c == nil {
+		return
+	}
+	c.Reset()
+	c.widgetBase.Close()
 }
 
 func (c *canvas) SetBounds(bounds ui.Rect) {
@@ -1144,146 +1263,14 @@ func (c *canvas) RequestRedraw() {
 }
 func (c *canvas) TakeRedrawRequest() bool { return c.redraw.Swap(false) }
 
-const panelHeaderHeight = 32
-
-type panel struct {
-	*widgetBase
-
-	stateMu sync.RWMutex
-	content nativeWidget
-	movable bool
-	moves   listeners[ui.MoveHandler]
-}
-
-func (p *panel) Close() {
-	if p == nil {
-		return
-	}
-	p.stateMu.Lock()
-	content := p.content
-	p.content = nil
-	p.stateMu.Unlock()
-	if content != nil {
-		content.Close()
-	}
-	p.widgetBase.Close()
-}
-
-func (p *panel) SetBounds(bounds ui.Rect) {
-	p.widgetBase.SetBounds(bounds)
-	p.layoutContent()
-}
-
-func (p *panel) PreferredSize() ui.Size {
-	p.stateMu.RLock()
-	content := p.content
-	p.stateMu.RUnlock()
-	if content == nil {
-		return ui.Size{Width: 240, Height: 160}
-	}
-	size := content.PreferredSize()
-	size.Width = max(240, size.Width+24)
-	size.Height = max(160, size.Height+panelHeaderHeight+12)
-	return size
-}
-
-func (p *panel) Title() string {
-	return nativeText(p.nativePointer())
-}
-
-func (p *panel) SetTitle(title string) {
-	setNativeText(p.nativePointer(), title)
-}
-
-func (p *panel) Content() ui.Widget {
-	p.stateMu.RLock()
-	defer p.stateMu.RUnlock()
-	if p.content == nil {
-		return nil
-	}
-	return p.content
-}
-
-func (p *panel) SetContent(content ui.Widget) error {
-	child, err := validateContainerChild(p, content)
-	if err != nil {
-		return err
-	}
-
-	p.stateMu.Lock()
-	previous := p.content
-	if previous != nil && previous.base() != child.base() {
-		previous.base().parent = nil
-		C.gkGTKWidgetUnparent(previous.base().nativePointer())
-		previous.SetVisible(false)
-	}
-	p.content = child
-	p.stateMu.Unlock()
-
-	child.base().parent = p
-	C.gkGTKWidgetSetParent(child.base().nativePointer(), p.nativePointer())
-	child.SetVisible(true)
-	p.layoutContent()
-	return nil
-}
-
-func (p *panel) IsMovable() bool {
-	p.stateMu.RLock()
-	defer p.stateMu.RUnlock()
-	return p.movable
-}
-
-func (p *panel) SetMovable(movable bool) {
-	p.stateMu.Lock()
-	p.movable = movable
-	p.stateMu.Unlock()
-	if native := p.nativePointer(); native != nil {
-		C.gkGTKPanelSetMovable(native, boolInt(movable))
-	}
-}
-
-func (p *panel) BringToFront() {
-	if native := p.nativePointer(); native != nil {
-		C.gkGTKPanelBringToFront(native)
-	}
-}
-
-func (p *panel) OnMove(handler ui.MoveHandler) ui.Unsubscribe {
-	if handler == nil {
-		return noOpUnsubscribe
-	}
-	return p.moves.add(handler)
-}
-
-func (p *panel) nativeEvent(event int) {
-	if event != int(C.GK_GTK_EVENT_PANEL_MOVE) {
-		return
-	}
-	native := p.nativePointer()
+func (c *canvas) PointerPosition() (x, y float64) {
+	native := c.nativePointer()
 	if native == nil {
-		return
+		return 0, 0
 	}
-	var x, y C.int
-	C.gkGTKPanelPosition(native, &x, &y)
-	position := ui.Point{X: int(x), Y: int(y)}
-	p.setPositionFromNative(position)
-	for _, handler := range p.moves.snapshot() {
-		handler(position)
-	}
-}
-
-func (p *panel) layoutContent() {
-	p.stateMu.RLock()
-	content := p.content
-	p.stateMu.RUnlock()
-	if content == nil {
-		return
-	}
-	size := p.Bounds().Size
-	content.SetBounds(ui.Rect{Size: ui.Size{
-		Width:  max(0, size.Width-24),
-		Height: max(0, size.Height-panelHeaderHeight-12),
-	}})
+	var nativeX, nativeY C.double
+	C.gkGTKCanvasPointerPosition(native, &nativeX, &nativeY)
+	return float64(nativeX), float64(nativeY)
 }
 
 type section struct {
@@ -1383,9 +1370,6 @@ func validateContainerChild(container nativeWidget, content ui.Widget) (nativeWi
 	if !ok {
 		return nil, errors.New("ui/gtk: container content belongs to another backend")
 	}
-	if _, floating := child.(*panel); floating {
-		return nil, errors.New("ui/gtk: a floating panel cannot be container content")
-	}
 	base := child.base()
 	owner := container.base()
 	if base.window != owner.window {
@@ -1414,6 +1398,64 @@ func gkGTKGoWidgetEvent(handle C.uintptr_t, event C.int) {
 	}
 	if receiver, ok := cgo.Handle(handle).Value().(nativeEventReceiver); ok {
 		receiver.nativeEvent(int(event))
+	}
+}
+
+//export gkGTKGoWindowMove
+func gkGTKGoWindowMove(handle C.uintptr_t, x, y C.int) {
+	if handle == 0 {
+		return
+	}
+	if window, ok := cgo.Handle(handle).Value().(*window); ok {
+		window.dispatchMove(ui.Point{X: int(x), Y: int(y)})
+	}
+}
+
+//export gkGTKGoWindowPointerButton
+func gkGTKGoWindowPointerButton(handle C.uintptr_t, button, action, modifiers C.int) {
+	if handle == 0 {
+		return
+	}
+	if window, ok := cgo.Handle(handle).Value().(*window); ok {
+		window.pointer.DispatchPointerButton(ui.PointerButtonEvent{
+			Button:    pointer.Button(button),
+			Action:    pointer.ButtonAction(action),
+			Modifiers: keyboard.ModifierKey(modifiers),
+		})
+	}
+}
+
+//export gkGTKGoWindowScroll
+func gkGTKGoWindowScroll(handle C.uintptr_t, x, y C.double) {
+	if handle == 0 {
+		return
+	}
+	if window, ok := cgo.Handle(handle).Value().(*window); ok {
+		window.pointer.DispatchScroll(ui.ScrollEvent{X: float64(x), Y: float64(y)})
+	}
+}
+
+//export gkGTKGoCanvasPointerButton
+func gkGTKGoCanvasPointerButton(handle C.uintptr_t, button, action, modifiers C.int) {
+	if handle == 0 {
+		return
+	}
+	if canvas, ok := cgo.Handle(handle).Value().(*canvas); ok {
+		canvas.DispatchPointerButton(ui.PointerButtonEvent{
+			Button:    pointer.Button(button),
+			Action:    pointer.ButtonAction(action),
+			Modifiers: keyboard.ModifierKey(modifiers),
+		})
+	}
+}
+
+//export gkGTKGoCanvasScroll
+func gkGTKGoCanvasScroll(handle C.uintptr_t, x, y C.double) {
+	if handle == 0 {
+		return
+	}
+	if canvas, ok := cgo.Handle(handle).Value().(*canvas); ok {
+		canvas.DispatchScroll(ui.ScrollEvent{X: float64(x), Y: float64(y)})
 	}
 }
 
@@ -1692,11 +1734,16 @@ func (w *window) CreateScrollView(options ui.ScrollViewOptions) (ui.ScrollView, 
 }
 
 func (w *window) CreateCanvas() (ui.Canvas, error) {
-	native := C.gkGTKCreateCanvas()
+	result := &canvas{}
+	handle := cgo.NewHandle(result)
+	native := C.gkGTKCreateCanvas(C.uintptr_t(handle))
 	if native == nil {
+		handle.Delete()
 		return nil, errors.New("ui/gtk: could not create canvas")
 	}
-	return &canvas{widgetBase: newWidgetBase(w, native)}, nil
+	result.widgetBase = newWidgetBase(w, native)
+	result.handle = uintptr(handle)
+	return result, nil
 }
 
 func (w *window) CreateSection(options ui.SectionOptions) (ui.Section, error) {
@@ -1721,46 +1768,6 @@ func (w *window) CreateSection(options ui.SectionOptions) (ui.Section, error) {
 	result.content = content
 	content.base().parent = result
 	C.gkGTKWidgetSetParent(content.base().nativePointer(), native)
-	return result, nil
-}
-
-func (w *window) CreatePanel(options ui.PanelOptions) (ui.Panel, error) {
-	if err := options.Validate(); err != nil {
-		return nil, err
-	}
-	if w.nativePointer() == nil {
-		return nil, ui.ErrClosed
-	}
-
-	result := &panel{movable: !options.Fixed}
-	handle := cgo.NewHandle(result)
-	title := C.CString(options.Title)
-	defer C.free(unsafe.Pointer(title))
-	native := C.gkGTKCreatePanel(
-		w.nativePointer(),
-		title,
-		boolInt(!options.Fixed),
-		C.int(options.Position.X),
-		C.int(options.Position.Y),
-		C.int(options.Size.Width),
-		C.int(options.Size.Height),
-		C.uintptr_t(handle),
-	)
-	if native == nil {
-		handle.Delete()
-		return nil, errors.New("ui/gtk: could not create panel")
-	}
-	result.widgetBase = newWidgetBase(w, native)
-	result.handle = uintptr(handle)
-	result.SetBounds(ui.Rect{Position: options.Position, Size: options.Size})
-	if err := result.SetContent(options.Content); err != nil {
-		result.Close()
-		return nil, err
-	}
-	w.mu.Lock()
-	w.panels = append(w.panels, result)
-	w.mu.Unlock()
-	result.BringToFront()
 	return result, nil
 }
 
@@ -1896,18 +1903,30 @@ func fileExtensions(filters []ui.FileFilter) string {
 
 func (w *window) KeyState(key keyboard.Key) keyboard.KeyAction { return keyboard.KeyReleased }
 func (w *window) PointerButtonState(button pointer.Button) pointer.ButtonAction {
-	return pointer.Released
+	return w.pointer.PointerButtonState(button)
 }
-func (w *window) PointerPosition() (x, y float64)              { return 0, 0 }
-func (w *window) ScrollOffset() (x, y float64)                 { return 0, 0 }
+func (w *window) PointerPosition() (x, y float64) {
+	native := w.nativePointer()
+	if native == nil {
+		return 0, 0
+	}
+	var nativeX, nativeY C.double
+	C.gkGTKWindowPointerPosition(native, &nativeX, &nativeY)
+	return float64(nativeX), float64(nativeY)
+}
+func (w *window) ScrollOffset() (x, y float64) {
+	return w.pointer.ScrollOffset()
+}
 func (w *window) PointerMode() pointer.Mode                    { return pointer.Normal }
 func (w *window) SetPointerMode(mode pointer.Mode)             {}
 func (w *window) OnKey(handler ui.KeyHandler) ui.Unsubscribe   { return noOpUnsubscribe }
 func (w *window) OnText(handler ui.TextHandler) ui.Unsubscribe { return noOpUnsubscribe }
 func (w *window) OnPointerButton(handler ui.PointerButtonHandler) ui.Unsubscribe {
-	return noOpUnsubscribe
+	return w.pointer.OnPointerButton(handler)
 }
-func (w *window) OnScroll(handler ui.ScrollHandler) ui.Unsubscribe { return noOpUnsubscribe }
+func (w *window) OnScroll(handler ui.ScrollHandler) ui.Unsubscribe {
+	return w.pointer.OnScroll(handler)
+}
 
 func nativeText(native unsafe.Pointer) string {
 	if native == nil {
@@ -1943,5 +1962,4 @@ var _ ui.Button = (*button)(nil)
 var _ ui.TextField = (*textField)(nil)
 var _ ui.Slider = (*slider)(nil)
 var _ ui.Canvas = (*canvas)(nil)
-var _ ui.Panel = (*panel)(nil)
 var _ ui.Section = (*section)(nil)

@@ -43,20 +43,36 @@ type ScrollHandler func(event ScrollEvent)
 // Unsubscribe removes an event handler. It is safe to call more than once.
 type Unsubscribe func()
 
-// Input provides polling and event callbacks for keyboard and pointing
-// devices. ScrollOffset is a running total, so several consumers can read it
-// without consuming one another's input.
-type Input interface {
-	KeyState(key keyboard.Key) keyboard.KeyAction
+// PointerInput provides polling and event callbacks for a pointing device over
+// one surface: a whole window, or a single canvas within it. PointerPosition is
+// in logical pixels from the surface's top-left corner. ScrollOffset is a
+// running total, so several consumers can read it without consuming one
+// another's input.
+//
+// A canvas sees only what the platform delivers to it: a press that begins over
+// it, until that button is released, and scrolling while the pointer is over it.
+// A press that begins on another control is not the canvas's, even if the
+// pointer is then dragged across it. The owning window also sees canvas events;
+// its handlers run before the canvas handlers.
+type PointerInput interface {
 	PointerButtonState(button pointer.Button) pointer.ButtonAction
 	PointerPosition() (x, y float64)
 	ScrollOffset() (x, y float64)
+
+	OnPointerButton(handler PointerButtonHandler) Unsubscribe
+	OnScroll(handler ScrollHandler) Unsubscribe
+}
+
+// Input provides polling and event callbacks for keyboard and pointing
+// devices across a whole window.
+type Input interface {
+	PointerInput
+
+	KeyState(key keyboard.Key) keyboard.KeyAction
 
 	PointerMode() pointer.Mode
 	SetPointerMode(mode pointer.Mode)
 
 	OnKey(handler KeyHandler) Unsubscribe
 	OnText(handler TextHandler) Unsubscribe
-	OnPointerButton(handler PointerButtonHandler) Unsubscribe
-	OnScroll(handler ScrollHandler) Unsubscribe
 }

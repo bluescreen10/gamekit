@@ -12,10 +12,15 @@
 typedef struct {
     Display *display;
     Window window;
+    Window owner;
     Colormap colormap;
     Atom deleteWindow;
     Cursor blankCursor;
     int shouldClose;
+    int utility;
+    int suppressMove;
+    int havePosition;
+    int positionX, positionY;
     double scrollX, scrollY;
     int cursorMode;
     /* Virtual cursor position, accumulated from deltas while the cursor is disabled,
@@ -31,6 +36,8 @@ typedef struct {
     uintptr_t handle;
 } GKWindowNative;
 
+static void gkWindowPositionValues(GKWindowNative *native, int *x, int *y);
+
 static void gkSetError(char *error, size_t size, const char *message) {
     if (error && size) {
         strncpy(error, message, size - 1);
@@ -45,37 +52,124 @@ static void gkSetMotifDecorations(Display *display, Window window, int decorated
         unsigned long status;
     } hints = {2, 0, decorated ? 1ul : 0ul, 0, 0};
     Atom property = XInternAtom(display, "_MOTIF_WM_HINTS", False);
-    XChangeProperty(display, window, property, property, 32, PropModeReplace,
-                    (unsigned char *)&hints, 5);
+    XChangeProperty(display, window, property, property, 32, PropModeReplace, (unsigned char *)&hints, 5);
 }
 
 static int gkX11Key(KeySym symbol) {
-    if (symbol >= XK_a && symbol <= XK_z) return (int)(symbol - XK_a + 'A');
-    if ((symbol >= XK_A && symbol <= XK_Z) || (symbol >= XK_0 && symbol <= XK_9)) return (int)symbol;
-    switch (symbol) {
-        case XK_space: return 32; case XK_apostrophe: return 39; case XK_comma: return 44;
-        case XK_minus: return 45; case XK_period: return 46; case XK_slash: return 47;
-        case XK_semicolon: return 59; case XK_equal: return 61; case XK_bracketleft: return 91;
-        case XK_backslash: return 92; case XK_bracketright: return 93; case XK_grave: return 96;
-        case XK_Escape: return 256; case XK_Return: return 257; case XK_Tab: return 258;
-        case XK_BackSpace: return 259; case XK_Insert: return 260; case XK_Delete: return 261;
-        case XK_Right: return 262; case XK_Left: return 263; case XK_Down: return 264;
-        case XK_Up: return 265; case XK_Page_Up: return 266; case XK_Page_Down: return 267;
-        case XK_Home: return 268; case XK_End: return 269; case XK_Caps_Lock: return 280;
-        case XK_Scroll_Lock: return 281; case XK_Num_Lock: return 282; case XK_Print: return 283;
-        case XK_Pause: return 284; case XK_KP_Decimal: return 330; case XK_KP_Divide: return 331;
-        case XK_KP_Multiply: return 332; case XK_KP_Subtract: return 333; case XK_KP_Add: return 334;
-        case XK_KP_Enter: return 335; case XK_KP_Equal: return 336; case XK_Shift_L: return 340;
-        case XK_Control_L: return 341; case XK_Alt_L: return 342; case XK_Super_L: return 343;
-        case XK_Shift_R: return 344; case XK_Control_R: return 345; case XK_Alt_R: return 346;
-        case XK_Super_R: return 347; case XK_Menu: return 348; default: break;
+    if (symbol >= XK_a && symbol <= XK_z) {
+        return (int)(symbol - XK_a + 'A');
     }
-    if (symbol >= XK_F1 && symbol <= XK_F25) return 290 + (int)(symbol - XK_F1);
-    if (symbol >= XK_KP_0 && symbol <= XK_KP_9) return 320 + (int)(symbol - XK_KP_0);
+    if ((symbol >= XK_A && symbol <= XK_Z) || (symbol >= XK_0 && symbol <= XK_9)) {
+        return (int)symbol;
+    }
+    switch (symbol) {
+    case XK_space:
+        return 32;
+    case XK_apostrophe:
+        return 39;
+    case XK_comma:
+        return 44;
+    case XK_minus:
+        return 45;
+    case XK_period:
+        return 46;
+    case XK_slash:
+        return 47;
+    case XK_semicolon:
+        return 59;
+    case XK_equal:
+        return 61;
+    case XK_bracketleft:
+        return 91;
+    case XK_backslash:
+        return 92;
+    case XK_bracketright:
+        return 93;
+    case XK_grave:
+        return 96;
+    case XK_Escape:
+        return 256;
+    case XK_Return:
+        return 257;
+    case XK_Tab:
+        return 258;
+    case XK_BackSpace:
+        return 259;
+    case XK_Insert:
+        return 260;
+    case XK_Delete:
+        return 261;
+    case XK_Right:
+        return 262;
+    case XK_Left:
+        return 263;
+    case XK_Down:
+        return 264;
+    case XK_Up:
+        return 265;
+    case XK_Page_Up:
+        return 266;
+    case XK_Page_Down:
+        return 267;
+    case XK_Home:
+        return 268;
+    case XK_End:
+        return 269;
+    case XK_Caps_Lock:
+        return 280;
+    case XK_Scroll_Lock:
+        return 281;
+    case XK_Num_Lock:
+        return 282;
+    case XK_Print:
+        return 283;
+    case XK_Pause:
+        return 284;
+    case XK_KP_Decimal:
+        return 330;
+    case XK_KP_Divide:
+        return 331;
+    case XK_KP_Multiply:
+        return 332;
+    case XK_KP_Subtract:
+        return 333;
+    case XK_KP_Add:
+        return 334;
+    case XK_KP_Enter:
+        return 335;
+    case XK_KP_Equal:
+        return 336;
+    case XK_Shift_L:
+        return 340;
+    case XK_Control_L:
+        return 341;
+    case XK_Alt_L:
+        return 342;
+    case XK_Super_L:
+        return 343;
+    case XK_Shift_R:
+        return 344;
+    case XK_Control_R:
+        return 345;
+    case XK_Alt_R:
+        return 346;
+    case XK_Super_R:
+        return 347;
+    case XK_Menu:
+        return 348;
+    default:
+        break;
+    }
+    if (symbol >= XK_F1 && symbol <= XK_F25) {
+        return 290 + (int)(symbol - XK_F1);
+    }
+    if (symbol >= XK_KP_0 && symbol <= XK_KP_9) {
+        return 320 + (int)(symbol - XK_KP_0);
+    }
     return -1;
 }
 
-void *gkWindowCreate(const char *title, int width, int height, uint32_t flags,
+void *gkWindowCreate(const char *title, int width, int height, uint32_t flags, void *ownerPointer, int x, int y,
                      char *error, size_t errorSize) {
     Display *display = XOpenDisplay(NULL);
     if (!display) {
@@ -86,9 +180,8 @@ void *gkWindowCreate(const char *title, int width, int height, uint32_t flags,
     int screen = DefaultScreen(display);
     Window root = RootWindow(display, screen);
     XSetWindowAttributes attributes = {0};
-    attributes.event_mask = StructureNotifyMask | FocusChangeMask | KeyPressMask |
-                            KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
-                            PointerMotionMask;
+    attributes.event_mask = StructureNotifyMask | FocusChangeMask | KeyPressMask | KeyReleaseMask | ButtonPressMask |
+                            ButtonReleaseMask | PointerMotionMask;
     unsigned long mask = CWEventMask;
     Visual *visual = DefaultVisual(display, screen);
     int depth = DefaultDepth(display, screen);
@@ -110,10 +203,12 @@ void *gkWindowCreate(const char *title, int width, int height, uint32_t flags,
         mask |= CWColormap | CWBorderPixel | CWBackPixel;
     }
 
-    Window window = XCreateWindow(display, root, 0, 0, (unsigned int)width,
-        (unsigned int)height, 0, depth, InputOutput, visual, mask, &attributes);
+    Window window = XCreateWindow(display, root, 0, 0, (unsigned int)width, (unsigned int)height, 0, depth, InputOutput,
+                                  visual, mask, &attributes);
     if (!window) {
-        if (colormap) XFreeColormap(display, colormap);
+        if (colormap) {
+            XFreeColormap(display, colormap);
+        }
         XCloseDisplay(display);
         gkSetError(error, errorSize, "X11 could not create a window");
         return NULL;
@@ -122,19 +217,39 @@ void *gkWindowCreate(const char *title, int width, int height, uint32_t flags,
     GKWindowNative *native = calloc(1, sizeof(*native));
     if (!native) {
         XDestroyWindow(display, window);
-        if (colormap) XFreeColormap(display, colormap);
+        if (colormap) {
+            XFreeColormap(display, colormap);
+        }
         XCloseDisplay(display);
         gkSetError(error, errorSize, "out of memory");
         return NULL;
     }
     native->display = display;
     native->window = window;
+    GKWindowNative *owner = ownerPointer;
+    native->owner = owner ? owner->window : None;
+    native->utility = (flags & GK_WINDOW_UTILITY) != 0;
     native->colormap = colormap;
     native->deleteWindow = XInternAtom(display, "WM_DELETE_WINDOW", False);
     Bool detectable;
     XkbSetDetectableAutoRepeat(display, True, &detectable);
     XSetWMProtocols(display, window, &native->deleteWindow, 1);
     XStoreName(display, window, title ? title : "");
+
+    if (native->owner) {
+        XSetTransientForHint(display, window, native->owner);
+        Atom type = XInternAtom(display, "_NET_WM_WINDOW_TYPE", False);
+        Atom utility = XInternAtom(display, "_NET_WM_WINDOW_TYPE_UTILITY", False);
+        XChangeProperty(display, window, type, XA_ATOM, 32, PropModeReplace, (unsigned char *)&utility, 1);
+        Window child;
+        int ownerX = 0;
+        int ownerY = 0;
+        XTranslateCoordinates(display, native->owner, root, 0, 0, &ownerX, &ownerY, &child);
+        XMoveWindow(display, window, ownerX + x, ownerY + y);
+        native->positionX = x;
+        native->positionY = y;
+        native->havePosition = 1;
+    }
 
     if (!(flags & GK_WINDOW_RESIZABLE)) {
         XSizeHints size = {0};
@@ -143,7 +258,9 @@ void *gkWindowCreate(const char *title, int width, int height, uint32_t flags,
         size.min_height = size.max_height = height;
         XSetWMNormalHints(display, window, &size);
     }
-    if (flags & GK_WINDOW_BORDERLESS) gkSetMotifDecorations(display, window, 0);
+    if (flags & GK_WINDOW_BORDERLESS) {
+        gkSetMotifDecorations(display, window, 0);
+    }
 
     Atom states[3];
     int stateCount = 0;
@@ -156,22 +273,29 @@ void *gkWindowCreate(const char *title, int width, int height, uint32_t flags,
     }
     if (stateCount) {
         Atom state = XInternAtom(display, "_NET_WM_STATE", False);
-        XChangeProperty(display, window, state, XA_ATOM, 32, PropModeReplace,
-                        (unsigned char *)states, stateCount);
+        XChangeProperty(display, window, state, XA_ATOM, 32, PropModeReplace, (unsigned char *)states, stateCount);
     }
-    if (!(flags & GK_WINDOW_HIDDEN)) XMapRaised(display, window);
+    if (!(flags & GK_WINDOW_HIDDEN)) {
+        XMapRaised(display, window);
+    }
     XFlush(display);
     return native;
 }
 
 void gkWindowDestroy(void *pointer) {
-    if (!pointer) return;
+    if (!pointer) {
+        return;
+    }
     GKWindowNative *native = pointer;
     /* A pointer grab outlives the window and would lock up the desktop. */
     XUngrabPointer(native->display, CurrentTime);
-    if (native->blankCursor) XFreeCursor(native->display, native->blankCursor);
+    if (native->blankCursor) {
+        XFreeCursor(native->display, native->blankCursor);
+    }
     XDestroyWindow(native->display, native->window);
-    if (native->colormap) XFreeColormap(native->display, native->colormap);
+    if (native->colormap) {
+        XFreeColormap(native->display, native->colormap);
+    }
     XCloseDisplay(native->display);
     free(native);
 }
@@ -179,12 +303,24 @@ void gkWindowDestroy(void *pointer) {
 /* Translate X11's modifier state mask into GameKit's portable bitmask. */
 static int gkX11Mods(unsigned int state) {
     int mods = 0;
-    if (state & ShiftMask) mods |= GK_MOD_SHIFT;
-    if (state & ControlMask) mods |= GK_MOD_CONTROL;
-    if (state & Mod1Mask) mods |= GK_MOD_ALT;
-    if (state & Mod4Mask) mods |= GK_MOD_SUPER;
-    if (state & LockMask) mods |= GK_MOD_CAPS_LOCK;
-    if (state & Mod2Mask) mods |= GK_MOD_NUM_LOCK;
+    if (state & ShiftMask) {
+        mods |= GK_MOD_SHIFT;
+    }
+    if (state & ControlMask) {
+        mods |= GK_MOD_CONTROL;
+    }
+    if (state & Mod1Mask) {
+        mods |= GK_MOD_ALT;
+    }
+    if (state & Mod4Mask) {
+        mods |= GK_MOD_SUPER;
+    }
+    if (state & LockMask) {
+        mods |= GK_MOD_CAPS_LOCK;
+    }
+    if (state & Mod2Mask) {
+        mods |= GK_MOD_NUM_LOCK;
+    }
     return mods;
 }
 
@@ -193,7 +329,9 @@ static Cursor gkX11BlankCursor(Display *display, Window window) {
     static const char bits[] = {0};
     XColor black = {0};
     Pixmap pixmap = XCreateBitmapFromData(display, window, bits, 1, 1);
-    if (!pixmap) return None;
+    if (!pixmap) {
+        return None;
+    }
     Cursor cursor = XCreatePixmapCursor(display, pixmap, pixmap, &black, &black, 0, 0);
     XFreePixmap(display, pixmap);
     return cursor;
@@ -207,7 +345,9 @@ static void gkX11RefreshSize(GKWindowNative *native) {
 }
 
 static void gkX11WarpToCentre(GKWindowNative *native) {
-    if (native->width <= 0 || native->height <= 0) gkX11RefreshSize(native);
+    if (native->width <= 0 || native->height <= 0) {
+        gkX11RefreshSize(native);
+    }
     int cx = native->width / 2;
     int cy = native->height / 2;
     XWarpPointer(native->display, None, native->window, 0, 0, 0, 0, cx, cy);
@@ -219,7 +359,9 @@ static void gkX11WarpToCentre(GKWindowNative *native) {
 }
 
 static void gkApplyCursorMode(GKWindowNative *native) {
-    if (!native) return;
+    if (!native) {
+        return;
+    }
     if (native->cursorMode == GK_CURSOR_NORMAL) {
         XUndefineCursor(native->display, native->window);
         XUngrabPointer(native->display, CurrentTime);
@@ -233,8 +375,7 @@ static void gkApplyCursorMode(GKWindowNative *native) {
         if (native->cursorMode == GK_CURSOR_DISABLED) {
             /* Grabbing confines the pointer to the window, so it cannot reach a screen
                edge and stop generating motion. Recentring below does the rest. */
-            XGrabPointer(native->display, native->window, True,
-                         ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
+            XGrabPointer(native->display, native->window, True, ButtonPressMask | ButtonReleaseMask | PointerMotionMask,
                          GrabModeAsync, GrabModeAsync, native->window, None, CurrentTime);
             gkX11WarpToCentre(native);
         } else {
@@ -245,19 +386,33 @@ static void gkApplyCursorMode(GKWindowNative *native) {
 }
 
 void gkWindowPoll(void *pointer) {
-    if (!pointer) return;
+    if (!pointer) {
+        return;
+    }
     GKWindowNative *native = pointer;
     while (XPending(native->display)) {
         XEvent event;
         XNextEvent(native->display, &event);
-        if (event.type == ClientMessage &&
-            (Atom)event.xclient.data.l[0] == native->deleteWindow) {
+        if (event.type == ClientMessage && (Atom)event.xclient.data.l[0] == native->deleteWindow) {
             native->shouldClose = 1;
+            if (native->utility) {
+                XUnmapWindow(native->display, native->window);
+            }
         } else if (event.type == DestroyNotify) {
             native->shouldClose = 1;
         } else if (event.type == ConfigureNotify) {
             native->width = event.xconfigure.width;
             native->height = event.xconfigure.height;
+            int x = 0;
+            int y = 0;
+            gkWindowPositionValues(native, &x, &y);
+            int moved = !native->havePosition || native->positionX != x || native->positionY != y;
+            native->positionX = x;
+            native->positionY = y;
+            native->havePosition = 1;
+            if (moved && !native->suppressMove && native->handle) {
+                gkGoWindowMove(native->handle, x, y);
+            }
         } else if (event.type == KeyPress || event.type == KeyRelease) {
             int key = gkX11Key(XLookupKeysym(&event.xkey, 0));
             int mods = gkX11Mods(event.xkey.state);
@@ -274,7 +429,9 @@ void gkWindowPoll(void *pointer) {
                 int n = XLookupString(&event.xkey, buffer, (int)sizeof(buffer), &ignored, NULL);
                 for (int i = 0; i < n; i++) {
                     unsigned char c = (unsigned char)buffer[i];
-                    if (c < 0x20 || c == 0x7F) continue; /* control codes are not text */
+                    if (c < 0x20 || c == 0x7F) {
+                        continue; /* control codes are not text */
+                    }
                     gkGoCharEvent(native->handle, c);
                 }
             }
@@ -286,10 +443,15 @@ void gkWindowPoll(void *pointer) {
             if (b >= 4 && b <= 7) {
                 if (event.type == ButtonPress) {
                     double dx = 0, dy = 0;
-                    if (b == 4) dy = 1;
-                    else if (b == 5) dy = -1;
-                    else if (b == 6) dx = -1;
-                    else dx = 1;
+                    if (b == 4) {
+                        dy = 1;
+                    } else if (b == 5) {
+                        dy = -1;
+                    } else if (b == 6) {
+                        dx = -1;
+                    } else {
+                        dx = 1;
+                    }
                     native->scrollX += dx;
                     native->scrollY += dy;
                     gkGoScrollEvent(native->handle, dx, dy);
@@ -298,10 +460,15 @@ void gkWindowPoll(void *pointer) {
                 /* X11 numbers left/middle/right as 1/2/3; GameKit uses 0/1/2 with
                    middle last. */
                 int button = -1;
-                if (b == 1) button = GK_POINTER_BUTTON_LEFT;
-                else if (b == 2) button = GK_POINTER_BUTTON_MIDDLE;
-                else if (b == 3) button = GK_POINTER_BUTTON_RIGHT;
-                else if (b >= 8) button = (int)b - 5; /* 8,9 -> 3,4 */
+                if (b == 1) {
+                    button = GK_POINTER_BUTTON_LEFT;
+                } else if (b == 2) {
+                    button = GK_POINTER_BUTTON_MIDDLE;
+                } else if (b == 3) {
+                    button = GK_POINTER_BUTTON_RIGHT;
+                } else if (b >= 8) {
+                    button = (int)b - 5; /* 8,9 -> 3,4 */
+                }
                 if (button >= 0 && button < GK_POINTER_BUTTON_COUNT) {
                     int action = event.type == ButtonPress ? GK_POINTER_PRESSED : GK_POINTER_RELEASED;
                     gkGoPointerButtonEvent(native->handle, button, action, mods);
@@ -331,18 +498,26 @@ void gkWindowPoll(void *pointer) {
 }
 
 void gkWindowSetHandle(void *pointer, uintptr_t handle) {
-    if (pointer) ((GKWindowNative *)pointer)->handle = handle;
+    if (pointer) {
+        ((GKWindowNative *)pointer)->handle = handle;
+    }
 }
 
 void gkWindowGetScroll(void *pointer, double *x, double *y) {
     GKWindowNative *native = pointer;
-    if (x) *x = native ? native->scrollX : 0.0;
-    if (y) *y = native ? native->scrollY : 0.0;
+    if (x) {
+        *x = native ? native->scrollX : 0.0;
+    }
+    if (y) {
+        *y = native ? native->scrollY : 0.0;
+    }
 }
 
 void gkWindowSetCursorMode(void *pointer, int mode) {
     GKWindowNative *native = pointer;
-    if (!native || native->cursorMode == mode) return;
+    if (!native || native->cursorMode == mode) {
+        return;
+    }
     if (mode == GK_CURSOR_DISABLED) {
         double x = 0, y = 0;
         gkWindowCursorPosition(pointer, &x, &y);
@@ -363,19 +538,112 @@ int gkWindowShouldClose(void *pointer) {
 }
 
 void gkWindowSetShouldClose(void *pointer, int close) {
-    if (pointer) ((GKWindowNative *)pointer)->shouldClose = close != 0;
+    if (pointer) {
+        ((GKWindowNative *)pointer)->shouldClose = close != 0;
+    }
 }
 
 void gkWindowSize(void *pointer, int *width, int *height) {
     GKWindowNative *native = pointer;
     XWindowAttributes attributes;
     XGetWindowAttributes(native->display, native->window, &attributes);
-    if (width) *width = attributes.width;
-    if (height) *height = attributes.height;
+    if (width) {
+        *width = attributes.width;
+    }
+    if (height) {
+        *height = attributes.height;
+    }
 }
 
 void gkWindowFramebufferSize(void *pointer, int *width, int *height) {
     gkWindowSize(pointer, width, height);
+}
+
+void gkWindowSetSize(void *pointer, int width, int height) {
+    GKWindowNative *native = pointer;
+    if (!native) {
+        return;
+    }
+    XResizeWindow(native->display, native->window, (unsigned int)(width > 0 ? width : 1),
+                  (unsigned int)(height > 0 ? height : 1));
+    XFlush(native->display);
+}
+
+static void gkWindowPositionValues(GKWindowNative *native, int *x, int *y) {
+    int windowX = 0;
+    int windowY = 0;
+    int ownerX = 0;
+    int ownerY = 0;
+    Window child;
+    if (native) {
+        Window root = DefaultRootWindow(native->display);
+        XTranslateCoordinates(native->display, native->window, root, 0, 0, &windowX, &windowY, &child);
+        if (native->owner) {
+            XTranslateCoordinates(native->display, native->owner, root, 0, 0, &ownerX, &ownerY, &child);
+        }
+    }
+    if (x) {
+        *x = windowX - ownerX;
+    }
+    if (y) {
+        *y = windowY - ownerY;
+    }
+}
+
+void gkWindowPosition(void *pointer, int *x, int *y) {
+    gkWindowPositionValues(pointer, x, y);
+}
+
+void gkWindowSetPosition(void *pointer, int x, int y) {
+    GKWindowNative *native = pointer;
+    if (!native) {
+        return;
+    }
+    int ownerX = 0;
+    int ownerY = 0;
+    Window child;
+    if (native->owner) {
+        Window root = DefaultRootWindow(native->display);
+        XTranslateCoordinates(native->display, native->owner, root, 0, 0, &ownerX, &ownerY, &child);
+    }
+    native->suppressMove = 1;
+    native->positionX = x;
+    native->positionY = y;
+    native->havePosition = 1;
+    XMoveWindow(native->display, native->window, ownerX + x, ownerY + y);
+    XFlush(native->display);
+    native->suppressMove = 0;
+}
+
+int gkWindowVisible(void *pointer) {
+    GKWindowNative *native = pointer;
+    if (!native) {
+        return 0;
+    }
+    XWindowAttributes attributes;
+    XGetWindowAttributes(native->display, native->window, &attributes);
+    return attributes.map_state == IsViewable;
+}
+
+void gkWindowSetVisible(void *pointer, int visible) {
+    GKWindowNative *native = pointer;
+    if (!native) {
+        return;
+    }
+    if (visible) {
+        XMapRaised(native->display, native->window);
+    } else {
+        XUnmapWindow(native->display, native->window);
+    }
+    XFlush(native->display);
+}
+
+void gkWindowBringToFront(void *pointer) {
+    GKWindowNative *native = pointer;
+    if (native && gkWindowVisible(native)) {
+        XRaiseWindow(native->display, native->window);
+        XFlush(native->display);
+    }
 }
 
 void gkWindowSetTitle(void *pointer, const char *title) {
@@ -405,15 +673,22 @@ void gkWindowCursorPosition(void *pointer, double *x, double *y) {
     GKWindowNative *native = pointer;
     if (native->cursorMode == GK_CURSOR_DISABLED) {
         /* The pointer is grabbed and recentred; report accumulated motion instead. */
-        if (x) *x = native->virtualX;
-        if (y) *y = native->virtualY;
+        if (x) {
+            *x = native->virtualX;
+        }
+        if (y) {
+            *y = native->virtualY;
+        }
         return;
     }
     Window root, child;
     int rootX, rootY, windowX = 0, windowY = 0;
     unsigned int mask;
-    XQueryPointer(native->display, native->window, &root, &child,
-                  &rootX, &rootY, &windowX, &windowY, &mask);
-    if (x) *x = (double)windowX;
-    if (y) *y = (double)windowY;
+    XQueryPointer(native->display, native->window, &root, &child, &rootX, &rootY, &windowX, &windowY, &mask);
+    if (x) {
+        *x = (double)windowX;
+    }
+    if (y) {
+        *y = (double)windowY;
+    }
 }

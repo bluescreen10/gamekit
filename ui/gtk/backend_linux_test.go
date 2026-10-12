@@ -139,21 +139,26 @@ func TestNativeWidgets(t *testing.T) {
 	if err := window.SetContent(tabs); err != nil {
 		t.Fatal(err)
 	}
-	panelLabel, err := window.CreateLabel("Drag me")
-	if err != nil {
-		t.Fatal(err)
-	}
-	panelContent, err := window.CreateLayout(ui.Column(ui.Item(panelLabel)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	panel, err := window.CreatePanel(ui.PanelOptions{
+	utility, err := backend.CreateWindow(ui.WindowOptions{
 		Title:    "Inspector",
-		Content:  panelContent,
-		Position: ui.Point{X: 24, Y: 32},
 		Size:     ui.Size{Width: 240, Height: 160},
+		Kind:     ui.WindowUtility,
+		Owner:    window,
+		Position: ui.Point{X: 24, Y: 32},
+		Hidden:   true,
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	panelLabel, err := utility.CreateLabel("Drag me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	panelContent, err := utility.CreateLayout(ui.Column(ui.Item(panelLabel)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := utility.SetContent(panelContent); err != nil {
 		t.Fatal(err)
 	}
 	window.PollEvents()
@@ -163,6 +168,9 @@ func TestNativeWidgets(t *testing.T) {
 	}
 	if got := canvas.NativeSurface(); got.Kind != gpu.NativeSurfaceXlibWindow || got.Handle == 0 || got.Display == 0 {
 		t.Fatalf("canvas surface = %#v, want a complete Xlib surface", got)
+	}
+	if got := utility.NativeSurface(); got.Kind != gpu.NativeSurfaceXlibWindow || got.Handle == 0 || got.Display == 0 {
+		t.Fatalf("utility surface = %#v, want a complete Xlib surface", got)
 	}
 	if label.Text() != "Exposure" {
 		t.Fatalf("label text = %q, want %q", label.Text(), "Exposure")
@@ -183,20 +191,18 @@ func TestNativeWidgets(t *testing.T) {
 	if !section.IsExpanded() {
 		t.Fatal("section should initially be expanded")
 	}
-	if panel.Title() != "Inspector" || panel.Content() != panelContent || !panel.IsMovable() {
-		t.Fatal("panel did not preserve its initial values")
+	if utility.Title() != "Inspector" || utility.Kind() != ui.WindowUtility {
+		t.Fatal("utility window did not preserve its initial values")
 	}
-	if panel.Bounds() != (ui.Rect{
-		Position: ui.Point{X: 24, Y: 32},
-		Size:     ui.Size{Width: 240, Height: 160},
-	}) {
-		t.Fatalf("panel bounds = %#v, want position 24,32 and size 240x160", panel.Bounds())
+	if utility.Position() != (ui.Point{X: 24, Y: 32}) ||
+		utility.Size() != (ui.Size{Width: 240, Height: 160}) {
+		t.Fatalf("utility geometry = (%#v, %#v), want position 24,32 and size 240x160",
+			utility.Position(), utility.Size())
 	}
-	panel.SetTitle("Tools")
-	panel.SetMovable(false)
-	panel.BringToFront()
-	if panel.Title() != "Tools" || panel.IsMovable() {
-		t.Fatal("panel setters did not update its state")
+	utility.SetTitle("Tools")
+	utility.BringToFront()
+	if utility.Title() != "Tools" {
+		t.Fatal("utility title setter did not update its state")
 	}
 	section.SetExpanded(false)
 	if section.IsExpanded() {

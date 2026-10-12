@@ -5,6 +5,7 @@
 #define COBJMACROS
 #include <windows.h>
 #include <windowsx.h>
+#include "window_bridge.h"
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shlobj.h>
@@ -23,7 +24,6 @@ enum {
     GK_UI_TEXT_FIELD,
     GK_UI_SLIDER,
     GK_UI_CANVAS,
-    GK_UI_PANEL,
     GK_UI_SECTION,
     GK_UI_TEXT_AREA,
     GK_UI_CHECK_BOX,
@@ -66,16 +66,17 @@ struct GKUIControl {
     double maximum;
     double step;
     int sliderMaximum;
-    int movable;
     int expanded;
-    int dragging;
     int contentWidth;
     int contentHeight;
     int scrollX;
     int scrollY;
-    POINT dragStart;
-    RECT dragFrame;
+    /* canvasButtons has bit b set while canvas button b is held: the canvas holds the
+       mouse capture until every one is released. */
+    int canvasButtons;
 };
+
+int gkWinMods(void); /* window_windows.c */
 
 static const wchar_t *gkUIClass = L"gamekitUIContainer";
 static ATOM gkUIClassAtom;
@@ -84,18 +85,28 @@ static HFONT gkUIFont;
 
 static wchar_t *gkUIWide(const char *text) {
     int count = MultiByteToWideChar(CP_UTF8, 0, text ? text : "", -1, NULL, 0);
-    if (count <= 0) return NULL;
+    if (count <= 0) {
+        return NULL;
+    }
     wchar_t *wide = calloc((size_t)count, sizeof(*wide));
-    if (wide) MultiByteToWideChar(CP_UTF8, 0, text ? text : "", -1, wide, count);
+    if (wide) {
+        MultiByteToWideChar(CP_UTF8, 0, text ? text : "", -1, wide, count);
+    }
     return wide;
 }
 
 static char *gkUIUTF8(const wchar_t *text) {
-    if (!text) return _strdup("");
+    if (!text) {
+        return _strdup("");
+    }
     int count = WideCharToMultiByte(CP_UTF8, 0, text, -1, NULL, 0, NULL, NULL);
-    if (count <= 0) return _strdup("");
+    if (count <= 0) {
+        return _strdup("");
+    }
     char *utf8 = malloc((size_t)count);
-    if (utf8) WideCharToMultiByte(CP_UTF8, 0, text, -1, utf8, count, NULL, NULL);
+    if (utf8) {
+        WideCharToMultiByte(CP_UTF8, 0, text, -1, utf8, count, NULL, NULL);
+    }
     return utf8;
 }
 
@@ -109,7 +120,9 @@ static int gkUIDarkForWindow(HWND window) {
 }
 
 static void gkUISetControlTheme(HWND window, int dark) {
-    if (!window) return;
+    if (!window) {
+        return;
+    }
     SetPropW(window, L"GameKitUIDark", (HANDLE)(intptr_t)dark);
     SetWindowTheme(window, dark ? L"DarkMode_Explorer" : L"Explorer", NULL);
     InvalidateRect(window, NULL, TRUE);
@@ -121,7 +134,9 @@ static BOOL CALLBACK gkUIThemeChild(HWND window, LPARAM dark) {
 }
 
 void gkUIApplyTheme(HWND window, int dark) {
-    if (!window) return;
+    if (!window) {
+        return;
+    }
     gkUISetControlTheme(window, dark);
     EnumChildWindows(window, gkUIThemeChild, (LPARAM)dark);
 }
@@ -134,21 +149,24 @@ static void gkUISetFont(HWND window) {
             gkUIFont = CreateFontIndirectW(&metrics.lfMessageFont);
         }
     }
-    SendMessageW(window, WM_SETFONT,
-                 (WPARAM)(gkUIFont ? gkUIFont : GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+    SendMessageW(window, WM_SETFONT, (WPARAM)(gkUIFont ? gkUIFont : GetStockObject(DEFAULT_GUI_FONT)), TRUE);
 }
 
 static void gkUIUpdateContainerFrame(GKUIControl *control) {
-    if (!control || !control->window) return;
+    if (!control || !control->window) {
+        return;
+    }
     RECT rect = {0};
     GetClientRect(control->window, &rect);
     int width = rect.right - rect.left;
     int height = rect.bottom - rect.top;
-    if (control->kind == GK_UI_PANEL && control->body) {
-        MoveWindow(control->body, 12, 32, max(0, width - 24), max(0, height - 44), TRUE);
-    } else if (control->kind == GK_UI_SECTION) {
-        if (control->header) MoveWindow(control->header, 0, 0, width, 28, TRUE);
-        if (control->body) MoveWindow(control->body, 0, 28, width, max(0, height - 28), TRUE);
+    if (control->kind == GK_UI_SECTION) {
+        if (control->header) {
+            MoveWindow(control->header, 0, 0, width, 28, TRUE);
+        }
+        if (control->body) {
+            MoveWindow(control->body, 0, 28, width, max(0, height - 28), TRUE);
+        }
     } else if (control->kind == GK_UI_RADIO_GROUP) {
         for (int i = 0; i < control->itemCount; i++) {
             MoveWindow(control->items[i], 0, i * 24, width, 22, TRUE);
@@ -156,8 +174,7 @@ static void gkUIUpdateContainerFrame(GKUIControl *control) {
     } else if (control->kind == GK_UI_TABS && control->body) {
         RECT content = rect;
         TabCtrl_AdjustRect(control->window, FALSE, &content);
-        MoveWindow(control->body, content.left, content.top,
-                   max(0, content.right - content.left),
+        MoveWindow(control->body, content.left, content.top, max(0, content.right - content.left),
                    max(0, content.bottom - content.top), TRUE);
     } else if (control->kind == GK_UI_SCROLL_VIEW && control->body) {
         int maximumX = max(0, control->contentWidth - width);
@@ -176,38 +193,62 @@ static void gkUIUpdateContainerFrame(GKUIControl *control) {
         vertical.nPage = (UINT)max(0, height);
         vertical.nPos = control->scrollY;
         SetScrollInfo(control->window, SB_VERT, &vertical, TRUE);
-        MoveWindow(control->body, -control->scrollX, -control->scrollY,
-                   max(width, control->contentWidth), max(height, control->contentHeight), TRUE);
+        MoveWindow(control->body, -control->scrollX, -control->scrollY, max(width, control->contentWidth),
+                   max(height, control->contentHeight), TRUE);
     }
 }
 
 static void gkUIScrollMessage(GKUIControl *control, int bar, WPARAM wparam) {
-    if (!control || control->kind != GK_UI_SCROLL_VIEW) return;
+    if (!control || control->kind != GK_UI_SCROLL_VIEW) {
+        return;
+    }
     SCROLLINFO info = {sizeof(info), SIF_ALL};
     GetScrollInfo(control->window, bar, &info);
     int position = info.nPos;
     switch (LOWORD(wparam)) {
-    case SB_LINEUP: position -= 24; break;
-    case SB_LINEDOWN: position += 24; break;
-    case SB_PAGEUP: position -= (int)info.nPage; break;
-    case SB_PAGEDOWN: position += (int)info.nPage; break;
+    case SB_LINEUP:
+        position -= 24;
+        break;
+    case SB_LINEDOWN:
+        position += 24;
+        break;
+    case SB_PAGEUP:
+        position -= (int)info.nPage;
+        break;
+    case SB_PAGEDOWN:
+        position += (int)info.nPage;
+        break;
     case SB_THUMBPOSITION:
-    case SB_THUMBTRACK: position = info.nTrackPos; break;
-    case SB_TOP: position = info.nMin; break;
-    case SB_BOTTOM: position = info.nMax; break;
-    default: return;
+    case SB_THUMBTRACK:
+        position = info.nTrackPos;
+        break;
+    case SB_TOP:
+        position = info.nMin;
+        break;
+    case SB_BOTTOM:
+        position = info.nMax;
+        break;
+    default:
+        return;
     }
     int maximum = max(info.nMin, info.nMax - (int)info.nPage + 1);
     position = max(info.nMin, min(position, maximum));
-    if (bar == SB_HORZ) control->scrollX = position;
-    else control->scrollY = position;
+    if (bar == SB_HORZ) {
+        control->scrollX = position;
+    } else {
+        control->scrollY = position;
+    }
     gkUIUpdateContainerFrame(control);
 }
 
 static void gkUIToggleSection(GKUIControl *control, int notify) {
-    if (!control || control->kind != GK_UI_SECTION) return;
+    if (!control || control->kind != GK_UI_SECTION) {
+        return;
+    }
     control->expanded = !control->expanded;
-    if (control->body) ShowWindow(control->body, control->expanded ? SW_SHOW : SW_HIDE);
+    if (control->body) {
+        ShowWindow(control->body, control->expanded ? SW_SHOW : SW_HIDE);
+    }
     if (control->header) {
         size_t length = wcslen(control->text ? control->text : L"") + 4;
         wchar_t *title = calloc(length, sizeof(*title));
@@ -223,33 +264,39 @@ static void gkUIToggleSection(GKUIControl *control, int notify) {
     }
 }
 
-int gkUIProcessMessage(HWND window, UINT message, WPARAM wparam,
-                       LPARAM lparam, LRESULT *result) {
+int gkUIProcessMessage(HWND window, UINT message, WPARAM wparam, LPARAM lparam, LRESULT *result) {
     if (message == WM_COMMAND && lparam) {
         HWND child = (HWND)lparam;
         GKUIControl *control = gkUIFromWindow(child);
         int code = HIWORD(wparam);
         if (control && control->handle) {
-            if ((control->kind == GK_UI_BUTTON || control->kind == GK_UI_LINK) &&
-                code == BN_CLICKED) {
+            if ((control->kind == GK_UI_BUTTON || control->kind == GK_UI_LINK) && code == BN_CLICKED) {
                 gkUIGoEvent(control->handle, GK_UI_EVENT_CLICK);
-                if (result) *result = 0;
+                if (result) {
+                    *result = 0;
+                }
                 return 1;
             }
-            if ((control->kind == GK_UI_TEXT_FIELD || control->kind == GK_UI_TEXT_AREA) &&
-                code == EN_CHANGE && !control->suppress) {
+            if ((control->kind == GK_UI_TEXT_FIELD || control->kind == GK_UI_TEXT_AREA) && code == EN_CHANGE &&
+                !control->suppress) {
                 gkUIGoEvent(control->handle, GK_UI_EVENT_TEXT_CHANGE);
-                if (result) *result = 0;
+                if (result) {
+                    *result = 0;
+                }
                 return 1;
             }
             if (control->kind == GK_UI_SECTION && child == control->header && code == BN_CLICKED) {
                 gkUIToggleSection(control, 1);
-                if (result) *result = 0;
+                if (result) {
+                    *result = 0;
+                }
                 return 1;
             }
             if (control->kind == GK_UI_CHECK_BOX && code == BN_CLICKED) {
                 gkUIGoEvent(control->handle, GK_UI_EVENT_TOGGLE_CHANGE);
-                if (result) *result = 0;
+                if (result) {
+                    *result = 0;
+                }
                 return 1;
             }
             if (control->kind == GK_UI_RADIO_GROUP && code == BN_CLICKED) {
@@ -257,17 +304,20 @@ int gkUIProcessMessage(HWND window, UINT message, WPARAM wparam,
                 if (selected >= 0 && selected < control->itemCount) {
                     control->selectedIndex = selected;
                     for (int i = 0; i < control->itemCount; i++) {
-                        SendMessageW(control->items[i], BM_SETCHECK,
-                                     i == selected ? BST_CHECKED : BST_UNCHECKED, 0);
+                        SendMessageW(control->items[i], BM_SETCHECK, i == selected ? BST_CHECKED : BST_UNCHECKED, 0);
                     }
                     gkUIGoEvent(control->handle, GK_UI_EVENT_SELECTION_CHANGE);
                 }
-                if (result) *result = 0;
+                if (result) {
+                    *result = 0;
+                }
                 return 1;
             }
             if (control->kind == GK_UI_SELECT && code == CBN_SELCHANGE) {
                 gkUIGoEvent(control->handle, GK_UI_EVENT_SELECTION_CHANGE);
-                if (result) *result = 0;
+                if (result) {
+                    *result = 0;
+                }
                 return 1;
             }
         }
@@ -277,20 +327,25 @@ int gkUIProcessMessage(HWND window, UINT message, WPARAM wparam,
         if (control && control->handle && control->kind == GK_UI_LINK &&
             (header->code == NM_CLICK || header->code == NM_RETURN)) {
             gkUIGoEvent(control->handle, GK_UI_EVENT_CLICK);
-            if (result) *result = 0;
+            if (result) {
+                *result = 0;
+            }
             return 1;
         }
-        if (control && control->handle && control->kind == GK_UI_TABS &&
-            header->code == TCN_SELCHANGE) {
+        if (control && control->handle && control->kind == GK_UI_TABS && header->code == TCN_SELCHANGE) {
             gkUIGoEvent(control->handle, GK_UI_EVENT_TAB_CHANGE);
-            if (result) *result = 0;
+            if (result) {
+                *result = 0;
+            }
             return 1;
         }
     } else if (message == WM_HSCROLL && lparam) {
         GKUIControl *control = gkUIFromWindow((HWND)lparam);
         if (control && control->kind == GK_UI_SLIDER && control->handle) {
             gkUIGoEvent(control->handle, GK_UI_EVENT_VALUE_CHANGE);
-            if (result) *result = 0;
+            if (result) {
+                *result = 0;
+            }
             return 1;
         }
     } else if (message == WM_CTLCOLORSTATIC || message == WM_CTLCOLOREDIT) {
@@ -298,20 +353,97 @@ int gkUIProcessMessage(HWND window, UINT message, WPARAM wparam,
         if (gkUIDarkForWindow(window)) {
             SetTextColor(dc, RGB(238, 238, 238));
             SetBkColor(dc, RGB(32, 32, 32));
-            if (!gkUIDarkBrush) gkUIDarkBrush = CreateSolidBrush(RGB(32, 32, 32));
-            if (result) *result = (LRESULT)gkUIDarkBrush;
+            if (!gkUIDarkBrush) {
+                gkUIDarkBrush = CreateSolidBrush(RGB(32, 32, 32));
+            }
+            if (result) {
+                *result = (LRESULT)gkUIDarkBrush;
+            }
             return 1;
         }
         SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
         SetBkColor(dc, GetSysColor(COLOR_WINDOW));
-        if (result) *result = (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+        if (result) {
+            *result = (LRESULT)GetSysColorBrush(COLOR_WINDOW);
+        }
         return 1;
     }
     return 0;
 }
 
-static LRESULT CALLBACK gkUIContainerProc(HWND window, UINT message,
-                                           WPARAM wparam, LPARAM lparam) {
+/* gkUICanvasButton maps a mouse button message to a pointer button and whether it is a
+   press, or returns -1 for any other message. */
+static int gkUICanvasButton(UINT message, WPARAM wparam, int *pressed) {
+    *pressed = message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN || message == WM_MBUTTONDOWN ||
+               message == WM_XBUTTONDOWN;
+    switch (message) {
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+        return GK_POINTER_BUTTON_LEFT;
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+        return GK_POINTER_BUTTON_RIGHT;
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+        return GK_POINTER_BUTTON_MIDDLE;
+    case WM_XBUTTONDOWN:
+    case WM_XBUTTONUP:
+        return GET_XBUTTON_WPARAM(wparam) == XBUTTON1 ? 3 : 4;
+    }
+    return -1;
+}
+
+static void gkUICanvasReportButton(GKUIControl *control, int button, int action) {
+    if (control->handle) {
+        gkUIGoCanvasPointerButton(control->handle, button, action, gkWinMods());
+    }
+}
+
+/* gkUICanvasPointerMessage reports a canvas's own pointer events, and returns 1 if
+   message was one. Windows sends a press to the window under the pointer, but its
+   release only to the window holding the capture: so a press takes the capture until
+   every button is up, and losing it to someone else releases what was held. */
+static int gkUICanvasPointerMessage(GKUIControl *control, UINT message, WPARAM wparam, LPARAM lparam) {
+    int pressed = 0;
+    int button = gkUICanvasButton(message, wparam, &pressed);
+    if (button >= 0 && button < GK_POINTER_BUTTON_COUNT) {
+        if (pressed) {
+            if (!control->canvasButtons) {
+                SetCapture(control->window);
+            }
+            control->canvasButtons |= 1 << button;
+            gkUICanvasReportButton(control, button, GK_POINTER_PRESSED);
+        } else if (control->canvasButtons & (1 << button)) {
+            control->canvasButtons &= ~(1 << button);
+            gkUICanvasReportButton(control, button, GK_POINTER_RELEASED);
+            if (!control->canvasButtons && GetCapture() == control->window) {
+                ReleaseCapture();
+            }
+        }
+        return 1;
+    }
+    if (message == WM_CAPTURECHANGED && (HWND)lparam != control->window) {
+        for (int held = 0; held < GK_POINTER_BUTTON_COUNT; held++) {
+            if (control->canvasButtons & (1 << held)) {
+                gkUICanvasReportButton(control, held, GK_POINTER_RELEASED);
+            }
+        }
+        control->canvasButtons = 0;
+        return 1;
+    }
+    if (message == WM_MOUSEWHEEL || message == WM_MOUSEHWHEEL) {
+        /* The same scale as the window's own scrolling: one unit per detent. */
+        double delta = (double)GET_WHEEL_DELTA_WPARAM(wparam) / (double)WHEEL_DELTA;
+        if (control->handle) {
+            gkUIGoCanvasScroll(control->handle, message == WM_MOUSEHWHEEL ? delta : 0,
+                               message == WM_MOUSEWHEEL ? delta : 0);
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static LRESULT CALLBACK gkUIContainerProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     GKUIControl *control = gkUIFromWindow(window);
     if (message == WM_NCCREATE) {
         CREATESTRUCTW *create = (CREATESTRUCTW *)lparam;
@@ -319,16 +451,21 @@ static LRESULT CALLBACK gkUIContainerProc(HWND window, UINT message,
         control->window = window;
         SetPropW(window, L"GameKitUIControl", control);
     }
+    if (control && control->kind == GK_UI_CANVAS && gkUICanvasPointerMessage(control, message, wparam, lparam)) {
+        /* An XBUTTON message reports itself handled by returning TRUE. */
+        return message == WM_XBUTTONDOWN || message == WM_XBUTTONUP;
+    }
     LRESULT result = 0;
-    if (gkUIProcessMessage(window, message, wparam, lparam, &result)) return result;
+    if (gkUIProcessMessage(window, message, wparam, lparam, &result)) {
+        return result;
+    }
     if (message == WM_SIZE) {
         gkUIUpdateContainerFrame(control);
-    } else if ((message == WM_HSCROLL || message == WM_VSCROLL) &&
-               control && control->kind == GK_UI_SCROLL_VIEW && !lparam) {
+    } else if ((message == WM_HSCROLL || message == WM_VSCROLL) && control && control->kind == GK_UI_SCROLL_VIEW &&
+               !lparam) {
         gkUIScrollMessage(control, message == WM_HSCROLL ? SB_HORZ : SB_VERT, wparam);
         return 0;
-    } else if (message == WM_MOUSEWHEEL && control &&
-               control->kind == GK_UI_SCROLL_VIEW) {
+    } else if (message == WM_MOUSEWHEEL && control && control->kind == GK_UI_SCROLL_VIEW) {
         int steps = GET_WHEEL_DELTA_WPARAM(wparam) / WHEEL_DELTA;
         int bar = (GET_KEYSTATE_WPARAM(wparam) & MK_SHIFT) ? SB_HORZ : SB_VERT;
         if (bar == SB_VERT && !(GetWindowLongPtrW(window, GWL_STYLE) & WS_VSCROLL)) {
@@ -338,49 +475,19 @@ static LRESULT CALLBACK gkUIContainerProc(HWND window, UINT message,
         GetScrollInfo(window, bar, &info);
         int maximum = max(info.nMin, info.nMax - (int)info.nPage + 1);
         int position = max(info.nMin, min(info.nPos - steps * 72, maximum));
-        if (bar == SB_HORZ) control->scrollX = position;
-        else control->scrollY = position;
+        if (bar == SB_HORZ) {
+            control->scrollX = position;
+        } else {
+            control->scrollY = position;
+        }
         gkUIUpdateContainerFrame(control);
         return 0;
-    } else if (message == WM_LBUTTONDOWN && control && control->kind == GK_UI_PANEL &&
-               control->movable && GET_Y_LPARAM(lparam) < 32) {
-        control->dragging = 1;
-        GetCursorPos(&control->dragStart);
-        GetWindowRect(window, &control->dragFrame);
-        HWND parent = GetParent(window);
-        MapWindowPoints(HWND_DESKTOP, parent, (POINT *)&control->dragFrame, 2);
-        SetCapture(window);
-        SetWindowPos(window, HWND_TOP, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        return 0;
-    } else if (message == WM_MOUSEMOVE && control && control->dragging) {
-        HWND parent = GetParent(window);
-        RECT parentRect = {0};
-        RECT frame = control->dragFrame;
-        GetClientRect(parent, &parentRect);
-        int width = frame.right - frame.left;
-        int height = frame.bottom - frame.top;
-        POINT cursor;
-        GetCursorPos(&cursor);
-        int x = frame.left + cursor.x - control->dragStart.x;
-        int y = frame.top + cursor.y - control->dragStart.y;
-        x = max(0, min(x, max(0, parentRect.right - width)));
-        y = max(0, min(y, max(0, parentRect.bottom - height)));
-        SetWindowPos(window, HWND_TOP, x, y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
-        if (control->handle) gkUIGoEvent(control->handle, GK_UI_EVENT_PANEL_MOVE);
-        return 0;
-    } else if (message == WM_LBUTTONUP && control && control->dragging) {
-        control->dragging = 0;
-        ReleaseCapture();
-        return 0;
-    } else if (message == WM_CAPTURECHANGED && control) {
-        control->dragging = 0;
     } else if (message == WM_ERASEBKGND && control) {
         RECT rect;
         GetClientRect(window, &rect);
         int dark = gkUIDarkForWindow(window);
-        HBRUSH brush = dark ? (gkUIDarkBrush ? gkUIDarkBrush :
-            (gkUIDarkBrush = CreateSolidBrush(RGB(32, 32, 32)))) : GetSysColorBrush(COLOR_WINDOW);
+        HBRUSH brush = dark ? (gkUIDarkBrush ? gkUIDarkBrush : (gkUIDarkBrush = CreateSolidBrush(RGB(32, 32, 32))))
+                            : GetSysColorBrush(COLOR_WINDOW);
         FillRect((HDC)wparam, &rect, brush);
         return 1;
     } else if (message == WM_PAINT && control && control->kind == GK_UI_IMAGE) {
@@ -413,30 +520,9 @@ static LRESULT CALLBACK gkUIContainerProc(HWND window, UINT message,
             info.bmiHeader.biBitCount = 32;
             info.bmiHeader.biCompression = BI_RGB;
             SetStretchBltMode(dc, HALFTONE);
-            StretchDIBits(dc, x, y, drawWidth, drawHeight, 0, 0,
-                          control->imageWidth, control->imageHeight,
+            StretchDIBits(dc, x, y, drawWidth, drawHeight, 0, 0, control->imageWidth, control->imageHeight,
                           control->pixels, &info, DIB_RGB_COLORS, SRCCOPY);
         }
-        EndPaint(window, &paint);
-        return 0;
-    } else if (message == WM_PAINT && control && control->kind == GK_UI_PANEL) {
-        PAINTSTRUCT paint;
-        HDC dc = BeginPaint(window, &paint);
-        RECT rect;
-        GetClientRect(window, &rect);
-        int dark = gkUIDarkForWindow(window);
-        SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, dark ? RGB(238, 238, 238) : GetSysColor(COLOR_WINDOWTEXT));
-        SelectObject(dc, gkUIFont ? gkUIFont : GetStockObject(DEFAULT_GUI_FONT));
-        RECT title = {12, 7, max(12, rect.right - 12), 27};
-        DrawTextW(dc, control->text ? control->text : L"", -1, &title,
-                  DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
-        HPEN pen = CreatePen(PS_SOLID, 1, dark ? RGB(72, 72, 72) : GetSysColor(COLOR_3DSHADOW));
-        HGDIOBJ previous = SelectObject(dc, pen);
-        MoveToEx(dc, 0, 31, NULL);
-        LineTo(dc, rect.right, 31);
-        SelectObject(dc, previous);
-        DeleteObject(pen);
         EndPaint(window, &paint);
         return 0;
     } else if (message == WM_NCDESTROY) {
@@ -446,7 +532,9 @@ static LRESULT CALLBACK gkUIContainerProc(HWND window, UINT message,
 }
 
 static int gkUIRegisterClass(void) {
-    if (gkUIClassAtom) return 1;
+    if (gkUIClassAtom) {
+        return 1;
+    }
     WNDCLASSEXW cls = {0};
     cls.cbSize = sizeof(cls);
     cls.style = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
@@ -459,16 +547,16 @@ static int gkUIRegisterClass(void) {
     return gkUIClassAtom != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
 }
 
-static GKUIControl *gkUICreateControl(uintptr_t parent, int kind,
-                                      const wchar_t *className, const wchar_t *text,
+static GKUIControl *gkUICreateControl(uintptr_t parent, int kind, const wchar_t *className, const wchar_t *text,
                                       DWORD style, DWORD exStyle) {
     GKUIControl *control = calloc(1, sizeof(*control));
-    if (!control) return NULL;
+    if (!control) {
+        return NULL;
+    }
     control->kind = kind;
     control->text = _wcsdup(text ? text : L"");
-    HWND window = CreateWindowExW(exStyle, className, text ? text : L"", style | WS_CHILD | WS_VISIBLE,
-                                  0, 0, 0, 0, (HWND)parent, NULL, GetModuleHandleW(NULL),
-                                  className == gkUIClass ? control : NULL);
+    HWND window = CreateWindowExW(exStyle, className, text ? text : L"", style | WS_CHILD | WS_VISIBLE, 0, 0, 0, 0,
+                                  (HWND)parent, NULL, GetModuleHandleW(NULL), className == gkUIClass ? control : NULL);
     if (!window) {
         free(control->text);
         free(control);
@@ -482,7 +570,9 @@ static GKUIControl *gkUICreateControl(uintptr_t parent, int kind,
 }
 
 static GKUIControl *gkUICreateContainer(uintptr_t parent, int kind) {
-    if (!gkUIRegisterClass()) return NULL;
+    if (!gkUIRegisterClass()) {
+        return NULL;
+    }
     return gkUICreateControl(parent, kind, gkUIClass, L"", WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0);
 }
 
@@ -492,59 +582,62 @@ void *gkUICreateLayout(uintptr_t window) {
 
 void *gkUICreateLabel(uintptr_t window, const char *text) {
     wchar_t *wide = gkUIWide(text);
-    GKUIControl *control = gkUICreateControl(window, GK_UI_LABEL, L"STATIC", wide,
-                                             SS_LEFT | SS_NOPREFIX, 0);
+    GKUIControl *control = gkUICreateControl(window, GK_UI_LABEL, L"STATIC", wide, SS_LEFT | SS_NOPREFIX, 0);
     free(wide);
     return control;
 }
 
 void *gkUICreateButton(uintptr_t window, const char *text, uintptr_t handle) {
     wchar_t *wide = gkUIWide(text);
-    GKUIControl *control = gkUICreateControl(window, GK_UI_BUTTON, L"BUTTON", wide,
-                                             BS_PUSHBUTTON | WS_TABSTOP, 0);
+    GKUIControl *control = gkUICreateControl(window, GK_UI_BUTTON, L"BUTTON", wide, BS_PUSHBUTTON | WS_TABSTOP, 0);
     free(wide);
-    if (control) control->handle = handle;
+    if (control) {
+        control->handle = handle;
+    }
     return control;
 }
 
 void *gkUICreateTextField(uintptr_t window, uintptr_t handle) {
     GKUIControl *control = gkUICreateControl(window, GK_UI_TEXT_FIELD, L"EDIT", L"",
-                                             ES_AUTOHSCROLL | WS_TABSTOP | WS_BORDER,
-                                             WS_EX_CLIENTEDGE);
-    if (control) control->handle = handle;
+                                             ES_AUTOHSCROLL | WS_TABSTOP | WS_BORDER, WS_EX_CLIENTEDGE);
+    if (control) {
+        control->handle = handle;
+    }
     return control;
 }
 
-void *gkUICreateTextArea(uintptr_t window, const char *text,
-                         const char *placeholder, int readOnly, int wrap,
+void *gkUICreateTextArea(uintptr_t window, const char *text, const char *placeholder, int readOnly, int wrap,
                          uintptr_t handle) {
     wchar_t *wide = gkUIWide(text);
-    DWORD style = ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_TABSTOP |
-                  WS_BORDER | WS_VSCROLL;
-    if (!wrap) style |= ES_AUTOHSCROLL | WS_HSCROLL;
-    if (readOnly) style |= ES_READONLY;
-    GKUIControl *control = gkUICreateControl(window, GK_UI_TEXT_AREA, L"EDIT", wide,
-                                             style, WS_EX_CLIENTEDGE);
+    DWORD style = ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_TABSTOP | WS_BORDER | WS_VSCROLL;
+    if (!wrap) {
+        style |= ES_AUTOHSCROLL | WS_HSCROLL;
+    }
+    if (readOnly) {
+        style |= ES_READONLY;
+    }
+    GKUIControl *control = gkUICreateControl(window, GK_UI_TEXT_AREA, L"EDIT", wide, style, WS_EX_CLIENTEDGE);
     free(wide);
-    if (!control) return NULL;
+    if (!control) {
+        return NULL;
+    }
     control->handle = handle;
     control->readOnly = readOnly != 0;
     wchar_t *hint = gkUIWide(placeholder);
     control->placeholder = hint;
-    if (hint) SendMessageW(control->window, EM_SETCUEBANNER, TRUE, (LPARAM)hint);
+    if (hint) {
+        SendMessageW(control->window, EM_SETCUEBANNER, TRUE, (LPARAM)hint);
+    }
     return control;
 }
 
-void *gkUICreateCheckBox(uintptr_t window, const char *text, int checked,
-                         uintptr_t handle) {
+void *gkUICreateCheckBox(uintptr_t window, const char *text, int checked, uintptr_t handle) {
     wchar_t *wide = gkUIWide(text);
-    GKUIControl *control = gkUICreateControl(window, GK_UI_CHECK_BOX, L"BUTTON", wide,
-                                             BS_AUTOCHECKBOX | WS_TABSTOP, 0);
+    GKUIControl *control = gkUICreateControl(window, GK_UI_CHECK_BOX, L"BUTTON", wide, BS_AUTOCHECKBOX | WS_TABSTOP, 0);
     free(wide);
     if (control) {
         control->handle = handle;
-        SendMessageW(control->window, BM_SETCHECK,
-                     checked ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessageW(control->window, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
     }
     return control;
 }
@@ -560,9 +653,10 @@ void *gkUICreateRadioGroup(uintptr_t window, uintptr_t handle) {
 
 void *gkUICreateSelect(uintptr_t window, uintptr_t handle) {
     GKUIControl *control = gkUICreateControl(window, GK_UI_SELECT, L"COMBOBOX", L"",
-                                             CBS_DROPDOWNLIST | CBS_HASSTRINGS |
-                                             WS_TABSTOP | WS_VSCROLL, 0);
-    if (control) control->handle = handle;
+                                             CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_TABSTOP | WS_VSCROLL, 0);
+    if (control) {
+        control->handle = handle;
+    }
     return control;
 }
 
@@ -570,7 +664,9 @@ static int gkUIAppendWindow(GKUIControl *control, HWND item) {
     if (control->itemCount == control->itemCapacity) {
         int capacity = control->itemCapacity ? control->itemCapacity * 2 : 4;
         HWND *items = realloc(control->items, (size_t)capacity * sizeof(*items));
-        if (!items) return 0;
+        if (!items) {
+            return 0;
+        }
         control->items = items;
         control->itemCapacity = capacity;
     }
@@ -580,17 +676,20 @@ static int gkUIAppendWindow(GKUIControl *control, HWND item) {
 
 void gkUISelectionAddItem(void *pointer, const char *text) {
     GKUIControl *control = pointer;
-    if (!control) return;
+    if (!control) {
+        return;
+    }
     wchar_t *wide = gkUIWide(text);
-    if (!wide) return;
+    if (!wide) {
+        return;
+    }
     if (control->kind == GK_UI_SELECT) {
         SendMessageW(control->window, CB_ADDSTRING, 0, (LPARAM)wide);
     } else if (control->kind == GK_UI_RADIO_GROUP) {
         int index = control->itemCount;
-        HWND button = CreateWindowExW(0, L"BUTTON", wide,
-            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTORADIOBUTTON,
-            0, index * 24, 0, 22, control->window,
-            (HMENU)(intptr_t)(1000 + index), GetModuleHandleW(NULL), NULL);
+        HWND button =
+            CreateWindowExW(0, L"BUTTON", wide, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTORADIOBUTTON, 0, index * 24,
+                            0, 22, control->window, (HMENU)(intptr_t)(1000 + index), GetModuleHandleW(NULL), NULL);
         if (button && gkUIAppendWindow(control, button)) {
             SetPropW(button, L"GameKitUIControl", control);
             gkUISetFont(button);
@@ -605,7 +704,9 @@ void gkUISelectionAddItem(void *pointer, const char *text) {
 
 int gkUISelectionIndex(void *pointer) {
     GKUIControl *control = pointer;
-    if (!control) return -1;
+    if (!control) {
+        return -1;
+    }
     if (control->kind == GK_UI_SELECT) {
         return (int)SendMessageW(control->window, CB_GETCURSEL, 0, 0);
     }
@@ -614,26 +715,27 @@ int gkUISelectionIndex(void *pointer) {
 
 void gkUISetSelectionIndex(void *pointer, int index) {
     GKUIControl *control = pointer;
-    if (!control) return;
+    if (!control) {
+        return;
+    }
     if (control->kind == GK_UI_SELECT) {
         SendMessageW(control->window, CB_SETCURSEL, index, 0);
-    } else if (control->kind == GK_UI_RADIO_GROUP &&
-               index >= 0 && index < control->itemCount) {
+    } else if (control->kind == GK_UI_RADIO_GROUP && index >= 0 && index < control->itemCount) {
         control->selectedIndex = index;
         for (int i = 0; i < control->itemCount; i++) {
-            SendMessageW(control->items[i], BM_SETCHECK,
-                         i == index ? BST_CHECKED : BST_UNCHECKED, 0);
+            SendMessageW(control->items[i], BM_SETCHECK, i == index ? BST_CHECKED : BST_UNCHECKED, 0);
         }
     }
 }
 
-void *gkUICreateSlider(uintptr_t window, double minimum, double maximum,
-                       double value, double step, uintptr_t handle) {
+void *gkUICreateSlider(uintptr_t window, double minimum, double maximum, double value, double step, uintptr_t handle) {
     INITCOMMONCONTROLSEX common = {sizeof(common), ICC_BAR_CLASSES};
     InitCommonControlsEx(&common);
-    GKUIControl *control = gkUICreateControl(window, GK_UI_SLIDER, TRACKBAR_CLASSW, L"",
-                                             TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP, 0);
-    if (!control) return NULL;
+    GKUIControl *control =
+        gkUICreateControl(window, GK_UI_SLIDER, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP, 0);
+    if (!control) {
+        return NULL;
+    }
     control->handle = handle;
     control->minimum = minimum;
     control->maximum = maximum;
@@ -651,9 +753,10 @@ void *gkUICreateSlider(uintptr_t window, double minimum, double maximum,
 void *gkUICreateProgressBar(uintptr_t window, double value) {
     INITCOMMONCONTROLSEX common = {sizeof(common), ICC_PROGRESS_CLASS};
     InitCommonControlsEx(&common);
-    GKUIControl *control = gkUICreateControl(window, GK_UI_PROGRESS,
-                                             PROGRESS_CLASSW, L"", 0, 0);
-    if (!control) return NULL;
+    GKUIControl *control = gkUICreateControl(window, GK_UI_PROGRESS, PROGRESS_CLASSW, L"", 0, 0);
+    if (!control) {
+        return NULL;
+    }
     SendMessageW(control->window, PBM_SETRANGE32, 0, 10000);
     SendMessageW(control->window, PBM_SETPOS, (WPARAM)lround(value * 10000), 0);
     return control;
@@ -662,9 +765,10 @@ void *gkUICreateProgressBar(uintptr_t window, double value) {
 void *gkUICreateActivityIndicator(uintptr_t window, int running) {
     INITCOMMONCONTROLSEX common = {sizeof(common), ICC_PROGRESS_CLASS};
     InitCommonControlsEx(&common);
-    GKUIControl *control = gkUICreateControl(window, GK_UI_ACTIVITY,
-                                             PROGRESS_CLASSW, L"", PBS_MARQUEE, 0);
-    if (!control) return NULL;
+    GKUIControl *control = gkUICreateControl(window, GK_UI_ACTIVITY, PROGRESS_CLASSW, L"", PBS_MARQUEE, 0);
+    if (!control) {
+        return NULL;
+    }
     control->running = running != 0;
     SendMessageW(control->window, PBM_SETMARQUEE, running != 0, 30);
     return control;
@@ -672,25 +776,30 @@ void *gkUICreateActivityIndicator(uintptr_t window, int running) {
 
 void *gkUICreateSeparator(uintptr_t window, int direction) {
     DWORD style = direction == 0 ? SS_ETCHEDHORZ : SS_ETCHEDVERT;
-    GKUIControl *control = gkUICreateControl(window, GK_UI_SEPARATOR,
-                                             L"STATIC", L"", style, 0);
-    if (control) control->selectedIndex = direction;
+    GKUIControl *control = gkUICreateControl(window, GK_UI_SEPARATOR, L"STATIC", L"", style, 0);
+    if (control) {
+        control->selectedIndex = direction;
+    }
     return control;
 }
 
 void *gkUICreateImage(uintptr_t window, int scaling) {
     GKUIControl *control = gkUICreateContainer(window, GK_UI_IMAGE);
-    if (control) control->scaling = scaling;
+    if (control) {
+        control->scaling = scaling;
+    }
     return control;
 }
 
-void gkUIImageSet(void *pointer, const unsigned char *pixels,
-                  int width, int height, int stride) {
+void gkUIImageSet(void *pointer, const unsigned char *pixels, int width, int height, int stride) {
     GKUIControl *control = pointer;
-    if (!control || control->kind != GK_UI_IMAGE || !pixels ||
-        width <= 0 || height <= 0 || stride < width * 4) return;
+    if (!control || control->kind != GK_UI_IMAGE || !pixels || width <= 0 || height <= 0 || stride < width * 4) {
+        return;
+    }
     unsigned char *copy = malloc((size_t)width * height * 4);
-    if (!copy) return;
+    if (!copy) {
+        return;
+    }
     for (int y = 0; y < height; y++) {
         const unsigned char *source = pixels + y * stride;
         unsigned char *destination = copy + (size_t)y * width * 4;
@@ -716,30 +825,36 @@ int gkUIImageScaling(void *pointer) {
 
 void gkUIImageSetScaling(void *pointer, int scaling) {
     GKUIControl *control = pointer;
-    if (!control || control->kind != GK_UI_IMAGE) return;
+    if (!control || control->kind != GK_UI_IMAGE) {
+        return;
+    }
     control->scaling = scaling;
     InvalidateRect(control->window, NULL, TRUE);
 }
 
 static void gkUIUpdateLinkText(GKUIControl *control) {
-    if (!control || control->kind != GK_UI_LINK) return;
+    if (!control || control->kind != GK_UI_LINK) {
+        return;
+    }
     const wchar_t *text = control->text ? control->text : L"";
     const wchar_t *url = control->url ? control->url : L"";
     size_t size = wcslen(text) + wcslen(url) + 32;
     wchar_t *markup = calloc(size, sizeof(*markup));
-    if (!markup) return;
+    if (!markup) {
+        return;
+    }
     swprintf(markup, size, L"<a href=\"%ls\">%ls</a>", url, text);
     SetWindowTextW(control->window, markup);
     free(markup);
 }
 
-void *gkUICreateLink(uintptr_t window, const char *text,
-                     const char *url, uintptr_t handle) {
+void *gkUICreateLink(uintptr_t window, const char *text, const char *url, uintptr_t handle) {
     INITCOMMONCONTROLSEX common = {sizeof(common), ICC_LINK_CLASS};
     InitCommonControlsEx(&common);
-    GKUIControl *control = gkUICreateControl(window, GK_UI_LINK,
-                                             WC_LINK, L"", WS_TABSTOP, 0);
-    if (!control) return NULL;
+    GKUIControl *control = gkUICreateControl(window, GK_UI_LINK, WC_LINK, L"", WS_TABSTOP, 0);
+    if (!control) {
+        return NULL;
+    }
     free(control->text);
     control->text = gkUIWide(text);
     control->url = gkUIWide(url);
@@ -751,10 +866,10 @@ void *gkUICreateLink(uintptr_t window, const char *text,
 void *gkUICreateTabs(uintptr_t window, uintptr_t handle) {
     INITCOMMONCONTROLSEX common = {sizeof(common), ICC_TAB_CLASSES};
     InitCommonControlsEx(&common);
-    GKUIControl *control = gkUICreateControl(window, GK_UI_TABS,
-                                             WC_TABCONTROLW, L"",
-                                             WS_TABSTOP | WS_CLIPCHILDREN, 0);
-    if (!control) return NULL;
+    GKUIControl *control = gkUICreateControl(window, GK_UI_TABS, WC_TABCONTROLW, L"", WS_TABSTOP | WS_CLIPCHILDREN, 0);
+    if (!control) {
+        return NULL;
+    }
     control->handle = handle;
     control->selectedIndex = 0;
     GKUIControl *body = gkUICreateContainer((uintptr_t)control->window, GK_UI_LAYOUT);
@@ -773,16 +888,22 @@ void *gkUICreateTabs(uintptr_t window, uintptr_t handle) {
 int gkUITabsAdd(void *tabsPointer, const char *title, void *contentPointer) {
     GKUIControl *tabs = tabsPointer;
     GKUIControl *content = contentPointer;
-    if (!tabs || tabs->kind != GK_UI_TABS || !content) return 0;
+    if (!tabs || tabs->kind != GK_UI_TABS || !content) {
+        return 0;
+    }
     wchar_t *wide = gkUIWide(title);
-    if (!wide) return 0;
+    if (!wide) {
+        return 0;
+    }
     TCITEMW item = {0};
     item.mask = TCIF_TEXT;
     item.pszText = wide;
     int index = TabCtrl_GetItemCount(tabs->window);
     int added = TabCtrl_InsertItem(tabs->window, index, &item) >= 0;
     free(wide);
-    if (!added || !gkUIAppendWindow(tabs, content->window)) return 0;
+    if (!added || !gkUIAppendWindow(tabs, content->window)) {
+        return 0;
+    }
     SetParent(content->window, tabs->body);
     ShowWindow(content->window, index == tabs->selectedIndex ? SW_SHOW : SW_HIDE);
     return 1;
@@ -795,7 +916,9 @@ int gkUITabsSelected(void *pointer) {
 
 void gkUITabsSetSelected(void *pointer, int index) {
     GKUIControl *tabs = pointer;
-    if (!tabs || tabs->kind != GK_UI_TABS || index < 0 || index >= tabs->itemCount) return;
+    if (!tabs || tabs->kind != GK_UI_TABS || index < 0 || index >= tabs->itemCount) {
+        return;
+    }
     tabs->selectedIndex = index;
     TabCtrl_SetCurSel(tabs->window, index);
     for (int i = 0; i < tabs->itemCount; i++) {
@@ -806,20 +929,31 @@ void gkUITabsSetSelected(void *pointer, int index) {
 void gkUITabsContentSize(void *pointer, int *width, int *height) {
     GKUIControl *tabs = pointer;
     RECT rect = {0};
-    if (tabs && tabs->body) GetClientRect(tabs->body, &rect);
-    if (width) *width = rect.right - rect.left;
-    if (height) *height = rect.bottom - rect.top;
+    if (tabs && tabs->body) {
+        GetClientRect(tabs->body, &rect);
+    }
+    if (width) {
+        *width = rect.right - rect.left;
+    }
+    if (height) {
+        *height = rect.bottom - rect.top;
+    }
 }
 
 void *gkUICreateScrollView(uintptr_t window, int axes) {
     GKUIControl *control = gkUICreateContainer(window, GK_UI_SCROLL_VIEW);
-    if (!control) return NULL;
+    if (!control) {
+        return NULL;
+    }
     LONG_PTR style = GetWindowLongPtrW(control->window, GWL_STYLE);
-    if (axes == 0 || axes == 2) style |= WS_VSCROLL;
-    if (axes == 1 || axes == 2) style |= WS_HSCROLL;
+    if (axes == 0 || axes == 2) {
+        style |= WS_VSCROLL;
+    }
+    if (axes == 1 || axes == 2) {
+        style |= WS_HSCROLL;
+    }
     SetWindowLongPtrW(control->window, GWL_STYLE, style);
-    SetWindowLongPtrW(control->window, GWL_EXSTYLE,
-                      GetWindowLongPtrW(control->window, GWL_EXSTYLE) | WS_EX_CLIENTEDGE);
+    SetWindowLongPtrW(control->window, GWL_EXSTYLE, GetWindowLongPtrW(control->window, GWL_EXSTYLE) | WS_EX_CLIENTEDGE);
     GKUIControl *body = gkUICreateContainer((uintptr_t)control->window, GK_UI_LAYOUT);
     if (!body) {
         DestroyWindow(control->window);
@@ -837,14 +971,22 @@ void *gkUICreateScrollView(uintptr_t window, int axes) {
 void gkUIScrollViewportSize(void *pointer, int *width, int *height) {
     GKUIControl *control = pointer;
     RECT rect = {0};
-    if (control && control->kind == GK_UI_SCROLL_VIEW) GetClientRect(control->window, &rect);
-    if (width) *width = rect.right - rect.left;
-    if (height) *height = rect.bottom - rect.top;
+    if (control && control->kind == GK_UI_SCROLL_VIEW) {
+        GetClientRect(control->window, &rect);
+    }
+    if (width) {
+        *width = rect.right - rect.left;
+    }
+    if (height) {
+        *height = rect.bottom - rect.top;
+    }
 }
 
 void gkUIScrollSetContentSize(void *pointer, int width, int height) {
     GKUIControl *control = pointer;
-    if (!control || control->kind != GK_UI_SCROLL_VIEW) return;
+    if (!control || control->kind != GK_UI_SCROLL_VIEW) {
+        return;
+    }
     control->contentWidth = max(0, width);
     control->contentHeight = max(0, height);
     gkUIUpdateContainerFrame(control);
@@ -852,57 +994,58 @@ void gkUIScrollSetContentSize(void *pointer, int width, int height) {
 
 void gkUIScrollOffset(void *pointer, int *x, int *y) {
     GKUIControl *control = pointer;
-    if (x) *x = control && control->kind == GK_UI_SCROLL_VIEW ? control->scrollX : 0;
-    if (y) *y = control && control->kind == GK_UI_SCROLL_VIEW ? control->scrollY : 0;
+    if (x) {
+        *x = control && control->kind == GK_UI_SCROLL_VIEW ? control->scrollX : 0;
+    }
+    if (y) {
+        *y = control && control->kind == GK_UI_SCROLL_VIEW ? control->scrollY : 0;
+    }
 }
 
 void gkUIScrollSetOffset(void *pointer, int x, int y) {
     GKUIControl *control = pointer;
-    if (!control || control->kind != GK_UI_SCROLL_VIEW) return;
+    if (!control || control->kind != GK_UI_SCROLL_VIEW) {
+        return;
+    }
     control->scrollX = max(0, x);
     control->scrollY = max(0, y);
     gkUIUpdateContainerFrame(control);
 }
 
-void *gkUICreateCanvas(uintptr_t window) {
-    return gkUICreateContainer(window, GK_UI_CANVAS);
-}
-
-void *gkUICreatePanel(uintptr_t window, const char *title, int movable,
-                      uintptr_t handle) {
-    GKUIControl *control = gkUICreateContainer(window, GK_UI_PANEL);
-    if (!control) return NULL;
-    SetWindowLongPtrW(control->window, GWL_EXSTYLE,
-                      GetWindowLongPtrW(control->window, GWL_EXSTYLE) | WS_EX_CLIENTEDGE);
-    SetWindowPos(control->window, NULL, 0, 0, 0, 0,
-                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-    free(control->text);
-    control->text = gkUIWide(title);
-    control->movable = movable != 0;
-    control->handle = handle;
-    GKUIControl *body = gkUICreateContainer((uintptr_t)control->window, GK_UI_LAYOUT);
-    if (!body) {
-        DestroyWindow(control->window);
-        free(control->text);
-        free(control);
-        return NULL;
+void *gkUICreateCanvas(uintptr_t window, uintptr_t handle) {
+    GKUIControl *control = gkUICreateContainer(window, GK_UI_CANVAS);
+    if (control) {
+        control->handle = handle;
     }
-    control->body = body->window;
-    control->bodyControl = body;
     return control;
 }
 
-void *gkUICreateSection(uintptr_t window, const char *title, int expanded,
-                        uintptr_t handle) {
+void gkUICanvasPointerPosition(void *pointer, double *x, double *y) {
+    GKUIControl *control = pointer;
+    POINT point = {0};
+    if (control && control->window) {
+        GetCursorPos(&point);
+        ScreenToClient(control->window, &point);
+    }
+    if (x) {
+        *x = (double)point.x;
+    }
+    if (y) {
+        *y = (double)point.y;
+    }
+}
+
+void *gkUICreateSection(uintptr_t window, const char *title, int expanded, uintptr_t handle) {
     GKUIControl *control = gkUICreateContainer(window, GK_UI_SECTION);
-    if (!control) return NULL;
+    if (!control) {
+        return NULL;
+    }
     free(control->text);
     control->text = gkUIWide(title);
     control->expanded = expanded != 0;
     control->handle = handle;
-    control->header = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                                      0, 0, 0, 0, control->window, NULL,
-                                      GetModuleHandleW(NULL), NULL);
+    control->header = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 0, 0, 0, 0,
+                                      control->window, NULL, GetModuleHandleW(NULL), NULL);
     GKUIControl *body = gkUICreateContainer((uintptr_t)control->window, GK_UI_LAYOUT);
     if (!control->header || !body) {
         if (body) {
@@ -933,8 +1076,12 @@ uintptr_t gkUIControlHandle(void *pointer) {
 
 void gkUIDestroy(void *pointer) {
     GKUIControl *control = pointer;
-    if (!control) return;
-    if (control->window && IsWindow(control->window)) DestroyWindow(control->window);
+    if (!control) {
+        return;
+    }
+    if (control->window && IsWindow(control->window)) {
+        DestroyWindow(control->window);
+    }
     if (control->bodyControl) {
         free(control->bodyControl->text);
         free(control->bodyControl->placeholder);
@@ -950,18 +1097,24 @@ void gkUIDestroy(void *pointer) {
 
 void gkUIClearAction(void *pointer) {
     GKUIControl *control = pointer;
-    if (control) control->handle = 0;
+    if (control) {
+        control->handle = 0;
+    }
 }
 
 void gkUIAttachToWindow(uintptr_t window, void *pointer) {
     GKUIControl *control = pointer;
-    if (control && control->window) SetParent(control->window, (HWND)window);
+    if (control && control->window) {
+        SetParent(control->window, (HWND)window);
+    }
 }
 
 void gkUISetParent(void *pointer, void *parentPointer) {
     GKUIControl *control = pointer;
     GKUIControl *parent = parentPointer;
-    if (!control || !parent) return;
+    if (!control || !parent) {
+        return;
+    }
     HWND destination = parent->body ? parent->body : parent->window;
     SetParent(control->window, destination);
 }
@@ -969,30 +1122,34 @@ void gkUISetParent(void *pointer, void *parentPointer) {
 void gkUIBringToFront(void *pointer) {
     GKUIControl *control = pointer;
     if (control && control->window) {
-        SetWindowPos(control->window, HWND_TOP, 0, 0, 0, 0,
-                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        SetWindowPos(control->window, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 }
 
 void gkUISetFrame(void *pointer, int x, int y, int width, int height) {
     GKUIControl *control = pointer;
-    if (!control || !control->window) return;
+    if (!control || !control->window) {
+        return;
+    }
     int nativeHeight = control->kind == GK_UI_SELECT ? max(200, height) : height;
     width = max(0, width);
     nativeHeight = max(0, nativeHeight);
     RECT current = {0};
     GetWindowRect(control->window, &current);
     MapWindowPoints(HWND_DESKTOP, GetParent(control->window), (POINT *)&current, 2);
-    if (current.left == x && current.top == y &&
-        current.right - current.left == width &&
-        current.bottom - current.top == nativeHeight) return;
+    if (current.left == x && current.top == y && current.right - current.left == width &&
+        current.bottom - current.top == nativeHeight) {
+        return;
+    }
     MoveWindow(control->window, x, y, width, nativeHeight, TRUE);
     gkUIUpdateContainerFrame(control);
 }
 
 void gkUISetVisible(void *pointer, int visible) {
     GKUIControl *control = pointer;
-    if (control && control->window) ShowWindow(control->window, visible ? SW_SHOW : SW_HIDE);
+    if (control && control->window) {
+        ShowWindow(control->window, visible ? SW_SHOW : SW_HIDE);
+    }
 }
 
 static BOOL CALLBACK gkUIEnableChild(HWND window, LPARAM enabled) {
@@ -1002,7 +1159,9 @@ static BOOL CALLBACK gkUIEnableChild(HWND window, LPARAM enabled) {
 
 void gkUISetEnabled(void *pointer, int enabled) {
     GKUIControl *control = pointer;
-    if (!control || !control->window) return;
+    if (!control || !control->window) {
+        return;
+    }
     EnableWindow(control->window, enabled != 0);
     EnumChildWindows(control->window, gkUIEnableChild, (LPARAM)(enabled != 0));
 }
@@ -1012,13 +1171,12 @@ void gkUIPreferredSize(void *pointer, int *width, int *height) {
     int resultWidth = 0;
     int resultHeight = 0;
     if (control && control->window) {
-        if (control->kind == GK_UI_LABEL || control->kind == GK_UI_BUTTON ||
-            control->kind == GK_UI_CHECK_BOX || control->kind == GK_UI_LINK) {
+        if (control->kind == GK_UI_LABEL || control->kind == GK_UI_BUTTON || control->kind == GK_UI_CHECK_BOX ||
+            control->kind == GK_UI_LINK) {
             HDC dc = GetDC(control->window);
             HGDIOBJ previous = SelectObject(dc, (HGDIOBJ)SendMessageW(control->window, WM_GETFONT, 0, 0));
             RECT rect = {0};
-            DrawTextW(dc, control->text ? control->text : L"", -1, &rect,
-                      DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+            DrawTextW(dc, control->text ? control->text : L"", -1, &rect, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
             SelectObject(dc, previous);
             ReleaseDC(control->window, dc);
             resultWidth = rect.right - rect.left;
@@ -1065,25 +1223,39 @@ void gkUIPreferredSize(void *pointer, int *width, int *height) {
             resultHeight = 240;
         }
     }
-    if (width) *width = resultWidth;
-    if (height) *height = resultHeight;
+    if (width) {
+        *width = resultWidth;
+    }
+    if (height) {
+        *height = resultHeight;
+    }
 }
 
 void gkUIFramebufferSize(void *pointer, int *width, int *height) {
     GKUIControl *control = pointer;
     RECT rect = {0};
-    if (control && control->window) GetClientRect(control->window, &rect);
-    if (width) *width = rect.right - rect.left;
-    if (height) *height = rect.bottom - rect.top;
+    if (control && control->window) {
+        GetClientRect(control->window, &rect);
+    }
+    if (width) {
+        *width = rect.right - rect.left;
+    }
+    if (height) {
+        *height = rect.bottom - rect.top;
+    }
 }
 
 char *gkUIText(void *pointer) {
     GKUIControl *control = pointer;
-    if (!control) return _strdup("");
+    if (!control) {
+        return _strdup("");
+    }
     if (control->kind == GK_UI_TEXT_FIELD || control->kind == GK_UI_TEXT_AREA) {
         int length = GetWindowTextLengthW(control->window);
         wchar_t *text = calloc((size_t)length + 1, sizeof(*text));
-        if (!text) return NULL;
+        if (!text) {
+            return NULL;
+        }
         GetWindowTextW(control->window, text, length + 1);
         char *result = gkUIUTF8(text);
         free(text);
@@ -1094,9 +1266,13 @@ char *gkUIText(void *pointer) {
 
 void gkUISetText(void *pointer, const char *text) {
     GKUIControl *control = pointer;
-    if (!control) return;
+    if (!control) {
+        return;
+    }
     wchar_t *wide = gkUIWide(text);
-    if (!wide) return;
+    if (!wide) {
+        return;
+    }
     free(control->text);
     control->text = _wcsdup(wide);
     control->suppress = 1;
@@ -1105,8 +1281,6 @@ void gkUISetText(void *pointer, const char *text) {
     } else if (control->kind == GK_UI_SECTION) {
         control->expanded = !control->expanded;
         gkUIToggleSection(control, 0);
-    } else if (control->kind == GK_UI_PANEL) {
-        InvalidateRect(control->window, NULL, TRUE);
     } else {
         SetWindowTextW(control->window, wide);
     }
@@ -1116,10 +1290,13 @@ void gkUISetText(void *pointer, const char *text) {
 
 void gkUISetPlaceholder(void *pointer, const char *text) {
     GKUIControl *control = pointer;
-    if (!control || (control->kind != GK_UI_TEXT_FIELD &&
-                     control->kind != GK_UI_TEXT_AREA)) return;
+    if (!control || (control->kind != GK_UI_TEXT_FIELD && control->kind != GK_UI_TEXT_AREA)) {
+        return;
+    }
     wchar_t *wide = gkUIWide(text);
-    if (!wide) return;
+    if (!wide) {
+        return;
+    }
     free(control->placeholder);
     control->placeholder = wide;
     SendMessageW(control->window, EM_SETCUEBANNER, TRUE, (LPARAM)control->placeholder);
@@ -1139,8 +1316,7 @@ int gkUIChecked(void *pointer) {
 void gkUISetChecked(void *pointer, int checked) {
     GKUIControl *control = pointer;
     if (control && control->kind == GK_UI_CHECK_BOX) {
-        SendMessageW(control->window, BM_SETCHECK,
-                     checked ? BST_CHECKED : BST_UNCHECKED, 0);
+        SendMessageW(control->window, BM_SETCHECK, checked ? BST_CHECKED : BST_UNCHECKED, 0);
     }
 }
 
@@ -1151,41 +1327,50 @@ int gkUIReadOnly(void *pointer) {
 
 void gkUISetReadOnly(void *pointer, int readOnly) {
     GKUIControl *control = pointer;
-    if (!control || control->kind != GK_UI_TEXT_AREA) return;
+    if (!control || control->kind != GK_UI_TEXT_AREA) {
+        return;
+    }
     control->readOnly = readOnly != 0;
     SendMessageW(control->window, EM_SETREADONLY, readOnly != 0, 0);
 }
 
 double gkUISliderValue(void *pointer) {
     GKUIControl *control = pointer;
-    if (!control || control->kind != GK_UI_SLIDER) return 0;
+    if (!control || control->kind != GK_UI_SLIDER) {
+        return 0;
+    }
     int position = (int)SendMessageW(control->window, TBM_GETPOS, 0, 0);
     if (control->step > 0) {
         return min(control->maximum, control->minimum + position * control->step);
     }
-    return control->minimum + (control->maximum - control->minimum) *
-           position / control->sliderMaximum;
+    return control->minimum + (control->maximum - control->minimum) * position / control->sliderMaximum;
 }
 
 void gkUISetSliderValue(void *pointer, double value) {
     GKUIControl *control = pointer;
-    if (!control || control->kind != GK_UI_SLIDER) return;
+    if (!control || control->kind != GK_UI_SLIDER) {
+        return;
+    }
     value = max(control->minimum, min(value, control->maximum));
     double range = control->maximum - control->minimum;
-    int position = control->step > 0 ? (int)llround((value - control->minimum) / control->step) :
-                   (int)llround((value - control->minimum) / range * control->sliderMaximum);
+    int position = control->step > 0 ? (int)llround((value - control->minimum) / control->step)
+                                     : (int)llround((value - control->minimum) / range * control->sliderMaximum);
     SendMessageW(control->window, TBM_SETPOS, TRUE, position);
 }
 
 double gkUIProgressValue(void *pointer) {
     GKUIControl *control = pointer;
-    if (!control || control->kind != GK_UI_PROGRESS) return 0;
+    if (!control || control->kind != GK_UI_PROGRESS) {
+        return 0;
+    }
     return (double)SendMessageW(control->window, PBM_GETPOS, 0, 0) / 10000.0;
 }
 
 void gkUISetProgressValue(void *pointer, double value) {
     GKUIControl *control = pointer;
-    if (!control || control->kind != GK_UI_PROGRESS) return;
+    if (!control || control->kind != GK_UI_PROGRESS) {
+        return;
+    }
     value = max(0, min(value, 1));
     SendMessageW(control->window, PBM_SETPOS, (WPARAM)lround(value * 10000), 0);
 }
@@ -1197,7 +1382,9 @@ int gkUIActivityRunning(void *pointer) {
 
 void gkUISetActivityRunning(void *pointer, int running) {
     GKUIControl *control = pointer;
-    if (!control || control->kind != GK_UI_ACTIVITY) return;
+    if (!control || control->kind != GK_UI_ACTIVITY) {
+        return;
+    }
     control->running = running != 0;
     SendMessageW(control->window, PBM_SETMARQUEE, control->running, 30);
 }
@@ -1209,28 +1396,16 @@ char *gkUILinkURL(void *pointer) {
 
 void gkUISetLinkURL(void *pointer, const char *url) {
     GKUIControl *control = pointer;
-    if (!control || control->kind != GK_UI_LINK) return;
+    if (!control || control->kind != GK_UI_LINK) {
+        return;
+    }
     wchar_t *wide = gkUIWide(url);
-    if (!wide) return;
+    if (!wide) {
+        return;
+    }
     free(control->url);
     control->url = wide;
     gkUIUpdateLinkText(control);
-}
-
-void gkUIPanelSetMovable(void *pointer, int movable) {
-    GKUIControl *control = pointer;
-    if (control && control->kind == GK_UI_PANEL) control->movable = movable != 0;
-}
-
-void gkUIPanelPosition(void *pointer, int *x, int *y) {
-    GKUIControl *control = pointer;
-    RECT rect = {0};
-    if (control && control->window) {
-        GetWindowRect(control->window, &rect);
-        MapWindowPoints(HWND_DESKTOP, GetParent(control->window), (POINT *)&rect, 2);
-    }
-    if (x) *x = rect.left;
-    if (y) *y = rect.top;
 }
 
 int gkUISectionExpanded(void *pointer) {
@@ -1240,7 +1415,9 @@ int gkUISectionExpanded(void *pointer) {
 
 void gkUISectionSetExpanded(void *pointer, int expanded) {
     GKUIControl *control = pointer;
-    if (!control || control->kind != GK_UI_SECTION || control->expanded == (expanded != 0)) return;
+    if (!control || control->kind != GK_UI_SECTION || control->expanded == (expanded != 0)) {
+        return;
+    }
     gkUIToggleSection(control, 0);
 }
 
@@ -1249,11 +1426,15 @@ static wchar_t *gkUIFileFilter(const char *extensions) {
     if (!wide || !wide[0]) {
         free(wide);
         wchar_t *filter = calloc(20, sizeof(*filter));
-        if (filter) memcpy(filter, L"All files\0*.*\0\0", 15 * sizeof(*filter));
+        if (filter) {
+            memcpy(filter, L"All files\0*.*\0\0", 15 * sizeof(*filter));
+        }
         return filter;
     }
     for (wchar_t *next = wide; *next; next++) {
-        if (*next == L',') *next = L';';
+        if (*next == L',') {
+            *next = L';';
+        }
     }
     size_t patternLength = wcslen(wide) * 2 + 3;
     wchar_t *pattern = calloc(patternLength, sizeof(*pattern));
@@ -1265,8 +1446,12 @@ static wchar_t *gkUIFileFilter(const char *extensions) {
     wchar_t *part = wide;
     while (part && *part) {
         wchar_t *separator = wcschr(part, L';');
-        if (separator) *separator = 0;
-        if (out != pattern) *out++ = L';';
+        if (separator) {
+            *separator = 0;
+        }
+        if (out != pattern) {
+            *out++ = L';';
+        }
         *out++ = L'*';
         *out++ = L'.';
         size_t length = wcslen(part);
@@ -1295,10 +1480,14 @@ static wchar_t *gkUIFileFilter(const char *extensions) {
 static char *gkUIPathList(wchar_t **paths, size_t count, size_t *resultSize) {
     size_t size = 0;
     char **values = calloc(count, sizeof(*values));
-    if (!values) return NULL;
+    if (!values) {
+        return NULL;
+    }
     for (size_t i = 0; i < count; i++) {
         values[i] = gkUIUTF8(paths[i]);
-        if (values[i]) size += strlen(values[i]) + 1;
+        if (values[i]) {
+            size += strlen(values[i]) + 1;
+        }
     }
     char *result = size ? malloc(size) : NULL;
     char *next = result;
@@ -1311,7 +1500,9 @@ static char *gkUIPathList(wchar_t **paths, size_t count, size_t *resultSize) {
         }
     }
     free(values);
-    if (resultSize) *resultSize = size;
+    if (resultSize) {
+        *resultSize = size;
+    }
     return result;
 }
 
@@ -1323,11 +1514,11 @@ static int CALLBACK gkUIBrowseCallback(HWND dialog, UINT message, LPARAM lparam,
     return 0;
 }
 
-char *gkUIOpenPanel(uintptr_t window, const char *title,
-                    const char *directory, const char *filename,
-                    const char *extensions, int multiple, int directories,
-                    size_t *resultSize, int *cancelled) {
-    if (resultSize) *resultSize = 0;
+char *gkUIOpenPanel(uintptr_t window, const char *title, const char *directory, const char *filename,
+                    const char *extensions, int multiple, int directories, size_t *resultSize, int *cancelled) {
+    if (resultSize) {
+        *resultSize = 0;
+    }
     if (directories) {
         wchar_t path[MAX_PATH] = {0};
         wchar_t *wideTitle = gkUIWide(title);
@@ -1343,17 +1534,23 @@ char *gkUIOpenPanel(uintptr_t window, const char *title,
         free(wideTitle);
         free(wideDirectory);
         if (!item) {
-            if (cancelled) *cancelled = 1;
+            if (cancelled) {
+                *cancelled = 1;
+            }
             return NULL;
         }
         int ok = SHGetPathFromIDListW(item, path);
         CoTaskMemFree(item);
         if (!ok) {
-            if (cancelled) *cancelled = 0;
+            if (cancelled) {
+                *cancelled = 0;
+            }
             return NULL;
         }
         wchar_t *paths[] = {path};
-        if (cancelled) *cancelled = 0;
+        if (cancelled) {
+            *cancelled = 0;
+        }
         return gkUIPathList(paths, 1, resultSize);
     }
 
@@ -1364,11 +1561,19 @@ char *gkUIOpenPanel(uintptr_t window, const char *title,
     wchar_t *wideFilename = gkUIWide(filename);
     wchar_t *filter = gkUIFileFilter(extensions);
     if (!buffer || !filter) {
-        free(buffer); free(wideTitle); free(wideDirectory); free(wideFilename); free(filter);
-        if (cancelled) *cancelled = 0;
+        free(buffer);
+        free(wideTitle);
+        free(wideDirectory);
+        free(wideFilename);
+        free(filter);
+        if (cancelled) {
+            *cancelled = 0;
+        }
         return NULL;
     }
-    if (wideFilename) wcsncpy(buffer, wideFilename, capacity - 1);
+    if (wideFilename) {
+        wcsncpy(buffer, wideFilename, capacity - 1);
+    }
     OPENFILENAMEW open = {0};
     open.lStructSize = sizeof(open);
     open.hwndOwner = (HWND)window;
@@ -1377,13 +1582,18 @@ char *gkUIOpenPanel(uintptr_t window, const char *title,
     open.nMaxFile = capacity;
     open.lpstrInitialDir = wideDirectory && wideDirectory[0] ? wideDirectory : NULL;
     open.lpstrTitle = wideTitle && wideTitle[0] ? wideTitle : NULL;
-    open.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
-                 OFN_HIDEREADONLY | (multiple ? OFN_ALLOWMULTISELECT : 0);
+    open.Flags =
+        OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | (multiple ? OFN_ALLOWMULTISELECT : 0);
     int ok = GetOpenFileNameW(&open);
-    free(wideTitle); free(wideDirectory); free(wideFilename); free(filter);
+    free(wideTitle);
+    free(wideDirectory);
+    free(wideFilename);
+    free(filter);
     if (!ok) {
         free(buffer);
-        if (cancelled) *cancelled = CommDlgExtendedError() == 0;
+        if (cancelled) {
+            *cancelled = CommDlgExtendedError() == 0;
+        }
         return NULL;
     }
     wchar_t *second = buffer + wcslen(buffer) + 1;
@@ -1393,7 +1603,9 @@ char *gkUIOpenPanel(uintptr_t window, const char *title,
         result = gkUIPathList(paths, 1, resultSize);
     } else {
         size_t count = 0;
-        for (wchar_t *next = second; *next; next += wcslen(next) + 1) count++;
+        for (wchar_t *next = second; *next; next += wcslen(next) + 1) {
+            count++;
+        }
         wchar_t **paths = calloc(count, sizeof(*paths));
         size_t directoryLength = wcslen(buffer);
         size_t i = 0;
@@ -1403,24 +1615,28 @@ char *gkUIOpenPanel(uintptr_t window, const char *title,
             if (paths[i]) {
                 memcpy(paths[i], buffer, directoryLength * sizeof(**paths));
                 paths[i][directoryLength] = L'\\';
-                memcpy(paths[i] + directoryLength + 1, next,
-                       (nameLength + 1) * sizeof(**paths));
+                memcpy(paths[i] + directoryLength + 1, next, (nameLength + 1) * sizeof(**paths));
             }
             i++;
         }
         result = gkUIPathList(paths, count, resultSize);
-        for (i = 0; i < count; i++) free(paths[i]);
+        for (i = 0; i < count; i++) {
+            free(paths[i]);
+        }
         free(paths);
     }
     free(buffer);
-    if (cancelled) *cancelled = 0;
+    if (cancelled) {
+        *cancelled = 0;
+    }
     return result;
 }
 
-char *gkUISavePanel(uintptr_t window, const char *title,
-                    const char *directory, const char *filename,
+char *gkUISavePanel(uintptr_t window, const char *title, const char *directory, const char *filename,
                     const char *extensions, size_t *resultSize, int *cancelled) {
-    if (resultSize) *resultSize = 0;
+    if (resultSize) {
+        *resultSize = 0;
+    }
     const DWORD capacity = 32768;
     wchar_t *buffer = calloc(capacity, sizeof(*buffer));
     wchar_t *wideTitle = gkUIWide(title);
@@ -1428,11 +1644,19 @@ char *gkUISavePanel(uintptr_t window, const char *title,
     wchar_t *wideFilename = gkUIWide(filename);
     wchar_t *filter = gkUIFileFilter(extensions);
     if (!buffer || !filter) {
-        free(buffer); free(wideTitle); free(wideDirectory); free(wideFilename); free(filter);
-        if (cancelled) *cancelled = 0;
+        free(buffer);
+        free(wideTitle);
+        free(wideDirectory);
+        free(wideFilename);
+        free(filter);
+        if (cancelled) {
+            *cancelled = 0;
+        }
         return NULL;
     }
-    if (wideFilename) wcsncpy(buffer, wideFilename, capacity - 1);
+    if (wideFilename) {
+        wcsncpy(buffer, wideFilename, capacity - 1);
+    }
     OPENFILENAMEW save = {0};
     save.lStructSize = sizeof(save);
     save.hwndOwner = (HWND)window;
@@ -1443,15 +1667,22 @@ char *gkUISavePanel(uintptr_t window, const char *title,
     save.lpstrTitle = wideTitle && wideTitle[0] ? wideTitle : NULL;
     save.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
     int ok = GetSaveFileNameW(&save);
-    free(wideTitle); free(wideDirectory); free(wideFilename); free(filter);
+    free(wideTitle);
+    free(wideDirectory);
+    free(wideFilename);
+    free(filter);
     if (!ok) {
         free(buffer);
-        if (cancelled) *cancelled = CommDlgExtendedError() == 0;
+        if (cancelled) {
+            *cancelled = CommDlgExtendedError() == 0;
+        }
         return NULL;
     }
     wchar_t *paths[] = {buffer};
     char *result = gkUIPathList(paths, 1, resultSize);
     free(buffer);
-    if (cancelled) *cancelled = 0;
+    if (cancelled) {
+        *cancelled = 0;
+    }
     return result;
 }

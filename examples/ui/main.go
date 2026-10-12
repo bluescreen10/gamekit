@@ -32,7 +32,7 @@ func main() {
 	}
 	defer win.Close()
 
-	if err := buildWidgetTester(win); err != nil {
+	if err := buildWidgetTester(backend, win); err != nil {
 		panic(err)
 	}
 	for !win.ShouldClose() {
@@ -41,7 +41,7 @@ func main() {
 	}
 }
 
-func buildWidgetTester(win ui.Window) error {
+func buildWidgetTester(backend ui.Backend, win ui.Window) error {
 	status, err := win.CreateLabel("Ready")
 	if err != nil {
 		return err
@@ -92,12 +92,16 @@ func buildWidgetTester(win ui.Window) error {
 	if err != nil {
 		return err
 	}
+	showInspector, err := win.CreateButton("Show inspector")
+	if err != nil {
+		return err
+	}
 	quit, err := win.CreateButton("Quit")
 	if err != nil {
 		return err
 	}
 	footerButtons, err := win.CreateLayout(ui.Row(
-		ui.Item(theme), ui.Item(open), ui.Space(), ui.Item(quit),
+		ui.Item(theme), ui.Item(open), ui.Item(showInspector), ui.Space(), ui.Item(quit),
 	).WithGap(8))
 	if err != nil {
 		return err
@@ -114,31 +118,39 @@ func buildWidgetTester(win ui.Window) error {
 		return err
 	}
 
-	panelLabel, err := win.CreateLabel("Drag this native panel by its title bar.")
+	inspector, err := backend.CreateWindow(ui.WindowOptions{
+		Title:    "Inspector",
+		Size:     ui.Size{Width: 280, Height: 130},
+		Kind:     ui.WindowUtility,
+		Owner:    win,
+		Position: ui.Point{X: 28, Y: 56},
+		Theme:    win.Theme(),
+	})
 	if err != nil {
 		return err
 	}
-	panelBody, err := win.CreateLayout(
-		ui.Column(ui.Item(panelLabel), ui.Space()).WithPadding(ui.UniformInsets(8)),
+	inspectorLabel, err := inspector.CreateLabel("Drag this native utility window by its title bar.")
+	if err != nil {
+		return err
+	}
+	inspectorBody, err := inspector.CreateLayout(
+		ui.Column(ui.Item(inspectorLabel), ui.Space()).WithPadding(ui.UniformInsets(8)),
 	)
 	if err != nil {
 		return err
 	}
-	panel, err := win.CreatePanel(ui.PanelOptions{
-		Title:    "Floating panel",
-		Content:  panelBody,
-		Position: ui.Point{X: 28, Y: 56},
-		Size:     ui.Size{Width: 280, Height: 130},
-	})
-	if err == nil {
-		panel.OnMove(func(position ui.Point) {
-			status.SetText(fmt.Sprintf("Panel position: %d, %d", position.X, position.Y))
-		})
-	} else if errors.Is(err, ui.ErrNotSupported) {
-		panelBody.Close()
-	} else {
+	if err := inspector.SetContent(inspectorBody); err != nil {
 		return err
 	}
+	inspector.OnMove(func(position ui.Point) {
+		status.SetText(fmt.Sprintf("Inspector position: %d, %d", position.X, position.Y))
+	})
+	showInspector.OnClick(func() {
+		inspector.SetShouldClose(false)
+		inspector.SetVisible(true)
+		inspector.BringToFront()
+		status.SetText("Inspector shown")
+	})
 
 	themes := []struct {
 		value ui.Theme
@@ -154,6 +166,10 @@ func buildWidgetTester(win ui.Window) error {
 		selected := themes[themeIndex]
 		if themeErr := win.SetTheme(selected.value); themeErr != nil {
 			status.SetText("Theme: " + themeErr.Error())
+			return
+		}
+		if themeErr := inspector.SetTheme(selected.value); themeErr != nil {
+			status.SetText("Inspector theme: " + themeErr.Error())
 			return
 		}
 		theme.SetText("Theme: " + selected.name)
@@ -347,8 +363,18 @@ func createCanvasPage(win ui.Window, status ui.Label) (ui.Widget, error) {
 	if err != nil {
 		return nil, err
 	}
+	windowInput, err := win.CreateLabel("Window input: click or scroll anywhere in this window")
+	if err != nil {
+		return nil, err
+	}
+	canvasInput, err := win.CreateLabel("Canvas input: click or scroll inside the canvas")
+	if err != nil {
+		return nil, err
+	}
 	page, err := win.CreateLayout(ui.Column(
 		ui.Item(label),
+		ui.Item(windowInput),
+		ui.Item(canvasInput),
 		ui.Item(canvas).Grow(1).MinimumSize(ui.Size{Width: 320, Height: 240}),
 	).WithPadding(ui.UniformInsets(16)).WithGap(10))
 	if err != nil {
@@ -356,6 +382,26 @@ func createCanvasPage(win ui.Window, status ui.Label) (ui.Widget, error) {
 	}
 	canvas.OnResize(func(size ui.Size) {
 		status.SetText(fmt.Sprintf("Canvas: %d × %d", size.Width, size.Height))
+	})
+	win.OnPointerButton(func(event ui.PointerButtonEvent) {
+		x, y := win.PointerPosition()
+		windowInput.SetText(fmt.Sprintf("Window input: button %d, action %d at %.0f, %.0f",
+			event.Button, event.Action, x, y))
+	})
+	win.OnScroll(func(event ui.ScrollEvent) {
+		x, y := win.ScrollOffset()
+		windowInput.SetText(fmt.Sprintf("Window input: scroll %.2f, %.2f; total %.2f, %.2f",
+			event.X, event.Y, x, y))
+	})
+	canvas.OnPointerButton(func(event ui.PointerButtonEvent) {
+		x, y := canvas.PointerPosition()
+		canvasInput.SetText(fmt.Sprintf("Canvas input: button %d, action %d at %.0f, %.0f",
+			event.Button, event.Action, x, y))
+	})
+	canvas.OnScroll(func(event ui.ScrollEvent) {
+		x, y := canvas.ScrollOffset()
+		canvasInput.SetText(fmt.Sprintf("Canvas input: scroll %.2f, %.2f; total %.2f, %.2f",
+			event.X, event.Y, x, y))
 	})
 	return page, nil
 }

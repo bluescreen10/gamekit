@@ -24,10 +24,35 @@ func (theme Theme) Validate() error {
 	return nil
 }
 
-// WindowOptions describes a top-level native window. Size must be valid.
+// WindowKind describes a window's role in the application.
+type WindowKind uint8
+
+const (
+	// WindowNormal is an independent application window.
+	WindowNormal WindowKind = iota
+	// WindowUtility is an owned tool window that stays above its owner and does
+	// not appear as a separate application window.
+	WindowUtility
+)
+
+// Validate checks that the window kind is recognized.
+func (kind WindowKind) Validate() error {
+	if kind > WindowUtility {
+		return errors.New("ui: invalid window kind")
+	}
+	return nil
+}
+
+// WindowOptions describes a native application or utility window. Size is the
+// content area in logical pixels. Utility windows require an owner.
 type WindowOptions struct {
 	Title string
 	Size  Size
+	Kind  WindowKind
+	Owner Window
+
+	// Position is relative to the owner's content area for utility windows.
+	Position Point
 
 	Resizable              bool
 	Hidden                 bool
@@ -36,6 +61,26 @@ type WindowOptions struct {
 	AlwaysOnTop            bool
 	TransparentFramebuffer bool
 	Theme                  Theme
+}
+
+// Validate checks that the window options describe a usable native window.
+func (options WindowOptions) Validate() error {
+	if !options.Size.IsValid() {
+		return errors.New("ui: window size must be positive")
+	}
+	if err := options.Kind.Validate(); err != nil {
+		return err
+	}
+	if err := options.Theme.Validate(); err != nil {
+		return err
+	}
+	if options.Kind == WindowUtility && options.Owner == nil {
+		return errors.New("ui: utility window requires an owner")
+	}
+	if options.Kind == WindowNormal && options.Owner != nil {
+		return errors.New("ui: normal window cannot have an owner")
+	}
+	return nil
 }
 
 // Backend creates native windows.
@@ -50,20 +95,30 @@ type Drawable interface {
 	FramebufferSize() Size
 }
 
-// Window is a top-level native window and the owner of its controls and dialogs.
-// Close must be safe to call repeatedly. PollEvents and methods that create or
-// display native UI must be called from the platform UI thread. On macOS that
-// is the program's main thread.
+// Window is a native window and the owner of its controls and dialogs. Closing
+// an owner also closes its utility windows. A utility window's native close
+// control hides it and sets ShouldClose; clear that request before showing the
+// window again. Close releases the window and must be safe to call repeatedly.
+// PollEvents and methods that create or display native UI must be called from
+// the platform UI thread. On macOS that is the program's main thread.
 type Window interface {
 	Drawable
 	Input
 
 	Close()
+	Kind() WindowKind
 	Title() string
 	SetTitle(title string)
 	Theme() Theme
 	SetTheme(theme Theme) error
 	Size() Size
+	SetSize(size Size) error
+	Position() Point
+	SetPosition(position Point)
+	IsVisible() bool
+	SetVisible(visible bool)
+	BringToFront()
+	OnMove(handler MoveHandler) Unsubscribe
 
 	ShouldClose() bool
 	SetShouldClose(close bool)
@@ -87,7 +142,6 @@ type Window interface {
 	CreateTabs(options TabsOptions) (Tabs, error)
 	CreateScrollView(options ScrollViewOptions) (ScrollView, error)
 	CreateCanvas() (Canvas, error)
-	CreatePanel(options PanelOptions) (Panel, error)
 	CreateSection(options SectionOptions) (Section, error)
 
 	OpenFile(ctx context.Context, options OpenFileOptions) (string, error)

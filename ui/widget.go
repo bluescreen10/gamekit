@@ -19,7 +19,7 @@ type ValueChangeHandler func(value float64)
 // ResizeHandler receives a drawable's new size in logical pixels.
 type ResizeHandler func(size Size)
 
-// MoveHandler receives a floating panel's new position in logical pixels.
+// MoveHandler receives a window's new position in logical pixels.
 type MoveHandler func(position Point)
 
 // ExpansionChangeHandler receives a section's expanded state after it changes.
@@ -346,48 +346,15 @@ type ScrollView interface {
 
 // Canvas is a native control backed by a GPU-presentable surface. It can be
 // placed beside ordinary controls in the same window. RequestRedraw marks it
-// dirty; TakeRedrawRequest reports and clears that state.
+// dirty; TakeRedrawRequest reports and clears that state. Its pointer input is
+// its own, separate from the window's: see PointerInput.
 type Canvas interface {
 	Widget
 	Drawable
+	PointerInput
 	OnResize(handler ResizeHandler) Unsubscribe
 	RequestRedraw()
 	TakeRedrawRequest() bool
-}
-
-// PanelOptions describes a floating panel layered above a window's content.
-// Size must be valid. A panel is movable unless Fixed is true.
-type PanelOptions struct {
-	Title    string
-	Content  Widget
-	Position Point
-	Size     Size
-	Fixed    bool
-}
-
-// Validate checks that the panel has content and a usable size.
-func (options PanelOptions) Validate() error {
-	if options.Content == nil {
-		return errors.New("ui: panel content is required")
-	}
-	if !options.Size.IsValid() {
-		return errors.New("ui: panel size must be positive")
-	}
-	return nil
-}
-
-// Panel is a native container that floats above a window's content. It is not
-// arranged by the window's root Layout and can be dragged when it is movable.
-type Panel interface {
-	Widget
-	Title() string
-	SetTitle(title string)
-	Content() Widget
-	SetContent(content Widget) error
-	IsMovable() bool
-	SetMovable(movable bool)
-	BringToFront()
-	OnMove(handler MoveHandler) Unsubscribe
 }
 
 // SectionOptions describes a titled, collapsible native container.

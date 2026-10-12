@@ -12,7 +12,24 @@ enum {
     GK_GTK_EVENT_TOGGLE_CHANGE = 5,
     GK_GTK_EVENT_SELECTION_CHANGE = 6,
     GK_GTK_EVENT_TAB_CHANGE = 7,
-    GK_GTK_EVENT_PANEL_MOVE = 8,
+};
+
+enum {
+    GK_GTK_POINTER_RELEASED = 0,
+    GK_GTK_POINTER_PRESSED = 1,
+    GK_GTK_POINTER_BUTTON_LEFT = 0,
+    GK_GTK_POINTER_BUTTON_RIGHT = 1,
+    GK_GTK_POINTER_BUTTON_MIDDLE = 2,
+    GK_GTK_POINTER_BUTTON_COUNT = 8,
+};
+
+enum {
+    GK_GTK_MOD_SHIFT = 1u << 0,
+    GK_GTK_MOD_CONTROL = 1u << 1,
+    GK_GTK_MOD_ALT = 1u << 2,
+    GK_GTK_MOD_SUPER = 1u << 3,
+    GK_GTK_MOD_CAPS_LOCK = 1u << 4,
+    GK_GTK_MOD_NUM_LOCK = 1u << 5,
 };
 
 enum {
@@ -34,11 +51,9 @@ enum {
     GK_GTK_WIDGET_LINK = 16,
     GK_GTK_WIDGET_TABS = 17,
     GK_GTK_WIDGET_SCROLL_VIEW = 18,
-    GK_GTK_WIDGET_PANEL = 19,
 };
 
-void *gkGTKWindowCreate(const char *title, int width, int height,
-                        uint32_t flags, int theme, uintptr_t handle,
+void *gkGTKWindowCreate(const char *title, int width, int height, uint32_t flags, int theme, void *owner, int x, int y,
                         char *error, size_t error_size);
 void gkGTKWindowDestroy(void *window);
 void gkGTKWindowPoll(void *window);
@@ -46,8 +61,16 @@ int gkGTKWindowShouldClose(void *window);
 void gkGTKWindowSetShouldClose(void *window, int close);
 void gkGTKWindowSize(void *window, int *width, int *height);
 void gkGTKWindowFramebufferSize(void *window, int *width, int *height);
+void gkGTKWindowSetSize(void *window, int width, int height);
+void gkGTKWindowPosition(void *window, int *x, int *y);
+void gkGTKWindowSetPosition(void *window, int x, int y);
+int gkGTKWindowVisible(void *window);
+void gkGTKWindowSetVisible(void *window, int visible);
+void gkGTKWindowBringToFront(void *window);
+void gkGTKWindowSetHandle(void *window, uintptr_t handle);
 void gkGTKWindowSetTitle(void *window, const char *title);
 void gkGTKWindowSetTheme(void *window, int theme);
+void gkGTKWindowPointerPosition(void *window, double *x, double *y);
 uintptr_t gkGTKWindowXID(void *window);
 uintptr_t gkGTKWindowXDisplay(void *window);
 void gkGTKWindowSetContent(void *window, void *widget);
@@ -56,22 +79,19 @@ void *gkGTKCreateLayout(void);
 void *gkGTKCreateLabel(const char *text);
 void *gkGTKCreateButton(const char *text, uintptr_t handle);
 void *gkGTKCreateTextField(uintptr_t handle);
-void *gkGTKCreateTextArea(const char *text, const char *placeholder,
-                          int read_only, int wrap, uintptr_t handle);
+void *gkGTKCreateTextArea(const char *text, const char *placeholder, int read_only, int wrap, uintptr_t handle);
 void *gkGTKCreateCheckBox(const char *text, int checked, uintptr_t handle);
 void *gkGTKCreateRadioGroup(uintptr_t handle);
 void *gkGTKCreateSelect(uintptr_t handle);
 void gkGTKSelectionAddItem(void *widget, const char *text);
 int gkGTKSelectionIndex(void *widget);
 void gkGTKSelectionSetIndex(void *widget, int index);
-void *gkGTKCreateSlider(double minimum, double maximum, double value,
-                        double step, uintptr_t handle);
+void *gkGTKCreateSlider(double minimum, double maximum, double value, double step, uintptr_t handle);
 void *gkGTKCreateProgressBar(double value);
 void *gkGTKCreateActivityIndicator(int running);
 void *gkGTKCreateSeparator(int direction);
 void *gkGTKCreateImage(int scaling);
-void gkGTKImageSet(void *widget, const unsigned char *pixels,
-                   int width, int height, int stride);
+void gkGTKImageSet(void *widget, const unsigned char *pixels, int width, int height, int stride);
 void gkGTKImageSetScaling(void *widget, int scaling);
 void *gkGTKCreateLink(const char *text, const char *url, uintptr_t handle);
 char *gkGTKLinkURL(void *widget);
@@ -86,10 +106,8 @@ void gkGTKScrollViewportSize(void *scroll, int *width, int *height);
 void gkGTKScrollSetContentSize(void *scroll, int width, int height);
 void gkGTKScrollOffset(void *scroll, int *x, int *y);
 void gkGTKScrollSetOffset(void *scroll, int x, int y);
-void *gkGTKCreateCanvas(void);
+void *gkGTKCreateCanvas(uintptr_t handle);
 void *gkGTKCreateSection(const char *title, int expanded, uintptr_t handle);
-void *gkGTKCreatePanel(void *window, const char *title, int movable,
-                       int x, int y, int width, int height, uintptr_t handle);
 
 void gkGTKWidgetDestroy(void *widget);
 void gkGTKWidgetSetParent(void *widget, void *parent);
@@ -116,21 +134,20 @@ void gkGTKActivitySetRunning(void *widget, int running);
 uintptr_t gkGTKCanvasXID(void *widget);
 void gkGTKCanvasFramebufferSize(void *widget, int *width, int *height);
 void gkGTKCanvasQueueDraw(void *widget);
+void gkGTKCanvasPointerPosition(void *widget, double *x, double *y);
 int gkGTKSectionExpanded(void *widget);
 void gkGTKSectionSetExpanded(void *widget, int expanded);
-void gkGTKPanelSetMovable(void *widget, int movable);
-void gkGTKPanelPosition(void *widget, int *x, int *y);
-void gkGTKPanelBringToFront(void *widget);
 
-char *gkGTKOpenDialog(void *window, const char *title,
-                      const char *directory, const char *filename,
-                      const char *extensions, int multiple, int directories,
-                      size_t *result_size, int *cancelled);
-char *gkGTKSaveDialog(void *window, const char *title,
-                      const char *directory, const char *filename,
-                      const char *extensions, int confirm_overwrite,
-                      size_t *result_size, int *cancelled);
+char *gkGTKOpenDialog(void *window, const char *title, const char *directory, const char *filename,
+                      const char *extensions, int multiple, int directories, size_t *result_size, int *cancelled);
+char *gkGTKSaveDialog(void *window, const char *title, const char *directory, const char *filename,
+                      const char *extensions, int confirm_overwrite, size_t *result_size, int *cancelled);
 
 extern void gkGTKGoWidgetEvent(uintptr_t handle, int event);
+extern void gkGTKGoWindowMove(uintptr_t handle, int x, int y);
+extern void gkGTKGoWindowPointerButton(uintptr_t handle, int button, int action, int mods);
+extern void gkGTKGoWindowScroll(uintptr_t handle, double x, double y);
+extern void gkGTKGoCanvasPointerButton(uintptr_t handle, int button, int action, int mods);
+extern void gkGTKGoCanvasScroll(uintptr_t handle, double x, double y);
 
 #endif

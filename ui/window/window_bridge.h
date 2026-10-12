@@ -11,6 +11,7 @@ enum {
     GK_WINDOW_MAXIMIZED = 1u << 3,
     GK_WINDOW_ALWAYS_ON_TOP = 1u << 4,
     GK_WINDOW_TRANSPARENT = 1u << 5,
+    GK_WINDOW_UTILITY = 1u << 6,
 };
 
 enum {
@@ -47,14 +48,20 @@ enum {
     GK_CURSOR_DISABLED = 2,
 };
 
-void *gkWindowCreate(const char *title, int width, int height, uint32_t flags,
-                     char *error, size_t errorSize);
+void *gkWindowCreate(const char *title, int width, int height, uint32_t flags, void *owner, int x, int y, char *error,
+                     size_t errorSize);
 void gkWindowDestroy(void *window);
 void gkWindowPoll(void *window);
 int gkWindowShouldClose(void *window);
 void gkWindowSetShouldClose(void *window, int close);
 void gkWindowSize(void *window, int *width, int *height);
 void gkWindowFramebufferSize(void *window, int *width, int *height);
+void gkWindowSetSize(void *window, int width, int height);
+void gkWindowPosition(void *window, int *x, int *y);
+void gkWindowSetPosition(void *window, int x, int y);
+int gkWindowVisible(void *window);
+void gkWindowSetVisible(void *window, int visible);
+void gkWindowBringToFront(void *window);
 void gkWindowSetTitle(void *window, const char *title);
 void gkWindowSetTheme(void *window, int theme);
 uintptr_t gkWindowNativeHandle(void *window);
@@ -89,5 +96,6 @@ extern void gkGoKeyEvent(uintptr_t handle, int key, int scancode, int action, in
 extern void gkGoCharEvent(uintptr_t handle, unsigned int codepoint);
 extern void gkGoScrollEvent(uintptr_t handle, double x, double y);
 extern void gkGoPointerButtonEvent(uintptr_t handle, int button, int action, int mods);
+extern void gkGoWindowMove(uintptr_t handle, int x, int y);
 
 #endif

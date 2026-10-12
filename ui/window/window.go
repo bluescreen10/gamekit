@@ -13,6 +13,9 @@ import (
 // WindowOptions controls optional native-window behavior. Its zero value creates
 // a visible, fixed-size, decorated window, like SDL_CreateWindow without flags.
 type WindowOptions struct {
+	Kind                   ui.WindowKind
+	Owner                  *Window
+	Position               ui.Point
 	Resizable              bool
 	Hidden                 bool
 	Borderless             bool
@@ -29,6 +32,9 @@ type Window struct {
 	mu        sync.RWMutex
 	native    unsafe.Pointer
 	title     string
+	kind      ui.WindowKind
+	owner     *Window
+	children  map[*Window]struct{}
 	destroyed bool
 
 	// handle identifies this window to the C layer, which cannot hold a Go pointer.
@@ -47,7 +53,6 @@ type Window struct {
 	buttons [pointer.ButtonCount]pointer.ButtonAction
 
 	content ui.Widget
-	panels  []ui.Panel
 	theme   ui.Theme
 
 	handlersMu sync.RWMutex
@@ -57,6 +62,7 @@ type Window struct {
 	textHandlers          map[uint64]ui.TextHandler
 	pointerButtonHandlers map[uint64]ui.PointerButtonHandler
 	scrollHandlers        map[uint64]ui.ScrollHandler
+	moveHandlers          map[uint64]ui.MoveHandler
 }
 
 var (
@@ -77,14 +83,42 @@ func CreateWindow(title string, width, height int, opts *WindowOptions) (*Window
 	if err := options.Theme.Validate(); err != nil {
 		return nil, err
 	}
-	native, err := createNativeWindow(title, width, height, options)
+	if err := options.Kind.Validate(); err != nil {
+		return nil, err
+	}
+	if options.Kind == ui.WindowUtility && options.Owner == nil {
+		return nil, errors.New("ui/window: utility window requires an owner")
+	}
+	if options.Kind == ui.WindowNormal && options.Owner != nil {
+		return nil, errors.New("ui/window: normal window cannot have an owner")
+	}
+	var ownerNative unsafe.Pointer
+	if options.Owner != nil {
+		ownerNative = options.Owner.nativePointer()
+		if ownerNative == nil {
+			return nil, ui.ErrClosed
+		}
+	}
+	native, err := createNativeWindow(title, width, height, options, ownerNative)
 	if err != nil {
 		return nil, err
 	}
-	w := &Window{native: native, title: title, theme: options.Theme}
+	w := &Window{
+		native:   native,
+		title:    title,
+		kind:     options.Kind,
+		owner:    options.Owner,
+		children: make(map[*Window]struct{}),
+		theme:    options.Theme,
+	}
 	windowsMu.Lock()
 	windows[w] = struct{}{}
 	windowsMu.Unlock()
+	if w.owner != nil {
+		w.owner.mu.Lock()
+		w.owner.children[w] = struct{}{}
+		w.owner.mu.Unlock()
+	}
 	// Give the C layer a way to name this window when it dispatches an event.
 	w.handle = newWindowHandle(w)
 	setNativeWindowHandle(native, w.handle)
@@ -98,14 +132,6 @@ func (w *Window) Destroy() {
 	if w == nil {
 		return
 	}
-	if w.content != nil {
-		w.content.Close()
-		w.content = nil
-	}
-	for _, panel := range w.panels {
-		panel.Close()
-	}
-	w.panels = nil
 	w.mu.Lock()
 	if w.destroyed {
 		w.mu.Unlock()
@@ -113,10 +139,31 @@ func (w *Window) Destroy() {
 	}
 	native := w.native
 	handle := w.handle
+	content := w.content
+	children := make([]*Window, 0, len(w.children))
+	for child := range w.children {
+		children = append(children, child)
+	}
+	owner := w.owner
 	w.native = nil
 	w.handle = 0
+	w.content = nil
+	w.children = nil
+	w.owner = nil
 	w.destroyed = true
 	w.mu.Unlock()
+
+	if content != nil {
+		content.Close()
+	}
+	for _, child := range children {
+		child.Close()
+	}
+	if owner != nil {
+		owner.mu.Lock()
+		delete(owner.children, w)
+		owner.mu.Unlock()
+	}
 
 	windowsMu.Lock()
 	delete(windows, w)
@@ -200,6 +247,107 @@ func (w *Window) Size() ui.Size {
 func (w *Window) FramebufferSize() ui.Size {
 	width, height := w.GetFramebufferSize()
 	return ui.Size{Width: width, Height: height}
+}
+
+// Kind reports the window's application role.
+func (w *Window) Kind() ui.WindowKind {
+	if w == nil {
+		return ui.WindowNormal
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.kind
+}
+
+// SetSize changes the client-area size in logical pixels.
+func (w *Window) SetSize(size ui.Size) error {
+	if !size.IsValid() {
+		return errors.New("ui/window: window size must be positive")
+	}
+	native := w.nativePointer()
+	if native == nil {
+		return ui.ErrClosed
+	}
+	setNativeWindowSize(native, size.Width, size.Height)
+	return nil
+}
+
+// Position reports the window's top-left position. A utility window's position
+// is relative to its owner's content area.
+func (w *Window) Position() ui.Point {
+	native := w.nativePointer()
+	if native == nil {
+		return ui.Point{}
+	}
+	x, y := nativeWindowPosition(native)
+	return ui.Point{X: x, Y: y}
+}
+
+// SetPosition moves the window. Utility-window coordinates are relative to the
+// owner's content area.
+func (w *Window) SetPosition(position ui.Point) {
+	native := w.nativePointer()
+	if native == nil {
+		return
+	}
+	setNativeWindowPosition(native, position.X, position.Y)
+}
+
+// IsVisible reports whether the native window is currently shown.
+func (w *Window) IsVisible() bool {
+	native := w.nativePointer()
+	return native != nil && nativeWindowVisible(native)
+}
+
+// SetVisible shows or hides the native window.
+func (w *Window) SetVisible(visible bool) {
+	native := w.nativePointer()
+	if native == nil {
+		return
+	}
+	setNativeWindowVisible(native, visible)
+}
+
+// BringToFront raises a visible window above other windows.
+func (w *Window) BringToFront() {
+	if native := w.nativePointer(); native != nil {
+		bringNativeWindowToFront(native)
+	}
+}
+
+// OnMove registers a handler for user-initiated window movement.
+func (w *Window) OnMove(handler ui.MoveHandler) ui.Unsubscribe {
+	if w == nil || handler == nil {
+		return noOpUnsubscribe
+	}
+	w.handlersMu.Lock()
+	if w.moveHandlers == nil {
+		w.moveHandlers = make(map[uint64]ui.MoveHandler)
+	}
+	id := w.nextHandlerID()
+	w.moveHandlers[id] = handler
+	w.handlersMu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			w.handlersMu.Lock()
+			delete(w.moveHandlers, id)
+			w.handlersMu.Unlock()
+		})
+	}
+}
+
+func (w *Window) dispatchMove(position ui.Point) {
+	w.handlersMu.RLock()
+	handlers := make([]ui.MoveHandler, 0, len(w.moveHandlers))
+	for _, handler := range w.moveHandlers {
+		handlers = append(handlers, handler)
+	}
+	w.handlersMu.RUnlock()
+	for _, handler := range handlers {
+		handler(position)
+	}
 }
 
 // SetTitle changes the native window title.

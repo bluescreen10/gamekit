@@ -12,6 +12,7 @@ import (
 
 	"github.com/bluescreen10/gamekit/keyboard"
 	"github.com/bluescreen10/gamekit/pointer"
+	"github.com/bluescreen10/gamekit/ui"
 )
 
 // Event callbacks, in the GLFW shape: register one per window, and it is invoked from
@@ -159,6 +160,14 @@ func gkGoPointerButtonEvent(h C.uintptr_t, button, action, mods C.int) {
 		return
 	}
 	w.dispatchPointerButton(pointer.Button(button), pointer.ButtonAction(action), keyboard.ModifierKey(mods))
+}
+
+//export gkGoWindowMove
+func gkGoWindowMove(h C.uintptr_t, x, y C.int) {
+	w := windowFromHandle(h)
+	if w != nil {
+		w.dispatchMove(ui.Point{X: int(x), Y: int(y)})
+	}
 }
 
 // newWindowHandle allocates the cgo.Handle naming w to the C layer, and

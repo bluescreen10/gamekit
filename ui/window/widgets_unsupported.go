@@ -83,11 +83,6 @@ func (w *Window) CreateCanvas() (ui.Canvas, error) {
 	return nil, ui.ErrNotSupported
 }
 
-// CreatePanel creates a floating native panel owned by the window.
-func (w *Window) CreatePanel(options ui.PanelOptions) (ui.Panel, error) {
-	return nil, ui.ErrNotSupported
-}
-
 // CreateSection creates a collapsible native section owned by the window.
 func (w *Window) CreateSection(options ui.SectionOptions) (ui.Section, error) {
 	return nil, ui.ErrNotSupported

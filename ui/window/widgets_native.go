@@ -112,14 +112,6 @@ func (w *widgetBase) SetBounds(bounds ui.Rect) {
 	)
 }
 
-func (w *widgetBase) setPositionFromNative(position ui.Point) {
-	w.mu.Lock()
-	if !w.closed {
-		w.bounds.Position = position
-	}
-	w.mu.Unlock()
-}
-
 func (w *widgetBase) PreferredSize() ui.Size {
 	native := w.nativePointer()
 	if native == nil {
@@ -336,9 +328,6 @@ func (l *layout) validateChildren(spec ui.LayoutSpec) ([]nativeWidget, error) {
 	seen := make(map[*widgetBase]struct{}, len(children))
 	for _, child := range children {
 		base := child.base()
-		if _, floating := child.(*panel); floating {
-			return nil, errors.New("ui/window: floating panel cannot be a layout child")
-		}
 		if base.window != l.window {
 			return nil, errors.New("ui/window: layout child belongs to another window")
 		}
@@ -947,8 +936,29 @@ func (s *slider) nativeEvent(event int) {
 
 type canvas struct {
 	*widgetBase
+	canvasPointer
 	resizes listeners[ui.ResizeHandler]
 	redraw  atomic.Bool
+}
+
+func (c *canvas) Close() {
+	if c == nil {
+		return
+	}
+	c.Reset()
+	c.widgetBase.Close()
+}
+
+// PointerPosition returns the pointer in logical pixels from the canvas's top-left
+// corner. It is outside the canvas's bounds when the pointer is.
+func (c *canvas) PointerPosition() (x, y float64) {
+	native := c.nativePointer()
+	if native == nil {
+		return 0, 0
+	}
+	var nativeX, nativeY C.double
+	C.gkUICanvasPointerPosition(native, &nativeX, &nativeY)
+	return float64(nativeX), float64(nativeY)
 }
 
 func (c *canvas) SetBounds(bounds ui.Rect) {
@@ -1002,150 +1012,7 @@ func (c *canvas) TakeRedrawRequest() bool {
 	return c.redraw.Swap(false)
 }
 
-const (
-	panelHeaderHeight   = 32
-	sectionHeaderHeight = 28
-)
-
-type panel struct {
-	*widgetBase
-
-	stateMu sync.RWMutex
-	content nativeWidget
-	movable bool
-	moves   listeners[ui.MoveHandler]
-}
-
-func (p *panel) Close() {
-	if p == nil {
-		return
-	}
-	p.stateMu.Lock()
-	content := p.content
-	p.content = nil
-	p.stateMu.Unlock()
-	if content != nil {
-		content.Close()
-	}
-	p.widgetBase.Close()
-}
-
-func (p *panel) SetBounds(bounds ui.Rect) {
-	p.widgetBase.SetBounds(bounds)
-	p.layoutContent()
-}
-
-func (p *panel) PreferredSize() ui.Size {
-	p.stateMu.RLock()
-	content := p.content
-	p.stateMu.RUnlock()
-	if content == nil {
-		return ui.Size{Width: 240, Height: 160}
-	}
-	size := content.PreferredSize()
-	size.Width = max(240, size.Width+24)
-	size.Height = max(160, size.Height+panelHeaderHeight+12)
-	return size
-}
-
-func (p *panel) Title() string {
-	return nativeText(p.nativePointer())
-}
-
-func (p *panel) SetTitle(title string) {
-	setNativeText(p.nativePointer(), title)
-}
-
-func (p *panel) Content() ui.Widget {
-	p.stateMu.RLock()
-	defer p.stateMu.RUnlock()
-	if p.content == nil {
-		return nil
-	}
-	return p.content
-}
-
-func (p *panel) SetContent(content ui.Widget) error {
-	child, err := validateContainerChild(p, content)
-	if err != nil {
-		return err
-	}
-
-	p.stateMu.Lock()
-	previous := p.content
-	if previous != nil && previous.base() != child.base() {
-		previous.base().parent = nil
-		C.gkUIAttachToWindow(p.window.nativeWindowHandle(), previous.base().nativePointer())
-		previous.SetVisible(false)
-	}
-	p.content = child
-	p.stateMu.Unlock()
-
-	child.base().parent = p
-	C.gkUISetParent(child.base().nativePointer(), p.nativePointer())
-	child.SetVisible(true)
-	p.layoutContent()
-	return nil
-}
-
-func (p *panel) IsMovable() bool {
-	p.stateMu.RLock()
-	defer p.stateMu.RUnlock()
-	return p.movable
-}
-
-func (p *panel) SetMovable(movable bool) {
-	p.stateMu.Lock()
-	p.movable = movable
-	p.stateMu.Unlock()
-	if native := p.nativePointer(); native != nil {
-		C.gkUIPanelSetMovable(native, boolInt(movable))
-	}
-}
-
-func (p *panel) BringToFront() {
-	if native := p.nativePointer(); native != nil {
-		C.gkUIBringToFront(native)
-	}
-}
-
-func (p *panel) OnMove(handler ui.MoveHandler) ui.Unsubscribe {
-	if handler == nil {
-		return noOpUnsubscribe
-	}
-	return p.moves.add(handler)
-}
-
-func (p *panel) nativeEvent(event int) {
-	if event != int(C.GK_UI_EVENT_PANEL_MOVE) {
-		return
-	}
-	native := p.nativePointer()
-	if native == nil {
-		return
-	}
-	var x, y C.int
-	C.gkUIPanelPosition(native, &x, &y)
-	position := ui.Point{X: int(x), Y: int(y)}
-	p.setPositionFromNative(position)
-	for _, handler := range p.moves.snapshot() {
-		handler(position)
-	}
-}
-
-func (p *panel) layoutContent() {
-	p.stateMu.RLock()
-	content := p.content
-	p.stateMu.RUnlock()
-	if content == nil {
-		return
-	}
-	size := p.Bounds().Size
-	content.SetBounds(ui.Rect{Size: ui.Size{
-		Width:  max(0, size.Width-24),
-		Height: max(0, size.Height-panelHeaderHeight-12),
-	}})
-}
+const sectionHeaderHeight = 28
 
 type section struct {
 	*widgetBase
@@ -1280,9 +1147,6 @@ func validateContainerChild(container nativeWidget, content ui.Widget) (nativeWi
 	if !ok {
 		return nil, errors.New("ui/window: container content belongs to another backend")
 	}
-	if _, floating := child.(*panel); floating {
-		return nil, errors.New("ui/window: a floating panel cannot be container content")
-	}
 	base := child.base()
 	owner := container.base()
 	if base.window != owner.window {
@@ -1326,9 +1190,6 @@ func (w *Window) SetContent(content ui.Widget) error {
 	if widget.base().parent != nil {
 		return errors.New("ui/window: content already belongs to a layout")
 	}
-	if _, floating := widget.(*panel); floating {
-		return errors.New("ui/window: floating panel cannot be window content")
-	}
 	if w.content != nil && w.content != content {
 		w.content.SetVisible(false)
 	}
@@ -1337,9 +1198,6 @@ func (w *Window) SetContent(content ui.Widget) error {
 	w.content = content
 	content.SetVisible(true)
 	content.SetBounds(ui.Rect{Size: w.Size()})
-	for _, floating := range w.panels {
-		floating.BringToFront()
-	}
 	return nil
 }
 
@@ -1639,44 +1497,18 @@ func (w *Window) CreateScrollView(options ui.ScrollViewOptions) (ui.ScrollView, 
 	return result, nil
 }
 
-// CreateCanvas creates a GPU-presentable native control owned by the window.
+// CreateCanvas creates a GPU-presentable native control owned by the window. Its
+// view reports the pointer events delivered to it through the canvas's handle.
 func (w *Window) CreateCanvas() (ui.Canvas, error) {
-	native := C.gkUICreateCanvas(w.nativeWindowHandle())
-	if native == nil {
-		return nil, errors.New("ui/window: native backend could not create a canvas")
-	}
-	return &canvas{widgetBase: newWidgetBase(w, native)}, nil
-}
-
-// CreatePanel creates a floating native panel owned by the window.
-func (w *Window) CreatePanel(options ui.PanelOptions) (ui.Panel, error) {
-	if err := options.Validate(); err != nil {
-		return nil, err
-	}
-
-	result := &panel{movable: !options.Fixed}
+	result := &canvas{}
 	handle := cgo.NewHandle(result)
-	title := C.CString(options.Title)
-	defer C.free(unsafe.Pointer(title))
-	native := C.gkUICreatePanel(
-		w.nativeWindowHandle(),
-		title,
-		boolInt(!options.Fixed),
-		C.uintptr_t(handle),
-	)
+	native := C.gkUICreateCanvas(w.nativeWindowHandle(), C.uintptr_t(handle))
 	if native == nil {
 		handle.Delete()
-		return nil, errors.New("ui/window: native backend could not create a panel")
+		return nil, errors.New("ui/window: native backend could not create a canvas")
 	}
 	result.widgetBase = newWidgetBase(w, native)
 	result.handle = uintptr(handle)
-	result.SetBounds(ui.Rect{Position: options.Position, Size: options.Size})
-	if err := result.SetContent(options.Content); err != nil {
-		result.Close()
-		return nil, err
-	}
-	w.panels = append(w.panels, result)
-	result.BringToFront()
 	return result, nil
 }
 
@@ -1744,5 +1576,4 @@ var _ ui.Button = (*button)(nil)
 var _ ui.TextField = (*textField)(nil)
 var _ ui.Slider = (*slider)(nil)
 var _ ui.Canvas = (*canvas)(nil)
-var _ ui.Panel = (*panel)(nil)
 var _ ui.Section = (*section)(nil)

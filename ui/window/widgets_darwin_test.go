@@ -18,24 +18,26 @@ import (
 var cocoaWidgets struct {
 	err error
 
-	rootBounds    ui.Rect
-	canvasBounds  ui.Rect
-	sidebarBounds ui.Rect
-	labelText     string
-	buttonText    string
-	placeholder   string
-	sliderValue   float64
-	framebuffer   ui.Size
-	windowTarget  gpu.NativeSurface
-	canvasTarget  gpu.NativeSurface
-	panelTitle    string
-	panelMovable  bool
-	panelBounds   ui.Rect
-	sectionTitle  string
-	sectionOpen   bool
-	expandedSize  ui.Size
-	collapsedSize ui.Size
-	darkTheme     ui.Theme
+	rootBounds      ui.Rect
+	canvasBounds    ui.Rect
+	sidebarBounds   ui.Rect
+	labelText       string
+	buttonText      string
+	placeholder     string
+	sliderValue     float64
+	framebuffer     ui.Size
+	windowTarget    gpu.NativeSurface
+	canvasTarget    gpu.NativeSurface
+	utilityTarget   gpu.NativeSurface
+	utilityTitle    string
+	utilityKind     ui.WindowKind
+	utilityPosition ui.Point
+	utilitySize     ui.Size
+	sectionTitle    string
+	sectionOpen     bool
+	expandedSize    ui.Size
+	collapsedSize   ui.Size
+	darkTheme       ui.Theme
 }
 
 var cocoaWindow ui.Window
@@ -49,7 +51,7 @@ func TestMain(m *testing.M) {
 	})
 	if err == nil {
 		cocoaWindow = win
-		err = buildCocoaWidgetTest(win)
+		err = buildCocoaWidgetTest(backend, win)
 	}
 	cocoaWidgets.err = err
 
@@ -73,7 +75,7 @@ func TestCocoaDialogHonorsCancelledContext(t *testing.T) {
 	}
 }
 
-func buildCocoaWidgetTest(win ui.Window) error {
+func buildCocoaWidgetTest(backend ui.Backend, win ui.Window) error {
 	label, err := win.CreateLabel("Material")
 	if err != nil {
 		return err
@@ -130,15 +132,26 @@ func buildCocoaWidgetTest(win ui.Window) error {
 	cocoaWidgets.windowTarget = win.NativeSurface()
 	cocoaWidgets.canvasTarget = canvas.NativeSurface()
 
-	panelLabel, err := win.CreateLabel("Exposure")
+	utility, err := backend.CreateWindow(ui.WindowOptions{
+		Title:    "Inspector",
+		Size:     ui.Size{Width: 240, Height: 180},
+		Kind:     ui.WindowUtility,
+		Owner:    win,
+		Position: ui.Point{X: 24, Y: 20},
+		Hidden:   true,
+	})
 	if err != nil {
 		return err
 	}
-	sectionContent, err := win.CreateLayout(ui.Column(ui.Item(panelLabel)).WithPadding(ui.UniformInsets(8)))
+	panelLabel, err := utility.CreateLabel("Exposure")
 	if err != nil {
 		return err
 	}
-	section, err := win.CreateSection(ui.SectionOptions{
+	sectionContent, err := utility.CreateLayout(ui.Column(ui.Item(panelLabel)).WithPadding(ui.UniformInsets(8)))
+	if err != nil {
+		return err
+	}
+	section, err := utility.CreateSection(ui.SectionOptions{
 		Title:    "Rendering",
 		Content:  sectionContent,
 		Expanded: true,
@@ -146,23 +159,18 @@ func buildCocoaWidgetTest(win ui.Window) error {
 	if err != nil {
 		return err
 	}
-	panelContent, err := win.CreateLayout(ui.Column(ui.Item(section), ui.Space()))
+	panelContent, err := utility.CreateLayout(ui.Column(ui.Item(section), ui.Space()))
 	if err != nil {
 		return err
 	}
-	panel, err := win.CreatePanel(ui.PanelOptions{
-		Title:    "Inspector",
-		Content:  panelContent,
-		Position: ui.Point{X: 24, Y: 20},
-		Size:     ui.Size{Width: 240, Height: 180},
-	})
-	if err != nil {
+	if err := utility.SetContent(panelContent); err != nil {
 		return err
 	}
-	cocoaWidgets.panelTitle = panel.Title()
-	cocoaWidgets.panelMovable = panel.IsMovable()
-	cocoaWidgets.panelBounds = panel.Bounds()
-	panel.BringToFront()
+	cocoaWidgets.utilityTitle = utility.Title()
+	cocoaWidgets.utilityKind = utility.Kind()
+	cocoaWidgets.utilityPosition = utility.Position()
+	cocoaWidgets.utilitySize = utility.Size()
+	cocoaWidgets.utilityTarget = utility.NativeSurface()
 	cocoaWidgets.sectionTitle = section.Title()
 	cocoaWidgets.sectionOpen = section.IsExpanded()
 	cocoaWidgets.expandedSize = section.PreferredSize()
@@ -305,23 +313,26 @@ func TestCocoaSurfaceTargets(t *testing.T) {
 	if cocoaWidgets.canvasTarget.Kind != gpu.NativeSurfaceCocoaView || cocoaWidgets.canvasTarget.Handle == 0 {
 		t.Errorf("canvas target = %#v, want a valid Cocoa view", cocoaWidgets.canvasTarget)
 	}
+	if cocoaWidgets.utilityTarget.Kind != gpu.NativeSurfaceCocoaWindow || cocoaWidgets.utilityTarget.Handle == 0 {
+		t.Errorf("utility target = %#v, want a valid Cocoa window", cocoaWidgets.utilityTarget)
+	}
 }
 
-func TestCocoaFloatingPanel(t *testing.T) {
+func TestCocoaUtilityWindow(t *testing.T) {
 	if cocoaWidgets.err != nil {
 		t.Fatal(cocoaWidgets.err)
 	}
-	if cocoaWidgets.panelTitle != "Inspector" {
-		t.Errorf("panel title = %q, want Inspector", cocoaWidgets.panelTitle)
+	if cocoaWidgets.utilityTitle != "Inspector" {
+		t.Errorf("utility title = %q, want Inspector", cocoaWidgets.utilityTitle)
 	}
-	if !cocoaWidgets.panelMovable {
-		t.Error("panel is not movable by default")
+	if cocoaWidgets.utilityKind != ui.WindowUtility {
+		t.Errorf("utility kind = %v, want WindowUtility", cocoaWidgets.utilityKind)
 	}
-	if cocoaWidgets.panelBounds != (ui.Rect{
-		Position: ui.Point{X: 24, Y: 20},
-		Size:     ui.Size{Width: 240, Height: 180},
-	}) {
-		t.Errorf("panel bounds = %#v, want position 24,20 and size 240x180", cocoaWidgets.panelBounds)
+	if cocoaWidgets.utilityPosition != (ui.Point{X: 24, Y: 20}) {
+		t.Errorf("utility position = %#v, want 24,20", cocoaWidgets.utilityPosition)
+	}
+	if cocoaWidgets.utilitySize != (ui.Size{Width: 240, Height: 180}) {
+		t.Errorf("utility size = %#v, want 240x180", cocoaWidgets.utilitySize)
 	}
 }
 

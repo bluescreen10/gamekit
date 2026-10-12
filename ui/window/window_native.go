@@ -19,7 +19,7 @@ import (
 	"github.com/bluescreen10/gamekit/ui"
 )
 
-func createNativeWindow(title string, width, height int, hints WindowOptions) (unsafe.Pointer, error) {
+func createNativeWindow(title string, width, height int, hints WindowOptions, owner unsafe.Pointer) (unsafe.Pointer, error) {
 	ctitle := C.CString(title)
 	defer C.free(unsafe.Pointer(ctitle))
 	var flags C.uint32_t
@@ -41,8 +41,12 @@ func createNativeWindow(title string, width, height int, hints WindowOptions) (u
 	if hints.TransparentFramebuffer {
 		flags |= C.GK_WINDOW_TRANSPARENT
 	}
+	if hints.Kind == ui.WindowUtility {
+		flags |= C.GK_WINDOW_UTILITY
+	}
 	var message [1024]C.char
-	native := C.gkWindowCreate(ctitle, C.int(width), C.int(height), flags, &message[0], C.size_t(len(message)))
+	native := C.gkWindowCreate(ctitle, C.int(width), C.int(height), flags, owner,
+		C.int(hints.Position.X), C.int(hints.Position.Y), &message[0], C.size_t(len(message)))
 	if native == nil {
 		detail := C.GoString(&message[0])
 		if detail == "" {
@@ -72,6 +76,30 @@ func nativeWindowFramebufferSize(native unsafe.Pointer) (int, int) {
 	var width, height C.int
 	C.gkWindowFramebufferSize(native, &width, &height)
 	return int(width), int(height)
+}
+func setNativeWindowSize(native unsafe.Pointer, width, height int) {
+	C.gkWindowSetSize(native, C.int(width), C.int(height))
+}
+func nativeWindowPosition(native unsafe.Pointer) (int, int) {
+	var x, y C.int
+	C.gkWindowPosition(native, &x, &y)
+	return int(x), int(y)
+}
+func setNativeWindowPosition(native unsafe.Pointer, x, y int) {
+	C.gkWindowSetPosition(native, C.int(x), C.int(y))
+}
+func nativeWindowVisible(native unsafe.Pointer) bool {
+	return C.gkWindowVisible(native) != 0
+}
+func setNativeWindowVisible(native unsafe.Pointer, visible bool) {
+	value := C.int(0)
+	if visible {
+		value = 1
+	}
+	C.gkWindowSetVisible(native, value)
+}
+func bringNativeWindowToFront(native unsafe.Pointer) {
+	C.gkWindowBringToFront(native)
 }
 func setNativeWindowTitle(native unsafe.Pointer, title string) {
 	ctitle := C.CString(title)
