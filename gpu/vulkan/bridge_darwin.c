@@ -1,4 +1,4 @@
-//go:build darwin && cgo
+//go:build darwin && cgo && gamekit_vulkan
 
 #define VK_USE_PLATFORM_METAL_EXT
 #include "bridge.h"

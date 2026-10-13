@@ -1,6 +1,7 @@
 package gpu_test
 
 import (
+	"bytes"
 	"testing"
 	"unsafe"
 
@@ -8,7 +9,7 @@ import (
 )
 
 // TestBufferWriteCopiesAtOffset covers the ordinary path: bytes land at the given
-// offset in the mapped memory, leaving what came before untouched.
+// offset in the mapped memory, leaving the rest untouched.
 func TestBufferWriteCopiesAtOffset(t *testing.T) {
 	if !gpu.HasBackend() {
 		t.Skip("no gpu backend registered")
@@ -21,11 +22,16 @@ func TestBufferWriteCopiesAtOffset(t *testing.T) {
 	buf := b.Alloc(8, gpu.MemoryHost, "write-test")
 	defer b.Free(buf)
 
+	// Alloc does not zero memory: on lavapipe a fresh buffer held 52 in its last
+	// byte. Fill it first so the bytes no Write touches have a known value.
+	untouched := byte(0xEE)
+	buf.Write(bytes.Repeat([]byte{untouched}, 8), 0)
+
 	buf.Write([]byte{1, 2, 3, 4}, 0)
 	buf.Write([]byte{5, 6}, 4)
 
 	got := unsafe.Slice((*byte)(buf.Ptr), buf.Size)
-	want := []byte{1, 2, 3, 4, 5, 6, 0, 0}
+	want := []byte{1, 2, 3, 4, 5, 6, untouched, untouched}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("buffer = %v, want %v", got, want)

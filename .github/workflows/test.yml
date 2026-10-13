@@ -69,9 +69,10 @@ jobs:
           go vet ./...
 
       # xvfb supplies the X display the window and input code needs; without it every
-      # X11 path fails at XOpenDisplay rather than being tested.
+      # X11 path fails at XOpenDisplay rather than being tested. No -v: only failures
+      # print, so a red run shows why without scrolling past every passing test.
       - name: Test
-        run: xvfb-run -a go test ./... -count=1 -v
+        run: xvfb-run -a go test ./... -count=1
 
   macos:
     name: macOS
@@ -82,9 +83,9 @@ jobs:
     timeout-minutes: 25
     env:
       CGO_ENABLED: "1"
-      # Vulkan-on-Metal through KosmicKrisp, which is the combination this engine
-      # actually ships on. Switch to "metal" if the driver proves unstable on runners.
-      GAMEKIT_GPU_BACKEND: vulkan
+      # Metal is the default backend on macOS. Named explicitly so a device that fails
+      # to initialise fails the run instead of skipping every GPU test.
+      GAMEKIT_GPU_BACKEND: metal
       # Pinned rather than "latest" so a CI failure is always reproducible, and so this
       # matches the SDK used in development.
       VULKAN_SDK_VERSION: 1.4.357.1
@@ -99,12 +100,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # KosmicKrisp is Mesa's Vulkan-on-Metal driver and ships only inside the LunarG
-      # SDK, as the com.lunarg.vulkan.kosmic component. com.lunarg.vulkan.usr is what
-      # copies headers, the loader and the ICD manifests into /usr/local — which is
-      # exactly where gpu/vulkan's #cgo darwin flags already look, so nothing here has
-      # to override them.
-      - name: Install the Vulkan SDK with KosmicKrisp
+      # gpu/vulkan is opt-in on macOS (-tags gamekit_vulkan). The SDK is installed only
+      # to compile it: KosmicKrisp finds no usable GPU on the hosted runners' virtual
+      # machines ("Failed to detect any valid GPUs"), so its tests run on a real Mac.
+      # com.lunarg.vulkan.usr copies headers and the loader into /usr/local, which is
+      # where gpu/vulkan's #cgo darwin flags look.
+      - name: Install the Vulkan SDK
         run: |
           ver="$VULKAN_SDK_VERSION"
           curl -sSfL -o vulkansdk.zip \
@@ -117,24 +118,12 @@ jobs:
           sudo "$installer" \
             --root "$HOME/VulkanSDK/${ver}" \
             --accept-licenses --default-answer --confirm-command \
-            install com.lunarg.vulkan.core com.lunarg.vulkan.usr com.lunarg.vulkan.kosmic
-
-      - name: Select KosmicKrisp
-        run: |
-          icd=/usr/local/share/vulkan/icd.d/libkosmickrisp_icd.json
-          test -f "$icd" || { echo "KosmicKrisp ICD missing — did com.lunarg.vulkan.kosmic install?"; exit 1; }
-          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
-          echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
-
-      # Fail here, with a readable device list, rather than inside an opaque test error
-      # if the driver did not load.
-      - name: Verify KosmicKrisp is the active driver
-        run: |
-          vulkaninfo --summary | sed -n '/^Devices:/,$p' | head -20
-          vulkaninfo --summary | grep -q "KosmicKrisp" || { echo "KosmicKrisp is not the active driver"; exit 1; }
+            install com.lunarg.vulkan.core com.lunarg.vulkan.usr
 
       - name: Build
-        run: go build ./...
+        run: |
+          go build ./...
+          go build -tags gamekit_vulkan ./...
 
       # unsafeptr is off here, and only here. surface_darwin.go and gpu/vulkan's
       # metal_darwin.go convert a uintptr back to an unsafe.Pointer to hand Cocoa and
@@ -143,12 +132,14 @@ jobs:
       # heuristic cannot tell them from laundering a real Go pointer. Every other check
       # still runs, and no other platform compiles these files.
       - name: Vet
-        run: go vet -unsafeptr=false ./...
+        run: |
+          go vet -unsafeptr=false ./...
+          go vet -unsafeptr=false -tags gamekit_vulkan ./...
 
       # Cocoa needs a WindowServer connection to create a window at all, which the
       # hosted macOS runners have.
       - name: Test
-        run: go test ./... -count=1 -v
+        run: go test ./... -count=1
 
   windows:
     name: Windows
@@ -224,4 +215,4 @@ jobs:
       # registers and the gpu tests skip themselves. What this job covers is compilation
       # of the Win32 window, input and Vulkan-surface code, which no other job compiles.
       - name: Test
-        run: go test ./... -count=1 -v
+        run: go test ./... -count=1

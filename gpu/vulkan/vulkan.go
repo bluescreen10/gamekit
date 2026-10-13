@@ -1,6 +1,5 @@
-// Package vulkan is the Vulkan 1.3 backend for gamekit's gpu package. It uses thin, targeted
-// cgo bindings (not a full Vulkan binding) — only the entry points the bindless,
-// GPU-driven gpu needs. On macOS it runs on the KosmicKrisp ICD.
+//go:build !darwin || gamekit_vulkan
+
 package vulkan
 
 /*

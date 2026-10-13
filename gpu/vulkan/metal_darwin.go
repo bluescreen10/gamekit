@@ -1,4 +1,4 @@
-//go:build darwin && cgo
+//go:build darwin && cgo && gamekit_vulkan
 
 package vulkan
 

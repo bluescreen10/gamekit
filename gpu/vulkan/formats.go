@@ -1,3 +1,5 @@
+//go:build !darwin || gamekit_vulkan
+
 package vulkan
 
 // #include "bridge.h"
