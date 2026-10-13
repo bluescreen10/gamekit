@@ -47,13 +47,13 @@ locale = "en-US"
 [[menu.main]]
   name = "latest"
   parent = "version"
-  url = "https://bluescreen10.github.io/gamekit/latest/"
+  url = "https://game-kit.dev/latest/"
   weight = 1
 
 [[menu.main]]
   name = "dev"
   parent = "version"
-  url = "https://bluescreen10.github.io/gamekit/dev/"
+  url = "https://game-kit.dev/dev/"
   weight = 2
 
 [[menu.main]]
