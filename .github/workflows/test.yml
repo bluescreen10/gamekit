@@ -10,7 +10,10 @@ permissions:
 jobs:
   linux:
     name: Linux
-    runs-on: ubuntu-24.04
+    # gpu/vulkan requires VK_KHR_unified_image_layouts: its headers arrived in Vulkan
+    # 1.4.317 and lavapipe supports it from Mesa 25.3. Ubuntu 24.04 has neither, so the
+    # bridge fails to compile there; 26.04 ships Mesa 26.0 and Vulkan 1.4.341.
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     env:
       CGO_ENABLED: "1"
