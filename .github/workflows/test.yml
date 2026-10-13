@@ -82,10 +82,11 @@ jobs:
     timeout-minutes: 15
     env:
       CGO_ENABLED: "1"
-      # Metal is the only backend on macOS (gpu/vulkan is opt-in there, behind
-      # -tags gamekit_vulkan, and not built here). Named explicitly so a device that
-      # fails to initialise fails the run instead of skipping every GPU test.
-      GAMEKIT_GPU_BACKEND: metal
+      # GAMEKIT_GPU_BACKEND is deliberately unset. The runner is a virtual machine whose
+      # paravirtualized GPU has no Metal 4, so the Metal backend's Init fails ("requires
+      # a Metal 4 GPU"); unset, the GPU tests skip instead of failing, and everything
+      # else — windows, input, the backend's Go side — is still tested. GPU tests run
+      # on a real Mac. (gpu/vulkan is opt-in on macOS and not built here.)
 
     steps:
       - name: Check out repository
@@ -102,6 +103,10 @@ jobs:
 
       - name: Vet
         run: go vet ./...
+
+      # Shows which GPU the runner has, so a skipped GPU suite has a visible reason.
+      - name: Show GPU
+        run: system_profiler SPDisplaysDataType
 
       # Cocoa needs a WindowServer connection to create a window at all, which the
       # hosted macOS runners have.

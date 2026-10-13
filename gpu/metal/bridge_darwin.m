@@ -791,6 +791,9 @@ MBResult mbInit(void *backend) {
         require(b.device != nil, @"no Metal device");
         require(b.device.argumentBuffersSupport == MTLArgumentBuffersTier2 && b.device.hasUnifiedMemory,
                 @"requires a unified-memory GPU with Tier 2 argument buffers");
+        // The paravirtualized GPU of a macOS virtual machine (GitHub's hosted runners)
+        // passes the checks above but has no Metal 4: newMTL4CommandQueue returns nil.
+        require([b.device supportsFamily:MTLGPUFamilyMetal4], @"requires a Metal 4 GPU");
         b.queue = [[b.device newMTL4CommandQueue] autorelease];
         require(b.queue != nil, @"cannot create command queue");
         MTL4CompilerDescriptor *cd = [MTL4CompilerDescriptor new];
