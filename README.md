@@ -12,9 +12,9 @@ It supplies native windows, input, UI controls, and a bindless GPU interface.
 
 ## Features
 
-- Create native windows with Cocoa, Win32, or X11.
+- Create native windows and controls with Cocoa, WinUI, or GTK 4.
 - Receive portable keyboard, pointer, text, and scroll input.
-- Use native controls with Cocoa, Win32, or GTK 3.
+- Use one UI interface on all supported platforms.
 - Send graphics work to Vulkan 1.3 or Metal 4.
 - Use GPU addresses and a global bindless texture heap.
 
@@ -26,8 +26,7 @@ proposal.
 
 - Install Go 1.27 or a later compatible version.
 - Enable cgo and install a C compiler for native features.
-- On Linux, install the X11 development files.
-- Install the GTK 3 development files if you use the GTK backend.
+- On Linux, install the X11 and GTK 4 development files.
 - Use macOS 26 or later for the Metal backend.
 
 The Vulkan backend also needs Vulkan headers, a loader, and a compatible
@@ -53,13 +52,16 @@ import (
 	"time"
 
 	"github.com/bluescreen10/gamekit/ui"
-	"github.com/bluescreen10/gamekit/ui/window"
+	_ "github.com/bluescreen10/gamekit/ui/default"
 )
 
 func main() {
 	runtime.LockOSThread()
 
-	backend := &window.Backend{}
+	backend, err := ui.New(nil)
+	if err != nil {
+		panic(err)
+	}
 	win, err := backend.CreateWindow(ui.WindowOptions{
 		Title:     "GameKit",
 		Size:      ui.Size{Width: 1280, Height: 720},
@@ -77,17 +79,25 @@ func main() {
 }
 ```
 
-Run the native UI example on macOS or Windows:
+The `ui/default` package registers Cocoa on macOS, Win32 on Windows, and GTK 4
+on Linux. Import a backend package directly to select it by name:
+
+```go
+import (
+	"github.com/bluescreen10/gamekit/ui"
+	_ "github.com/bluescreen10/gamekit/ui/gtk"
+)
+
+backend, err := ui.New(&ui.Config{Backend: "gtk"})
+```
+
+Run the native UI example:
 
 ```sh
 go run ./examples/ui
 ```
 
-On Linux, run the example with the GTK build tag:
-
-```sh
-go run -tags gtk ./examples/ui
-```
+Linux requires the GTK 4 development package.
 
 ## Packages
 
@@ -96,9 +106,10 @@ go run -tags gtk ./examples/ui
 | [`gpu`](https://pkg.go.dev/github.com/bluescreen10/gamekit/gpu) | Provides the bindless GPU interface. |
 | [`gpu/vulkan`](https://pkg.go.dev/github.com/bluescreen10/gamekit/gpu/vulkan) | Implements the Vulkan backend. |
 | [`gpu/metal`](https://pkg.go.dev/github.com/bluescreen10/gamekit/gpu/metal) | Implements the Metal backend. |
-| [`ui`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui) | Defines the native UI protocol and layout types. |
-| [`ui/window`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/window) | Implements native windows and input. |
-| [`ui/gtk`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/gtk) | Implements GTK 3 controls on Linux. |
+| [`ui`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui) | Defines the common native UI interface and layout types. |
+| [`ui/default`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/default) | Registers the default UI backend for the target platform. |
+| [`ui/window`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/window) | Implements Cocoa, Win32, and basic X11 windows. |
+| [`ui/gtk`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/gtk) | Implements GTK 4 controls on Linux. |
 | [`keyboard`](https://pkg.go.dev/github.com/bluescreen10/gamekit/keyboard) | Defines portable keys and keyboard events. |
 | [`pointer`](https://pkg.go.dev/github.com/bluescreen10/gamekit/pointer) | Defines portable pointer buttons and actions. |
 
@@ -111,4 +122,13 @@ Run all tests:
 
 ```sh
 go test ./...
+```
+
+The UI conformance roadmap intentionally keeps this command failing while UI
+requirements are missing. Each `TestRoadmapConformance` subtest names one
+outstanding contract. To inspect only the currently executable native UI
+contract, run:
+
+```sh
+go test ./ui/uitest -run TestCurrentBackendConformance -v
 ```
