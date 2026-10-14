@@ -3,5 +3,6 @@
 // It uses Cocoa on macOS, Win32 on Windows, and X11 on Linux. Cocoa and Win32
 // implement the native widget set. The built-in X11 path provides windows and
 // input; applications that need native Linux widgets should use package gtk.
-// The zero value of Backend is ready for use.
+// Importing this package registers "cocoa", "win32", or "x11" for the target
+// platform. The zero value of Backend is ready for use.
 package window

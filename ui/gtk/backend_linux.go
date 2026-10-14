@@ -1,9 +1,9 @@
-//go:build linux && cgo && gtk
+//go:build linux && cgo
 
 package gtk
 
 /*
-#cgo pkg-config: gtk+-3.0 gdk-x11-3.0
+#cgo pkg-config: gtk4 x11
 #include "bridge.h"
 #include <stdlib.h>
 */
@@ -1158,6 +1158,9 @@ func (t *tabs) nativeEvent(event int) {
 		return
 	}
 	index := t.SelectedIndex()
+	if index < 0 || index >= len(t.Items()) {
+		return
+	}
 	t.layoutContent()
 	for _, handler := range t.changes.snapshot() {
 		handler(index)

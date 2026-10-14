@@ -10,16 +10,15 @@ import (
 	"time"
 
 	"github.com/bluescreen10/gamekit/ui"
-	"github.com/bluescreen10/gamekit/ui/gtk"
-	"github.com/bluescreen10/gamekit/ui/window"
+	_ "github.com/bluescreen10/gamekit/ui/default"
 )
 
 func main() {
 	runtime.LockOSThread()
 
-	var backend ui.Backend = &window.Backend{}
-	if runtime.GOOS == "linux" {
-		backend = &gtk.Backend{}
+	backend, err := ui.New(nil)
+	if err != nil {
+		panic(err)
 	}
 	win, err := backend.CreateWindow(ui.WindowOptions{
 		Title:     "GameKit widget tester",

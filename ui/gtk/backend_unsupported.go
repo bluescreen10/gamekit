@@ -1,4 +1,4 @@
-//go:build !linux || !cgo || !gtk
+//go:build !linux || !cgo
 
 package gtk
 

@@ -1,9 +1,15 @@
-//go:build linux && cgo && gtk
+//go:build linux && cgo
 
 #include "bridge.h"
 
+/* GameKit supports GTK 4.0. New GTK versions deprecate the X11 and file chooser
+   compatibility APIs that the backend must use. */
+#define GDK_DISABLE_DEPRECATION_WARNINGS
+#define GTK_DISABLE_DEPRECATION_WARNINGS
 #include <gtk/gtk.h>
-#include <gdk/gdkx.h>
+#include <gdk/x11/gdkx.h>
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,15 +21,16 @@ typedef struct GKGTKWindow {
     struct GKGTKWindow *owner;
     gboolean should_close;
     gboolean utility;
-    gboolean suppress_move;
     gboolean have_position;
     int x;
     int y;
+    int width;
+    int height;
     unsigned int buttons;
     uintptr_t handle;
 } GKGTKWindow;
 
-typedef struct {
+typedef struct GKGTKWidget {
     GtkWidget *widget;
     GtkWidget *content;
     GtkWidget *control;
@@ -37,6 +44,9 @@ typedef struct {
     unsigned int buttons;
     uintptr_t handle;
     gboolean suppress;
+    Display *xdisplay;
+    Window xwindow;
+    gboolean xwindow_mapped;
 } GKGTKWidget;
 
 static gboolean gkGTKInitialized;
@@ -50,17 +60,14 @@ static int gkGTKModifiers(GdkModifierType state) {
     if (state & GDK_CONTROL_MASK) {
         modifiers |= GK_GTK_MOD_CONTROL;
     }
-    if (state & GDK_MOD1_MASK) {
+    if (state & GDK_ALT_MASK) {
         modifiers |= GK_GTK_MOD_ALT;
     }
-    if (state & (GDK_SUPER_MASK | GDK_MOD4_MASK)) {
+    if (state & GDK_SUPER_MASK) {
         modifiers |= GK_GTK_MOD_SUPER;
     }
     if (state & GDK_LOCK_MASK) {
         modifiers |= GK_GTK_MOD_CAPS_LOCK;
-    }
-    if (state & GDK_MOD2_MASK) {
-        modifiers |= GK_GTK_MOD_NUM_LOCK;
     }
     return modifiers;
 }
@@ -81,104 +88,121 @@ static int gkGTKPointerButton(guint button) {
     }
 }
 
-static void gkGTKScrollDeltas(GdkEventScroll *event, double *x, double *y) {
-    double dx = 0;
-    double dy = 0;
-    if (event->direction == GDK_SCROLL_SMOOTH) {
-        gdk_event_get_scroll_deltas((GdkEvent *)event, &dx, &dy);
-        dy = -dy;
-    } else if (event->direction == GDK_SCROLL_UP) {
-        dy = 1;
-    } else if (event->direction == GDK_SCROLL_DOWN) {
-        dy = -1;
-    } else if (event->direction == GDK_SCROLL_LEFT) {
-        dx = -1;
-    } else if (event->direction == GDK_SCROLL_RIGHT) {
-        dx = 1;
-    }
-    if (x) {
-        *x = dx;
-    }
-    if (y) {
-        *y = dy;
-    }
-}
-
-static GKGTKWindow *gkGTKWindowFromEvent(GdkEvent *event) {
-    GdkWindow *event_window = gdk_event_get_window(event);
-    gpointer user_data = NULL;
-    if (!event_window) {
-        return NULL;
-    }
-    gdk_window_get_user_data(event_window, &user_data);
-    if (!user_data || !GTK_IS_WIDGET(user_data)) {
-        return NULL;
-    }
-    GtkWidget *toplevel = gtk_widget_get_toplevel(GTK_WIDGET(user_data));
-    if (!GTK_IS_WINDOW(toplevel)) {
-        return NULL;
-    }
-    return g_object_get_data(G_OBJECT(toplevel), "GameKitGTKWindow");
-}
-
 static void gkGTKReleaseWindowButtons(GKGTKWindow *native, int modifiers) {
     if (!native) {
         return;
     }
     for (int button = 0; button < GK_GTK_POINTER_BUTTON_COUNT; button++) {
-        if (native->buttons & (1u << button)) {
-            if (native->handle) {
-                gkGTKGoWindowPointerButton(native->handle, button, GK_GTK_POINTER_RELEASED, modifiers);
-            }
+        if ((native->buttons & (1u << button)) && native->handle) {
+            gkGTKGoWindowPointerButton(native->handle, button, GK_GTK_POINTER_RELEASED, modifiers);
         }
     }
     native->buttons = 0;
 }
 
-/* Observe every GDK event before GTK dispatches it to a child widget. Canvas signals
-   run later, so an event is reported to the owning window first and its canvas second. */
-static void gkGTKEvent(GdkEvent *event, gpointer data) {
-    (void)data;
-    GKGTKWindow *native = gkGTKWindowFromEvent(event);
-    if (native && native->handle) {
-        if (event->type == GDK_BUTTON_PRESS || event->type == GDK_BUTTON_RELEASE) {
-            GdkEventButton *button_event = (GdkEventButton *)event;
-            int button = gkGTKPointerButton(button_event->button);
-            if (button >= 0 && button < GK_GTK_POINTER_BUTTON_COUNT) {
-                unsigned int mask = 1u << button;
-                int action = event->type == GDK_BUTTON_PRESS ? GK_GTK_POINTER_PRESSED : GK_GTK_POINTER_RELEASED;
-                if (action == GK_GTK_POINTER_PRESSED) {
-                    native->buttons |= mask;
-                    gkGTKGoWindowPointerButton(native->handle, button, action,
-                                               gkGTKModifiers(button_event->state));
-                } else if (native->buttons & mask) {
-                    native->buttons &= ~mask;
-                    gkGTKGoWindowPointerButton(native->handle, button, action,
-                                               gkGTKModifiers(button_event->state));
-                }
-            }
-        } else if (event->type == GDK_SCROLL) {
-            GdkEventScroll *scroll_event = (GdkEventScroll *)event;
-            double x = 0;
-            double y = 0;
-            gkGTKScrollDeltas(scroll_event, &x, &y);
-            gkGTKGoWindowScroll(native->handle, x, y);
-        } else if (event->type == GDK_GRAB_BROKEN) {
-            gkGTKReleaseWindowButtons(native, 0);
+static void gkGTKReleaseCanvasButtons(GKGTKWidget *native, int modifiers) {
+    if (!native) {
+        return;
+    }
+    for (int button = 0; button < GK_GTK_POINTER_BUTTON_COUNT; button++) {
+        if ((native->buttons & (1u << button)) && native->handle) {
+            gkGTKGoCanvasPointerButton(native->handle, button, GK_GTK_POINTER_RELEASED, modifiers);
         }
     }
-    gtk_main_do_event(event);
+    native->buttons = 0;
+}
+
+static void gkGTKWindowButton(GtkGestureClick *gesture, int presses, double x, double y, gpointer data) {
+    (void)presses;
+    (void)x;
+    (void)y;
+    GKGTKWindow *native = data;
+    int button = gkGTKPointerButton(gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)));
+    if (!native || button < 0 || button >= GK_GTK_POINTER_BUTTON_COUNT) {
+        return;
+    }
+    native->buttons |= 1u << button;
+    if (native->handle) {
+        GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
+        gkGTKGoWindowPointerButton(native->handle, button, GK_GTK_POINTER_PRESSED, gkGTKModifiers(state));
+    }
+}
+
+static void gkGTKWindowButtonReleased(GtkGestureClick *gesture, int presses, double x, double y, gpointer data) {
+    (void)presses;
+    (void)x;
+    (void)y;
+    GKGTKWindow *native = data;
+    int button = gkGTKPointerButton(gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)));
+    if (!native || button < 0 || button >= GK_GTK_POINTER_BUTTON_COUNT) {
+        return;
+    }
+    unsigned int mask = 1u << button;
+    if (!(native->buttons & mask)) {
+        return;
+    }
+    native->buttons &= ~mask;
+    if (native->handle) {
+        GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
+        gkGTKGoWindowPointerButton(native->handle, button, GK_GTK_POINTER_RELEASED, gkGTKModifiers(state));
+    }
+}
+
+static gboolean gkGTKWindowScroll(GtkEventControllerScroll *controller, double dx, double dy, gpointer data) {
+    (void)controller;
+    GKGTKWindow *native = data;
+    if (native && native->handle) {
+        gkGTKGoWindowScroll(native->handle, dx, -dy);
+    }
+    return FALSE;
+}
+
+static void gkGTKWindowActive(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)spec;
+    if (!gtk_window_is_active(GTK_WINDOW(object))) {
+        gkGTKReleaseWindowButtons(data, 0);
+    }
+}
+
+static gboolean gkGTKCloseRequest(GtkWindow *window, gpointer data) {
+    GKGTKWindow *native = data;
+    native->should_close = TRUE;
+    if (native->utility) {
+        gtk_widget_set_visible(GTK_WIDGET(window), FALSE);
+    }
+    return TRUE;
+}
+
+static GdkSurface *gkGTKWindowSurface(GKGTKWindow *native) {
+    if (!native || !native->window) {
+        return NULL;
+    }
+    gtk_widget_realize(native->window);
+    GtkNative *gtk_native = gtk_widget_get_native(native->window);
+    return gtk_native ? gtk_native_get_surface(gtk_native) : NULL;
+}
+
+static Window gkGTKWindowXWindow(GKGTKWindow *native) {
+    GdkSurface *surface = gkGTKWindowSurface(native);
+    return surface && GDK_IS_X11_SURFACE(surface) ? gdk_x11_surface_get_xid(surface) : 0;
+}
+
+static Display *gkGTKWindowXDisplayValue(GKGTKWindow *native) {
+    GdkSurface *surface = gkGTKWindowSurface(native);
+    if (!surface || !GDK_IS_X11_SURFACE(surface)) {
+        return NULL;
+    }
+    return gdk_x11_display_get_xdisplay(gdk_surface_get_display(surface));
 }
 
 static void gkGTKWindowOrigin(GKGTKWindow *native, int *x, int *y) {
-    int origin_x = 0;
-    int origin_y = 0;
-    if (native && native->overlay) {
-        gtk_widget_realize(native->overlay);
-        GdkWindow *window = gtk_widget_get_window(native->overlay);
-        if (window) {
-            gdk_window_get_origin(window, &origin_x, &origin_y);
-        }
+    int origin_x = native ? native->x : 0;
+    int origin_y = native ? native->y : 0;
+    Display *display = gkGTKWindowXDisplayValue(native);
+    Window window = gkGTKWindowXWindow(native);
+    if (display && window) {
+        Window child = 0;
+        XTranslateCoordinates(display, window, DefaultRootWindow(display), 0, 0, &origin_x, &origin_y, &child);
     }
     if (x) {
         *x = origin_x;
@@ -194,7 +218,7 @@ static void gkGTKWindowPositionValues(GKGTKWindow *native, int *x, int *y) {
     int owner_x = 0;
     int owner_y = 0;
     if (native) {
-        gtk_window_get_position(GTK_WINDOW(native->window), &window_x, &window_y);
+        gkGTKWindowOrigin(native, &window_x, &window_y);
         if (native->owner) {
             gkGTKWindowOrigin(native->owner, &owner_x, &owner_y);
         }
@@ -207,33 +231,48 @@ static void gkGTKWindowPositionValues(GKGTKWindow *native, int *x, int *y) {
     }
 }
 
-static gboolean gkGTKDelete(GtkWidget *widget, GdkEvent *event, gpointer data) {
-    (void)event;
-    GKGTKWindow *native = data;
-    native->should_close = TRUE;
-    if (native->utility) {
-        gtk_widget_hide(widget);
+static void gkGTKPollWindowPosition(GKGTKWindow *native) {
+    if (!native) {
+        return;
     }
-    return TRUE;
-}
-
-static gboolean gkGTKWindowConfigure(GtkWidget *widget, GdkEventConfigure *event, gpointer data) {
-    (void)widget;
-    (void)event;
-    GKGTKWindow *native = data;
     int x = 0;
     int y = 0;
     gkGTKWindowPositionValues(native, &x, &y);
     if (native->have_position && native->x == x && native->y == y) {
-        return FALSE;
+        return;
     }
     native->x = x;
     native->y = y;
     native->have_position = TRUE;
-    if (!native->suppress_move && native->handle) {
+    if (native->handle) {
         gkGTKGoWindowMove(native->handle, x, y);
     }
-    return FALSE;
+}
+
+static void gkGTKSetX11WindowProperties(GKGTKWindow *native, uint32_t flags) {
+    Display *display = gkGTKWindowXDisplayValue(native);
+    Window window = gkGTKWindowXWindow(native);
+    if (!display || !window) {
+        return;
+    }
+    if ((flags & (1u << 4)) || native->utility) {
+        Atom state = XInternAtom(display, "_NET_WM_STATE", False);
+        Atom values[2];
+        int count = 0;
+        if (flags & (1u << 4)) {
+            values[count++] = XInternAtom(display, "_NET_WM_STATE_ABOVE", False);
+        }
+        if (native->utility) {
+            values[count++] = XInternAtom(display, "_NET_WM_STATE_SKIP_TASKBAR", False);
+        }
+        XChangeProperty(display, window, state, XA_ATOM, 32, PropModeReplace, (unsigned char *)values, count);
+    }
+    if (native->utility) {
+        Atom property = XInternAtom(display, "_NET_WM_WINDOW_TYPE", False);
+        Atom utility = XInternAtom(display, "_NET_WM_WINDOW_TYPE_UTILITY", False);
+        XChangeProperty(display, window, property, XA_ATOM, 32, PropModeReplace, (unsigned char *)&utility, 1);
+    }
+    XFlush(display);
 }
 
 static void gkGTKApplyTheme(int theme) {
@@ -249,9 +288,9 @@ void *gkGTKWindowCreate(const char *title, int width, int height, uint32_t flags
                         int y, char *error, size_t error_size) {
     if (!gkGTKInitialized) {
         gdk_set_allowed_backends("x11");
-        if (!gtk_init_check(NULL, NULL)) {
+        if (!gtk_init_check()) {
             if (error && error_size) {
-                snprintf(error, error_size, "GTK could not initialize an X11 display");
+                snprintf(error, error_size, "GTK 4 could not initialize an X11 display");
             }
             return NULL;
         }
@@ -259,7 +298,6 @@ void *gkGTKWindowCreate(const char *title, int width, int height, uint32_t flags
         if (settings) {
             g_object_get(settings, "gtk-application-prefer-dark-theme", &gkGTKSystemDark, NULL);
         }
-        gdk_event_handler_set(gkGTKEvent, NULL, NULL);
         gkGTKInitialized = TRUE;
     }
 
@@ -267,53 +305,59 @@ void *gkGTKWindowCreate(const char *title, int width, int height, uint32_t flags
     if (!native) {
         return NULL;
     }
-    native->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    native->window = gtk_window_new();
     native->overlay = gtk_overlay_new();
     native->owner = owner_pointer;
     native->utility = (flags & (1u << 6)) != 0;
+    native->width = MAX(1, width);
+    native->height = MAX(1, height);
+    native->x = x;
+    native->y = y;
+    native->have_position = native->owner != NULL;
     g_object_set_data(G_OBJECT(native->window), "GameKitGTKWindow", native);
-    gtk_container_add(GTK_CONTAINER(native->window), native->overlay);
+    gtk_window_set_child(GTK_WINDOW(native->window), native->overlay);
     gtk_window_set_title(GTK_WINDOW(native->window), title ? title : "");
-    gtk_window_set_default_size(GTK_WINDOW(native->window), width, height);
+    gtk_window_set_default_size(GTK_WINDOW(native->window), native->width, native->height);
     gtk_window_set_resizable(GTK_WINDOW(native->window), (flags & 1u) != 0);
     gtk_window_set_decorated(GTK_WINDOW(native->window), (flags & (1u << 2)) == 0);
-    gtk_window_set_keep_above(GTK_WINDOW(native->window), (flags & (1u << 4)) != 0);
     if (native->owner) {
         gtk_window_set_transient_for(GTK_WINDOW(native->window), GTK_WINDOW(native->owner->window));
         gtk_window_set_destroy_with_parent(GTK_WINDOW(native->window), TRUE);
-        gtk_window_set_skip_taskbar_hint(GTK_WINDOW(native->window), TRUE);
-        gtk_window_set_type_hint(GTK_WINDOW(native->window), GDK_WINDOW_TYPE_HINT_UTILITY);
     }
-    if (flags & (1u << 5)) {
-        GdkScreen *screen = gtk_widget_get_screen(native->window);
-        GdkVisual *visual = gdk_screen_get_rgba_visual(screen);
-        if (visual) {
-            gtk_widget_set_visual(native->window, visual);
-        }
-        gtk_widget_set_app_paintable(native->window, TRUE);
-    }
-    g_signal_connect(native->window, "delete-event", G_CALLBACK(gkGTKDelete), native);
-    g_signal_connect(native->window, "configure-event", G_CALLBACK(gkGTKWindowConfigure), native);
+    g_signal_connect(native->window, "close-request", G_CALLBACK(gkGTKCloseRequest), native);
+    g_signal_connect(native->window, "notify::is-active", G_CALLBACK(gkGTKWindowActive), native);
+
+    GtkGesture *click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);
+    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(click), GTK_PHASE_CAPTURE);
+    g_signal_connect(click, "pressed", G_CALLBACK(gkGTKWindowButton), native);
+    g_signal_connect(click, "released", G_CALLBACK(gkGTKWindowButtonReleased), native);
+    gtk_widget_add_controller(native->window, GTK_EVENT_CONTROLLER(click));
+
+    GtkEventController *scroll = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+    gtk_event_controller_set_propagation_phase(scroll, GTK_PHASE_CAPTURE);
+    g_signal_connect(scroll, "scroll", G_CALLBACK(gkGTKWindowScroll), native);
+    gtk_widget_add_controller(native->window, scroll);
+
     gkGTKApplyTheme(theme);
-    gtk_widget_show(native->overlay);
     gtk_widget_realize(native->window);
-    gtk_window_resize(GTK_WINDOW(native->window), MAX(1, width), MAX(1, height));
+    gkGTKSetX11WindowProperties(native, flags);
     if (native->owner) {
         int owner_x = 0;
         int owner_y = 0;
         gkGTKWindowOrigin(native->owner, &owner_x, &owner_y);
-        native->suppress_move = TRUE;
-        native->x = x;
-        native->y = y;
-        native->have_position = TRUE;
-        gtk_window_move(GTK_WINDOW(native->window), owner_x + x, owner_y + y);
-        native->suppress_move = FALSE;
+        Display *display = gkGTKWindowXDisplayValue(native);
+        Window window = gkGTKWindowXWindow(native);
+        if (display && window) {
+            XMoveWindow(display, window, owner_x + x, owner_y + y);
+            XFlush(display);
+        }
     }
     if (flags & (1u << 3)) {
         gtk_window_maximize(GTK_WINDOW(native->window));
     }
     if (!(flags & (1u << 1))) {
-        gtk_widget_show(native->window);
+        gtk_window_present(GTK_WINDOW(native->window));
     }
     return native;
 }
@@ -326,15 +370,15 @@ void gkGTKWindowDestroy(void *pointer) {
     if (native->window) {
         g_object_set_data(G_OBJECT(native->window), "GameKitGTKWindow", NULL);
         gkGTKReleaseWindowButtons(native, 0);
-        gtk_widget_destroy(native->window);
+        gtk_window_destroy(GTK_WINDOW(native->window));
     }
     free(native);
 }
 
 void gkGTKWindowPoll(void *pointer) {
-    (void)pointer;
     while (g_main_context_iteration(NULL, FALSE)) {
     }
+    gkGTKPollWindowPosition(pointer);
 }
 
 int gkGTKWindowShouldClose(void *pointer) {
@@ -350,16 +394,26 @@ void gkGTKWindowSetShouldClose(void *pointer, int close) {
 
 void gkGTKWindowSize(void *pointer, int *width, int *height) {
     GKGTKWindow *native = pointer;
-    GtkAllocation allocation = {0};
+    int value_width = native ? native->width : 0;
+    int value_height = native ? native->height : 0;
     if (native) {
         GtkWidget *content = native->content ? native->content : native->overlay;
-        gtk_widget_get_allocation(content, &allocation);
+        int allocated_width = gtk_widget_get_width(content);
+        int allocated_height = gtk_widget_get_height(content);
+        if (allocated_width > 0) {
+            value_width = allocated_width;
+            native->width = allocated_width;
+        }
+        if (allocated_height > 0) {
+            value_height = allocated_height;
+            native->height = allocated_height;
+        }
     }
     if (width) {
-        *width = allocation.width;
+        *width = value_width;
     }
     if (height) {
-        *height = allocation.height;
+        *height = value_height;
     }
 }
 
@@ -380,7 +434,9 @@ void gkGTKWindowFramebufferSize(void *pointer, int *width, int *height) {
 void gkGTKWindowSetSize(void *pointer, int width, int height) {
     GKGTKWindow *native = pointer;
     if (native) {
-        gtk_window_resize(GTK_WINDOW(native->window), MAX(1, width), MAX(1, height));
+        native->width = MAX(1, width);
+        native->height = MAX(1, height);
+        gtk_window_set_default_size(GTK_WINDOW(native->window), native->width, native->height);
     }
 }
 
@@ -398,12 +454,15 @@ void gkGTKWindowSetPosition(void *pointer, int x, int y) {
     if (native->owner) {
         gkGTKWindowOrigin(native->owner, &owner_x, &owner_y);
     }
-    native->suppress_move = TRUE;
     native->x = x;
     native->y = y;
     native->have_position = TRUE;
-    gtk_window_move(GTK_WINDOW(native->window), owner_x + x, owner_y + y);
-    native->suppress_move = FALSE;
+    Display *display = gkGTKWindowXDisplayValue(native);
+    Window window = gkGTKWindowXWindow(native);
+    if (display && window) {
+        XMoveWindow(display, window, owner_x + x, owner_y + y);
+        XFlush(display);
+    }
 }
 
 int gkGTKWindowVisible(void *pointer) {
@@ -417,9 +476,9 @@ void gkGTKWindowSetVisible(void *pointer, int visible) {
         return;
     }
     if (visible) {
-        gtk_widget_show(native->window);
+        gtk_window_present(GTK_WINDOW(native->window));
     } else {
-        gtk_widget_hide(native->window);
+        gtk_widget_set_visible(native->window, FALSE);
     }
 }
 
@@ -449,15 +508,24 @@ void gkGTKWindowSetTheme(void *pointer, int theme) {
 }
 
 static void gkGTKPointerPosition(GtkWidget *widget, double *x, double *y) {
-    int pointer_x = 0;
-    int pointer_y = 0;
-    GdkWindow *window = widget ? gtk_widget_get_window(widget) : NULL;
-    if (window) {
-        GdkDisplay *display = gdk_window_get_display(window);
+    double pointer_x = 0;
+    double pointer_y = 0;
+    GtkNative *native = widget ? gtk_widget_get_native(widget) : NULL;
+    GdkSurface *surface = native ? gtk_native_get_surface(native) : NULL;
+    if (surface) {
+        GdkDisplay *display = gdk_surface_get_display(surface);
         GdkSeat *seat = gdk_display_get_default_seat(display);
         GdkDevice *device = seat ? gdk_seat_get_pointer(seat) : NULL;
-        if (device) {
-            gdk_window_get_device_position(window, device, &pointer_x, &pointer_y, NULL);
+        double surface_x = 0;
+        double surface_y = 0;
+        if (device && gdk_surface_get_device_position(surface, device, &surface_x, &surface_y, NULL)) {
+            GtkWidget *root = GTK_WIDGET(native);
+            graphene_point_t source = GRAPHENE_POINT_INIT((float)surface_x, (float)surface_y);
+            graphene_point_t destination = GRAPHENE_POINT_INIT(0, 0);
+            if (root == widget || gtk_widget_compute_point(root, widget, &source, &destination)) {
+                pointer_x = root == widget ? surface_x : destination.x;
+                pointer_y = root == widget ? surface_y : destination.y;
+            }
         }
     }
     if (x) {
@@ -473,31 +541,45 @@ void gkGTKWindowPointerPosition(void *pointer, double *x, double *y) {
     gkGTKPointerPosition(native ? native->window : NULL, x, y);
 }
 
-static GdkWindow *gkGTKNativeWindow(GKGTKWindow *native) {
-    if (!native) {
-        return NULL;
-    }
-    gtk_widget_realize(native->window);
-    return gtk_widget_get_window(native->window);
-}
-
 uintptr_t gkGTKWindowXID(void *pointer) {
-    GdkWindow *window = gkGTKNativeWindow(pointer);
-    return window && GDK_IS_X11_WINDOW(window) ? (uintptr_t)gdk_x11_window_get_xid(window) : 0;
+    return (uintptr_t)gkGTKWindowXWindow(pointer);
 }
 
 uintptr_t gkGTKWindowXDisplay(void *pointer) {
-    GdkWindow *window = gkGTKNativeWindow(pointer);
-    if (!window || !GDK_IS_X11_WINDOW(window)) {
-        return 0;
-    }
-    return (uintptr_t)gdk_x11_display_get_xdisplay(gdk_window_get_display(window));
+    return (uintptr_t)gkGTKWindowXDisplayValue(pointer);
 }
 
 static void gkGTKRemoveFromParent(GtkWidget *widget) {
-    GtkWidget *parent = gtk_widget_get_parent(widget);
-    if (parent && GTK_IS_CONTAINER(parent)) {
-        gtk_container_remove(GTK_CONTAINER(parent), widget);
+    GtkWidget *parent = widget ? gtk_widget_get_parent(widget) : NULL;
+    if (!parent) {
+        return;
+    }
+    GtkWidget *notebook = gtk_widget_get_ancestor(widget, GTK_TYPE_NOTEBOOK);
+    if (notebook) {
+        int page = gtk_notebook_page_num(GTK_NOTEBOOK(notebook), widget);
+        if (page >= 0) {
+            gtk_notebook_remove_page(GTK_NOTEBOOK(notebook), page);
+            return;
+        }
+    }
+    if (GTK_IS_FIXED(parent)) {
+        gtk_fixed_remove(GTK_FIXED(parent), widget);
+    } else if (GTK_IS_BOX(parent)) {
+        gtk_box_remove(GTK_BOX(parent), widget);
+    } else if (GTK_IS_OVERLAY(parent)) {
+        if (gtk_overlay_get_child(GTK_OVERLAY(parent)) == widget) {
+            gtk_overlay_set_child(GTK_OVERLAY(parent), NULL);
+        } else {
+            gtk_overlay_remove_overlay(GTK_OVERLAY(parent), widget);
+        }
+    } else if (GTK_IS_EXPANDER(parent)) {
+        gtk_expander_set_child(GTK_EXPANDER(parent), NULL);
+    } else if (GTK_IS_SCROLLED_WINDOW(parent)) {
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(parent), NULL);
+    } else if (GTK_IS_VIEWPORT(parent)) {
+        gtk_viewport_set_child(GTK_VIEWPORT(parent), NULL);
+    } else {
+        gtk_widget_unparent(widget);
     }
 }
 
@@ -508,13 +590,13 @@ void gkGTKWindowSetContent(void *window_pointer, void *widget_pointer) {
         return;
     }
     if (window->content && window->content != widget->widget) {
-        gtk_widget_hide(window->content);
         gkGTKRemoveFromParent(window->content);
     }
     gkGTKRemoveFromParent(widget->widget);
-    gtk_container_add(GTK_CONTAINER(window->overlay), widget->widget);
+    gtk_overlay_set_child(GTK_OVERLAY(window->overlay), widget->widget);
     window->content = widget->widget;
-    gtk_widget_show(widget->widget);
+    widget->window = window;
+    gtk_widget_set_visible(widget->widget, TRUE);
 }
 
 static GKGTKWidget *gkGTKWrap(GtkWidget *widget, int kind, uintptr_t handle) {
@@ -523,36 +605,55 @@ static GKGTKWidget *gkGTKWrap(GtkWidget *widget, int kind, uintptr_t handle) {
     }
     GKGTKWidget *native = calloc(1, sizeof(*native));
     if (!native) {
-        gtk_widget_destroy(widget);
+        g_object_ref_sink(widget);
+        g_object_unref(widget);
         return NULL;
     }
     native->widget = g_object_ref_sink(widget);
     native->kind = kind;
     native->handle = handle;
-    gtk_widget_show(widget);
+    gtk_widget_set_visible(widget, TRUE);
     return native;
 }
 
-static void gkGTKSignal(GtkWidget *widget, gpointer data) {
-    (void)widget;
+static int gkGTKEventForKind(int kind) {
+    if (kind == GK_GTK_WIDGET_BUTTON || kind == GK_GTK_WIDGET_LINK) {
+        return GK_GTK_EVENT_CLICK;
+    }
+    if (kind == GK_GTK_WIDGET_TEXT_FIELD || kind == GK_GTK_WIDGET_TEXT_AREA) {
+        return GK_GTK_EVENT_TEXT_CHANGE;
+    }
+    if (kind == GK_GTK_WIDGET_SLIDER) {
+        return GK_GTK_EVENT_VALUE_CHANGE;
+    }
+    if (kind == GK_GTK_WIDGET_CHECK_BOX) {
+        return GK_GTK_EVENT_TOGGLE_CHANGE;
+    }
+    if (kind == GK_GTK_WIDGET_RADIO_GROUP || kind == GK_GTK_WIDGET_SELECT) {
+        return GK_GTK_EVENT_SELECTION_CHANGE;
+    }
+    if (kind == GK_GTK_WIDGET_TABS) {
+        return GK_GTK_EVENT_TAB_CHANGE;
+    }
+    return GK_GTK_EVENT_SECTION_CHANGE;
+}
+
+static void gkGTKSignal(gpointer object, gpointer data) {
+    (void)object;
     GKGTKWidget *native = data;
-    if (!native->suppress && native->handle) {
-        int event = native->kind == GK_GTK_WIDGET_BUTTON || native->kind == GK_GTK_WIDGET_LINK ? GK_GTK_EVENT_CLICK
-                    : native->kind == GK_GTK_WIDGET_TEXT_FIELD || native->kind == GK_GTK_WIDGET_TEXT_AREA
-                        ? GK_GTK_EVENT_TEXT_CHANGE
-                    : native->kind == GK_GTK_WIDGET_SLIDER    ? GK_GTK_EVENT_VALUE_CHANGE
-                    : native->kind == GK_GTK_WIDGET_CHECK_BOX ? GK_GTK_EVENT_TOGGLE_CHANGE
-                    : native->kind == GK_GTK_WIDGET_RADIO_GROUP || native->kind == GK_GTK_WIDGET_SELECT
-                        ? GK_GTK_EVENT_SELECTION_CHANGE
-                    : native->kind == GK_GTK_WIDGET_TABS ? GK_GTK_EVENT_TAB_CHANGE
-                                                         : GK_GTK_EVENT_SECTION_CHANGE;
-        gkGTKGoWidgetEvent(native->handle, event);
+    if (native && !native->suppress && native->handle) {
+        gkGTKGoWidgetEvent(native->handle, gkGTKEventForKind(native->kind));
     }
 }
 
-static void gkGTKRadioSignal(GtkToggleButton *button, gpointer data) {
+static void gkGTKNotifySignal(GObject *object, GParamSpec *spec, gpointer data) {
+    (void)spec;
+    gkGTKSignal(object, data);
+}
+
+static void gkGTKRadioSignal(GtkCheckButton *button, gpointer data) {
     GKGTKWidget *native = data;
-    if (!gtk_toggle_button_get_active(button)) {
+    if (!gtk_check_button_get_active(button)) {
         return;
     }
     for (guint i = 0; native->items && i < native->items->len; i++) {
@@ -561,7 +662,7 @@ static void gkGTKRadioSignal(GtkToggleButton *button, gpointer data) {
             break;
         }
     }
-    gkGTKSignal(GTK_WIDGET(button), data);
+    gkGTKSignal(button, data);
 }
 
 static void gkGTKTabSignal(GtkNotebook *notebook, GtkWidget *page, guint page_number, gpointer data) {
@@ -576,44 +677,34 @@ static gboolean gkGTKLinkSignal(GtkWidget *widget, gpointer data) {
     return TRUE;
 }
 
-static gboolean gkGTKImageDraw(GtkWidget *widget, cairo_t *context, gpointer data) {
+static void gkGTKImageDraw(GtkDrawingArea *area, cairo_t *context, int width, int height, gpointer data) {
+    (void)area;
     GKGTKWidget *native = data;
     if (!native->pixbuf) {
-        return FALSE;
+        return;
     }
-    GtkAllocation allocation;
-    gtk_widget_get_allocation(widget, &allocation);
     int image_width = gdk_pixbuf_get_width(native->pixbuf);
     int image_height = gdk_pixbuf_get_height(native->pixbuf);
-    double sx = image_width ? (double)allocation.width / image_width : 1;
-    double sy = image_height ? (double)allocation.height / image_height : 1;
-    double scale_x = sx;
-    double scale_y = sy;
+    double scale_x = image_width ? (double)width / image_width : 1;
+    double scale_y = image_height ? (double)height / image_height : 1;
     if (native->scaling != 2) {
-        double scale = native->scaling == 1 ? MAX(sx, sy) : MIN(sx, sy);
+        double scale = native->scaling == 1 ? MAX(scale_x, scale_y) : MIN(scale_x, scale_y);
         scale_x = scale;
         scale_y = scale;
     }
-    double width = image_width * scale_x;
-    double height = image_height * scale_y;
+    double draw_width = image_width * scale_x;
+    double draw_height = image_height * scale_y;
     cairo_save(context);
-    cairo_translate(context, (allocation.width - width) / 2, (allocation.height - height) / 2);
+    cairo_translate(context, (width - draw_width) / 2, (height - draw_height) / 2);
     cairo_scale(context, scale_x, scale_y);
     gdk_cairo_set_source_pixbuf(context, native->pixbuf, 0, 0);
     cairo_paint(context);
     cairo_restore(context);
-    return TRUE;
 }
 
 static void gkGTKFreePixels(guchar *pixels, gpointer data) {
     (void)data;
     g_free(pixels);
-}
-
-static void gkGTKSectionSignal(GObject *object, GParamSpec *spec, gpointer data) {
-    (void)object;
-    (void)spec;
-    gkGTKSignal(NULL, data);
 }
 
 void *gkGTKCreateLayout(void) {
@@ -643,7 +734,7 @@ void *gkGTKCreateTextField(uintptr_t handle) {
 }
 
 void *gkGTKCreateTextArea(const char *text, const char *placeholder, int read_only, int wrap, uintptr_t handle) {
-    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    GtkWidget *scroll = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), wrap ? GTK_POLICY_NEVER : GTK_POLICY_AUTOMATIC,
                                    GTK_POLICY_AUTOMATIC);
     GtkWidget *editor = gtk_text_view_new();
@@ -651,8 +742,7 @@ void *gkGTKCreateTextArea(const char *text, const char *placeholder, int read_on
     gtk_text_view_set_editable(GTK_TEXT_VIEW(editor), read_only == 0);
     GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(editor));
     gtk_text_buffer_set_text(buffer, text ? text : "", -1);
-    gtk_container_add(GTK_CONTAINER(scroll), editor);
-    gtk_widget_show(editor);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), editor);
     GKGTKWidget *native = gkGTKWrap(scroll, GK_GTK_WIDGET_TEXT_AREA, handle);
     if (!native) {
         return NULL;
@@ -665,7 +755,7 @@ void *gkGTKCreateTextArea(const char *text, const char *placeholder, int read_on
 
 void *gkGTKCreateCheckBox(const char *text, int checked, uintptr_t handle) {
     GtkWidget *button = gtk_check_button_new_with_label(text ? text : "");
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(button), checked != 0);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(button), checked != 0);
     GKGTKWidget *native = gkGTKWrap(button, GK_GTK_WIDGET_CHECK_BOX, handle);
     if (native) {
         g_signal_connect(button, "toggled", G_CALLBACK(gkGTKSignal), native);
@@ -683,9 +773,10 @@ void *gkGTKCreateRadioGroup(uintptr_t handle) {
 }
 
 void *gkGTKCreateSelect(uintptr_t handle) {
-    GKGTKWidget *native = gkGTKWrap(gtk_combo_box_text_new(), GK_GTK_WIDGET_SELECT, handle);
+    GtkStringList *model = gtk_string_list_new(NULL);
+    GKGTKWidget *native = gkGTKWrap(gtk_drop_down_new(G_LIST_MODEL(model), NULL), GK_GTK_WIDGET_SELECT, handle);
     if (native) {
-        g_signal_connect(native->widget, "changed", G_CALLBACK(gkGTKSignal), native);
+        g_signal_connect(native->widget, "notify::selected", G_CALLBACK(gkGTKNotifySignal), native);
     }
     return native;
 }
@@ -696,15 +787,16 @@ void gkGTKSelectionAddItem(void *pointer, const char *text) {
         return;
     }
     if (native->kind == GK_GTK_WIDGET_SELECT) {
-        gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(native->widget), text ? text : "");
+        GtkStringList *model = GTK_STRING_LIST(gtk_drop_down_get_model(GTK_DROP_DOWN(native->widget)));
+        gtk_string_list_append(model, text ? text : "");
     } else if (native->kind == GK_GTK_WIDGET_RADIO_GROUP) {
         GtkWidget *first = native->items->len ? g_ptr_array_index(native->items, 0) : NULL;
-        GtkWidget *button = first
-                                ? gtk_radio_button_new_with_label_from_widget(GTK_RADIO_BUTTON(first), text ? text : "")
-                                : gtk_radio_button_new_with_label(NULL, text ? text : "");
+        GtkWidget *button = gtk_check_button_new_with_label(text ? text : "");
+        if (first) {
+            gtk_check_button_set_group(GTK_CHECK_BUTTON(button), GTK_CHECK_BUTTON(first));
+        }
         g_ptr_array_add(native->items, button);
-        gtk_box_pack_start(GTK_BOX(native->widget), button, FALSE, FALSE, 0);
-        gtk_widget_show(button);
+        gtk_box_append(GTK_BOX(native->widget), button);
         g_signal_connect(button, "toggled", G_CALLBACK(gkGTKRadioSignal), native);
     }
 }
@@ -715,7 +807,8 @@ int gkGTKSelectionIndex(void *pointer) {
         return -1;
     }
     if (native->kind == GK_GTK_WIDGET_SELECT) {
-        return gtk_combo_box_get_active(GTK_COMBO_BOX(native->widget));
+        guint selected = gtk_drop_down_get_selected(GTK_DROP_DOWN(native->widget));
+        return selected == GTK_INVALID_LIST_POSITION ? -1 : (int)selected;
     }
     return native->kind == GK_GTK_WIDGET_RADIO_GROUP ? native->selected : -1;
 }
@@ -727,11 +820,12 @@ void gkGTKSelectionSetIndex(void *pointer, int index) {
     }
     native->suppress = TRUE;
     if (native->kind == GK_GTK_WIDGET_SELECT) {
-        gtk_combo_box_set_active(GTK_COMBO_BOX(native->widget), index);
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(native->widget),
+                                   index < 0 ? GTK_INVALID_LIST_POSITION : (guint)index);
     } else if (native->kind == GK_GTK_WIDGET_RADIO_GROUP && native->items && index >= 0 &&
                index < (int)native->items->len) {
         native->selected = index;
-        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g_ptr_array_index(native->items, index)), TRUE);
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(g_ptr_array_index(native->items, index)), TRUE);
     }
     native->suppress = FALSE;
 }
@@ -756,9 +850,7 @@ void *gkGTKCreateProgressBar(double value) {
 
 void *gkGTKCreateActivityIndicator(int running) {
     GtkWidget *spinner = gtk_spinner_new();
-    if (running) {
-        gtk_spinner_start(GTK_SPINNER(spinner));
-    }
+    gtk_spinner_set_spinning(GTK_SPINNER(spinner), running != 0);
     GKGTKWidget *native = gkGTKWrap(spinner, GK_GTK_WIDGET_ACTIVITY, 0);
     if (native) {
         native->running = running != 0;
@@ -767,8 +859,8 @@ void *gkGTKCreateActivityIndicator(int running) {
 }
 
 void *gkGTKCreateSeparator(int direction) {
-    GtkWidget *separator = gtk_separator_new(direction == 0 ? GTK_ORIENTATION_HORIZONTAL : GTK_ORIENTATION_VERTICAL);
-    return gkGTKWrap(separator, GK_GTK_WIDGET_SEPARATOR, 0);
+    return gkGTKWrap(gtk_separator_new(direction == 0 ? GTK_ORIENTATION_HORIZONTAL : GTK_ORIENTATION_VERTICAL),
+                     GK_GTK_WIDGET_SEPARATOR, 0);
 }
 
 void *gkGTKCreateImage(int scaling) {
@@ -776,7 +868,7 @@ void *gkGTKCreateImage(int scaling) {
     GKGTKWidget *native = gkGTKWrap(area, GK_GTK_WIDGET_IMAGE, 0);
     if (native) {
         native->scaling = scaling;
-        g_signal_connect(area, "draw", G_CALLBACK(gkGTKImageDraw), native);
+        gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(area), gkGTKImageDraw, native, NULL);
     }
     return native;
 }
@@ -804,11 +896,10 @@ void gkGTKImageSet(void *pointer, const unsigned char *pixels, int width, int he
 
 void gkGTKImageSetScaling(void *pointer, int scaling) {
     GKGTKWidget *native = pointer;
-    if (!native || native->kind != GK_GTK_WIDGET_IMAGE) {
-        return;
+    if (native && native->kind == GK_GTK_WIDGET_IMAGE) {
+        native->scaling = scaling;
+        gtk_widget_queue_draw(native->widget);
     }
-    native->scaling = scaling;
-    gtk_widget_queue_draw(native->widget);
 }
 
 void *gkGTKCreateLink(const char *text, const char *url, uintptr_t handle) {
@@ -851,8 +942,6 @@ int gkGTKTabsAdd(void *tabs_pointer, const char *title, void *content_pointer) {
     gkGTKRemoveFromParent(content->widget);
     GtkWidget *label = gtk_label_new(title ? title : "");
     gtk_notebook_append_page(GTK_NOTEBOOK(tabs->widget), content->widget, label);
-    gtk_widget_show(label);
-    gtk_widget_show(content->widget);
     return 1;
 }
 
@@ -873,33 +962,33 @@ void gkGTKTabsSetSelected(void *pointer, int index) {
 
 void gkGTKTabsContentSize(void *pointer, int *width, int *height) {
     GKGTKWidget *tabs = pointer;
-    GtkAllocation allocation = {0};
+    int value_width = 0;
+    int value_height = 0;
     if (tabs && tabs->kind == GK_GTK_WIDGET_TABS) {
         int index = gtk_notebook_get_current_page(GTK_NOTEBOOK(tabs->widget));
         GtkWidget *page = gtk_notebook_get_nth_page(GTK_NOTEBOOK(tabs->widget), index);
         if (page) {
-            gtk_widget_get_allocation(page, &allocation);
+            value_width = gtk_widget_get_width(page);
+            value_height = gtk_widget_get_height(page);
         }
     }
     if (width) {
-        *width = allocation.width;
+        *width = value_width;
     }
     if (height) {
-        *height = allocation.height;
+        *height = value_height;
     }
 }
 
 void *gkGTKCreateScrollView(int axes) {
-    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    GtkWidget *scroll = gtk_scrolled_window_new();
     GtkPolicyType horizontal = axes == 1 || axes == 2 ? GTK_POLICY_AUTOMATIC : GTK_POLICY_NEVER;
     GtkPolicyType vertical = axes == 0 || axes == 2 ? GTK_POLICY_AUTOMATIC : GTK_POLICY_NEVER;
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), horizontal, vertical);
     GtkWidget *viewport = gtk_viewport_new(NULL, NULL);
     GtkWidget *content = gtk_fixed_new();
-    gtk_container_add(GTK_CONTAINER(viewport), content);
-    gtk_container_add(GTK_CONTAINER(scroll), viewport);
-    gtk_widget_show(content);
-    gtk_widget_show(viewport);
+    gtk_viewport_set_child(GTK_VIEWPORT(viewport), content);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), viewport);
     GKGTKWidget *native = gkGTKWrap(scroll, GK_GTK_WIDGET_SCROLL_VIEW, 0);
     if (!native) {
         return NULL;
@@ -911,24 +1000,21 @@ void *gkGTKCreateScrollView(int axes) {
 
 void gkGTKScrollViewportSize(void *pointer, int *width, int *height) {
     GKGTKWidget *native = pointer;
-    GtkAllocation allocation = {0};
-    if (native && native->kind == GK_GTK_WIDGET_SCROLL_VIEW && native->control) {
-        gtk_widget_get_allocation(native->control, &allocation);
-    }
+    int value_width = native && native->control ? gtk_widget_get_width(native->control) : 0;
+    int value_height = native && native->control ? gtk_widget_get_height(native->control) : 0;
     if (width) {
-        *width = allocation.width;
+        *width = value_width;
     }
     if (height) {
-        *height = allocation.height;
+        *height = value_height;
     }
 }
 
 void gkGTKScrollSetContentSize(void *pointer, int width, int height) {
     GKGTKWidget *native = pointer;
-    if (!native || native->kind != GK_GTK_WIDGET_SCROLL_VIEW || !native->content) {
-        return;
+    if (native && native->kind == GK_GTK_WIDGET_SCROLL_VIEW && native->content) {
+        gtk_widget_set_size_request(native->content, MAX(0, width), MAX(0, height));
     }
-    gtk_widget_set_size_request(native->content, MAX(0, width), MAX(0, height));
 }
 
 void gkGTKScrollOffset(void *pointer, int *x, int *y) {
@@ -956,78 +1042,111 @@ void gkGTKScrollSetOffset(void *pointer, int x, int y) {
     gtk_adjustment_set_value(gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(native->widget)), MAX(0, y));
 }
 
-static void gkGTKReleaseCanvasButtons(GKGTKWidget *native, int modifiers) {
-    if (!native) {
+static void gkGTKCanvasButton(GtkGestureClick *gesture, int presses, double x, double y, gpointer data) {
+    (void)presses;
+    (void)x;
+    (void)y;
+    GKGTKWidget *native = data;
+    int button = gkGTKPointerButton(gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)));
+    if (!native || button < 0 || button >= GK_GTK_POINTER_BUTTON_COUNT) {
         return;
     }
-    for (int button = 0; button < GK_GTK_POINTER_BUTTON_COUNT; button++) {
-        if (native->buttons & (1u << button)) {
-            if (native->handle) {
-                gkGTKGoCanvasPointerButton(native->handle, button, GK_GTK_POINTER_RELEASED, modifiers);
-            }
-        }
+    native->buttons |= 1u << button;
+    if (native->handle) {
+        GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
+        gkGTKGoCanvasPointerButton(native->handle, button, GK_GTK_POINTER_PRESSED, gkGTKModifiers(state));
     }
-    native->buttons = 0;
 }
 
-static gboolean gkGTKCanvasButton(GtkWidget *widget, GdkEventButton *event, gpointer data) {
-    (void)widget;
+static void gkGTKCanvasButtonReleased(GtkGestureClick *gesture, int presses, double x, double y, gpointer data) {
+    (void)presses;
+    (void)x;
+    (void)y;
     GKGTKWidget *native = data;
-    if (event->type != GDK_BUTTON_PRESS && event->type != GDK_BUTTON_RELEASE) {
-        return TRUE;
-    }
-    int button = gkGTKPointerButton(event->button);
-    if (button < 0 || button >= GK_GTK_POINTER_BUTTON_COUNT) {
-        return FALSE;
+    int button = gkGTKPointerButton(gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)));
+    if (!native || button < 0 || button >= GK_GTK_POINTER_BUTTON_COUNT) {
+        return;
     }
     unsigned int mask = 1u << button;
-    int action = event->type == GDK_BUTTON_PRESS ? GK_GTK_POINTER_PRESSED : GK_GTK_POINTER_RELEASED;
-    if (action == GK_GTK_POINTER_PRESSED) {
-        native->buttons |= mask;
-        if (native->handle) {
-            gkGTKGoCanvasPointerButton(native->handle, button, action, gkGTKModifiers(event->state));
-        }
-    } else if (native->buttons & mask) {
-        native->buttons &= ~mask;
-        if (native->handle) {
-            gkGTKGoCanvasPointerButton(native->handle, button, action, gkGTKModifiers(event->state));
-        }
+    if (!(native->buttons & mask)) {
+        return;
     }
-    return TRUE;
-}
-
-static gboolean gkGTKCanvasScroll(GtkWidget *widget, GdkEventScroll *event, gpointer data) {
-    (void)widget;
-    GKGTKWidget *native = data;
-    double x = 0;
-    double y = 0;
-    gkGTKScrollDeltas(event, &x, &y);
+    native->buttons &= ~mask;
     if (native->handle) {
-        gkGTKGoCanvasScroll(native->handle, x, y);
+        GdkModifierType state = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture));
+        gkGTKGoCanvasPointerButton(native->handle, button, GK_GTK_POINTER_RELEASED, gkGTKModifiers(state));
+    }
+}
+
+static gboolean gkGTKCanvasScroll(GtkEventControllerScroll *controller, double dx, double dy, gpointer data) {
+    (void)controller;
+    GKGTKWidget *native = data;
+    if (native && native->handle) {
+        gkGTKGoCanvasScroll(native->handle, dx, -dy);
     }
     return TRUE;
 }
 
-static gboolean gkGTKCanvasGrabBroken(GtkWidget *widget, GdkEventGrabBroken *event, gpointer data) {
+static void gkGTKCanvasSyncXWindow(GKGTKWidget *native) {
+    if (!native || !native->widget) {
+        return;
+    }
+    GtkNative *gtk_native = gtk_widget_get_native(native->widget);
+    GdkSurface *surface = gtk_native ? gtk_native_get_surface(gtk_native) : NULL;
+    if (!surface || !GDK_IS_X11_SURFACE(surface)) {
+        return;
+    }
+    GtkWidget *root = GTK_WIDGET(gtk_native);
+    graphene_rect_t bounds;
+    if (!gtk_widget_compute_bounds(native->widget, root, &bounds)) {
+        return;
+    }
+    int scale = gtk_widget_get_scale_factor(native->widget);
+    int x = (int)(bounds.origin.x * scale);
+    int y = (int)(bounds.origin.y * scale);
+    int width = MAX(1, (int)(bounds.size.width * scale));
+    int height = MAX(1, (int)(bounds.size.height * scale));
+    Display *display = gdk_x11_display_get_xdisplay(gdk_surface_get_display(surface));
+    Window parent = gdk_x11_surface_get_xid(surface);
+    if (!native->xwindow) {
+        native->xdisplay = display;
+        native->xwindow = XCreateSimpleWindow(display, parent, x, y, width, height, 0, 0, 0);
+        XSelectInput(display, native->xwindow, 0);
+    }
+    XMoveResizeWindow(display, native->xwindow, x, y, (unsigned int)width, (unsigned int)height);
+    gboolean mapped = gtk_widget_get_mapped(native->widget);
+    if (mapped && !native->xwindow_mapped) {
+        XMapWindow(display, native->xwindow);
+        native->xwindow_mapped = TRUE;
+    } else if (!mapped && native->xwindow_mapped) {
+        XUnmapWindow(display, native->xwindow);
+        native->xwindow_mapped = FALSE;
+    }
+    XFlush(display);
+}
+
+static gboolean gkGTKCanvasTick(GtkWidget *widget, GdkFrameClock *clock, gpointer data) {
     (void)widget;
-    (void)event;
-    gkGTKReleaseCanvasButtons(data, 0);
-    return FALSE;
+    (void)clock;
+    gkGTKCanvasSyncXWindow(data);
+    return G_SOURCE_CONTINUE;
 }
 
 void *gkGTKCreateCanvas(uintptr_t handle) {
     GtkWidget *area = gtk_drawing_area_new();
-    gtk_widget_set_has_window(area, TRUE);
-    gtk_widget_add_events(area, GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK | GDK_SCROLL_MASK |
-                                   GDK_SMOOTH_SCROLL_MASK | GDK_POINTER_MOTION_MASK);
     GKGTKWidget *native = gkGTKWrap(area, GK_GTK_WIDGET_CANVAS, handle);
     if (!native) {
         return NULL;
     }
-    g_signal_connect(area, "button-press-event", G_CALLBACK(gkGTKCanvasButton), native);
-    g_signal_connect(area, "button-release-event", G_CALLBACK(gkGTKCanvasButton), native);
-    g_signal_connect(area, "scroll-event", G_CALLBACK(gkGTKCanvasScroll), native);
-    g_signal_connect(area, "grab-broken-event", G_CALLBACK(gkGTKCanvasGrabBroken), native);
+    GtkGesture *click = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);
+    g_signal_connect(click, "pressed", G_CALLBACK(gkGTKCanvasButton), native);
+    g_signal_connect(click, "released", G_CALLBACK(gkGTKCanvasButtonReleased), native);
+    gtk_widget_add_controller(area, GTK_EVENT_CONTROLLER(click));
+    GtkEventController *scroll = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+    g_signal_connect(scroll, "scroll", G_CALLBACK(gkGTKCanvasScroll), native);
+    gtk_widget_add_controller(area, scroll);
+    gtk_widget_add_tick_callback(area, gkGTKCanvasTick, native, NULL);
     return native;
 }
 
@@ -1038,10 +1157,9 @@ void *gkGTKCreateSection(const char *title, int expanded, uintptr_t handle) {
         return NULL;
     }
     native->content = gtk_fixed_new();
-    gtk_widget_show(native->content);
-    gtk_container_add(GTK_CONTAINER(native->widget), native->content);
+    gtk_expander_set_child(GTK_EXPANDER(native->widget), native->content);
     gtk_expander_set_expanded(GTK_EXPANDER(native->widget), expanded != 0);
-    g_signal_connect(native->widget, "notify::expanded", G_CALLBACK(gkGTKSectionSignal), native);
+    g_signal_connect(native->widget, "notify::expanded", G_CALLBACK(gkGTKNotifySignal), native);
     return native;
 }
 
@@ -1051,8 +1169,13 @@ void gkGTKWidgetDestroy(void *pointer) {
         return;
     }
     native->handle = 0;
+    gkGTKReleaseCanvasButtons(native, 0);
+    if (native->xwindow && native->xdisplay) {
+        XDestroyWindow(native->xdisplay, native->xwindow);
+        XFlush(native->xdisplay);
+        native->xwindow = 0;
+    }
     gkGTKRemoveFromParent(native->widget);
-    gtk_widget_destroy(native->widget);
     g_object_unref(native->widget);
     if (native->items) {
         g_ptr_array_free(native->items, TRUE);
@@ -1080,10 +1203,14 @@ void gkGTKWidgetSetParent(void *widget_pointer, void *parent_pointer) {
     GtkWidget *container = parent->content ? parent->content : parent->widget;
     if (GTK_IS_FIXED(container)) {
         gtk_fixed_put(GTK_FIXED(container), widget->widget, 0, 0);
-    } else if (GTK_IS_CONTAINER(container)) {
-        gtk_container_add(GTK_CONTAINER(container), widget->widget);
+    } else if (GTK_IS_BOX(container)) {
+        gtk_box_append(GTK_BOX(container), widget->widget);
+    } else if (GTK_IS_EXPANDER(container)) {
+        gtk_expander_set_child(GTK_EXPANDER(container), widget->widget);
+    } else if (GTK_IS_SCROLLED_WINDOW(container)) {
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(container), widget->widget);
     }
-    gtk_widget_show(widget->widget);
+    widget->window = parent->window;
 }
 
 void gkGTKWidgetAttachToWindow(void *window, void *widget) {
@@ -1100,17 +1227,18 @@ void gkGTKWidgetSetFrame(void *pointer, int x, int y, int width, int height) {
         gtk_fixed_move(GTK_FIXED(parent), native->widget, x, y);
     }
     gtk_widget_set_size_request(native->widget, MAX(0, width), MAX(0, height));
+    if (native->kind == GK_GTK_WIDGET_CANVAS) {
+        gkGTKCanvasSyncXWindow(native);
+    }
 }
 
 void gkGTKWidgetSetVisible(void *pointer, int visible) {
     GKGTKWidget *native = pointer;
-    if (!native) {
-        return;
-    }
-    if (visible) {
-        gtk_widget_show(native->widget);
-    } else {
-        gtk_widget_hide(native->widget);
+    if (native) {
+        gtk_widget_set_visible(native->widget, visible != 0);
+        if (native->kind == GK_GTK_WIDGET_CANVAS) {
+            gkGTKCanvasSyncXWindow(native);
+        }
     }
 }
 
@@ -1123,28 +1251,32 @@ void gkGTKWidgetSetEnabled(void *pointer, int enabled) {
 
 void gkGTKWidgetPreferredSize(void *pointer, int *width, int *height) {
     GKGTKWidget *native = pointer;
-    GtkRequisition minimum = {0};
-    GtkRequisition natural = {0};
+    int minimum_width = 0;
+    int natural_width = 0;
+    int minimum_height = 0;
+    int natural_height = 0;
     if (native) {
-        gtk_widget_get_preferred_size(native->widget, &minimum, &natural);
+        gtk_widget_measure(native->widget, GTK_ORIENTATION_HORIZONTAL, -1, &minimum_width, &natural_width, NULL, NULL);
+        gtk_widget_measure(native->widget, GTK_ORIENTATION_VERTICAL, natural_width, &minimum_height, &natural_height,
+                           NULL, NULL);
     }
     if (native && native->kind == GK_GTK_WIDGET_TEXT_AREA) {
-        natural.width = MAX(natural.width, 200);
-        natural.height = MAX(natural.height, 96);
+        natural_width = MAX(natural_width, 200);
+        natural_height = MAX(natural_height, 96);
     }
     if (native && native->kind == GK_GTK_WIDGET_IMAGE && native->pixbuf) {
-        natural.width = gdk_pixbuf_get_width(native->pixbuf);
-        natural.height = gdk_pixbuf_get_height(native->pixbuf);
+        natural_width = gdk_pixbuf_get_width(native->pixbuf);
+        natural_height = gdk_pixbuf_get_height(native->pixbuf);
     }
     if (native && native->kind == GK_GTK_WIDGET_SCROLL_VIEW) {
-        natural.width = 320;
-        natural.height = 240;
+        natural_width = 320;
+        natural_height = 240;
     }
     if (width) {
-        *width = natural.width;
+        *width = natural_width;
     }
     if (height) {
-        *height = natural.height;
+        *height = natural_height;
     }
 }
 
@@ -1168,16 +1300,14 @@ char *gkGTKWidgetText(void *pointer) {
         text = gtk_label_get_text(GTK_LABEL(native->widget));
         break;
     case GK_GTK_WIDGET_BUTTON:
+    case GK_GTK_WIDGET_LINK:
         text = gtk_button_get_label(GTK_BUTTON(native->widget));
         break;
     case GK_GTK_WIDGET_TEXT_FIELD:
-        text = gtk_entry_get_text(GTK_ENTRY(native->widget));
+        text = gtk_editable_get_text(GTK_EDITABLE(native->widget));
         break;
     case GK_GTK_WIDGET_CHECK_BOX:
-        text = gtk_button_get_label(GTK_BUTTON(native->widget));
-        break;
-    case GK_GTK_WIDGET_LINK:
-        text = gtk_button_get_label(GTK_BUTTON(native->widget));
+        text = gtk_check_button_get_label(GTK_CHECK_BUTTON(native->widget));
         break;
     case GK_GTK_WIDGET_SECTION:
         text = gtk_expander_get_label(GTK_EXPANDER(native->widget));
@@ -1192,30 +1322,28 @@ void gkGTKWidgetSetText(void *pointer, const char *text) {
         return;
     }
     native->suppress = TRUE;
-    if (native->kind == GK_GTK_WIDGET_TEXT_AREA) {
+    switch (native->kind) {
+    case GK_GTK_WIDGET_LABEL:
+        gtk_label_set_text(GTK_LABEL(native->widget), text ? text : "");
+        break;
+    case GK_GTK_WIDGET_BUTTON:
+    case GK_GTK_WIDGET_LINK:
+        gtk_button_set_label(GTK_BUTTON(native->widget), text ? text : "");
+        break;
+    case GK_GTK_WIDGET_TEXT_FIELD:
+        gtk_editable_set_text(GTK_EDITABLE(native->widget), text ? text : "");
+        break;
+    case GK_GTK_WIDGET_TEXT_AREA: {
         GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(native->control));
         gtk_text_buffer_set_text(buffer, text ? text : "", -1);
-    } else {
-        switch (native->kind) {
-        case GK_GTK_WIDGET_LABEL:
-            gtk_label_set_text(GTK_LABEL(native->widget), text ? text : "");
-            break;
-        case GK_GTK_WIDGET_BUTTON:
-            gtk_button_set_label(GTK_BUTTON(native->widget), text ? text : "");
-            break;
-        case GK_GTK_WIDGET_TEXT_FIELD:
-            gtk_entry_set_text(GTK_ENTRY(native->widget), text ? text : "");
-            break;
-        case GK_GTK_WIDGET_CHECK_BOX:
-            gtk_button_set_label(GTK_BUTTON(native->widget), text ? text : "");
-            break;
-        case GK_GTK_WIDGET_LINK:
-            gtk_button_set_label(GTK_BUTTON(native->widget), text ? text : "");
-            break;
-        case GK_GTK_WIDGET_SECTION:
-            gtk_expander_set_label(GTK_EXPANDER(native->widget), text ? text : "");
-            break;
-        }
+        break;
+    }
+    case GK_GTK_WIDGET_CHECK_BOX:
+        gtk_check_button_set_label(GTK_CHECK_BUTTON(native->widget), text ? text : "");
+        break;
+    case GK_GTK_WIDGET_SECTION:
+        gtk_expander_set_label(GTK_EXPANDER(native->widget), text ? text : "");
+        break;
     }
     native->suppress = FALSE;
 }
@@ -1247,7 +1375,7 @@ void gkGTKTextFieldSetPlaceholder(void *pointer, const char *placeholder) {
 int gkGTKWidgetChecked(void *pointer) {
     GKGTKWidget *native = pointer;
     return native && native->kind == GK_GTK_WIDGET_CHECK_BOX &&
-           gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(native->widget));
+           gtk_check_button_get_active(GTK_CHECK_BUTTON(native->widget));
 }
 
 void gkGTKWidgetSetChecked(void *pointer, int checked) {
@@ -1256,7 +1384,7 @@ void gkGTKWidgetSetChecked(void *pointer, int checked) {
         return;
     }
     native->suppress = TRUE;
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(native->widget), checked != 0);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(native->widget), checked != 0);
     native->suppress = FALSE;
 }
 
@@ -1280,12 +1408,11 @@ double gkGTKSliderValue(void *pointer) {
 
 void gkGTKSliderSetValue(void *pointer, double value) {
     GKGTKWidget *native = pointer;
-    if (!native) {
-        return;
+    if (native) {
+        native->suppress = TRUE;
+        gtk_range_set_value(GTK_RANGE(native->widget), value);
+        native->suppress = FALSE;
     }
-    native->suppress = TRUE;
-    gtk_range_set_value(GTK_RANGE(native->widget), value);
-    native->suppress = FALSE;
 }
 
 double gkGTKProgressValue(void *pointer) {
@@ -1309,39 +1436,26 @@ int gkGTKActivityRunning(void *pointer) {
 
 void gkGTKActivitySetRunning(void *pointer, int running) {
     GKGTKWidget *native = pointer;
-    if (!native || native->kind != GK_GTK_WIDGET_ACTIVITY) {
-        return;
-    }
-    native->running = running != 0;
-    if (native->running) {
-        gtk_spinner_start(GTK_SPINNER(native->widget));
-    } else {
-        gtk_spinner_stop(GTK_SPINNER(native->widget));
+    if (native && native->kind == GK_GTK_WIDGET_ACTIVITY) {
+        native->running = running != 0;
+        gtk_spinner_set_spinning(GTK_SPINNER(native->widget), native->running);
     }
 }
 
 uintptr_t gkGTKCanvasXID(void *pointer) {
     GKGTKWidget *native = pointer;
-    if (!native) {
-        return 0;
-    }
-    gtk_widget_realize(native->widget);
-    GdkWindow *window = gtk_widget_get_window(native->widget);
-    return window && GDK_IS_X11_WINDOW(window) ? (uintptr_t)gdk_x11_window_get_xid(window) : 0;
+    gkGTKCanvasSyncXWindow(native);
+    return native ? (uintptr_t)native->xwindow : 0;
 }
 
 void gkGTKCanvasFramebufferSize(void *pointer, int *width, int *height) {
     GKGTKWidget *native = pointer;
-    GtkAllocation allocation = {0};
-    if (native) {
-        gtk_widget_get_allocation(native->widget, &allocation);
-    }
     int scale = native ? gtk_widget_get_scale_factor(native->widget) : 1;
     if (width) {
-        *width = allocation.width * scale;
+        *width = native ? gtk_widget_get_width(native->widget) * scale : 0;
     }
     if (height) {
-        *height = allocation.height * scale;
+        *height = native ? gtk_widget_get_height(native->widget) * scale : 0;
     }
 }
 
@@ -1364,88 +1478,107 @@ int gkGTKSectionExpanded(void *pointer) {
 
 void gkGTKSectionSetExpanded(void *pointer, int expanded) {
     GKGTKWidget *native = pointer;
-    if (!native) {
-        return;
+    if (native) {
+        native->suppress = TRUE;
+        gtk_expander_set_expanded(GTK_EXPANDER(native->widget), expanded != 0);
+        native->suppress = FALSE;
     }
-    native->suppress = TRUE;
-    gtk_expander_set_expanded(GTK_EXPANDER(native->widget), expanded != 0);
-    native->suppress = FALSE;
 }
 
 static void gkGTKConfigureFileChooser(GtkFileChooser *chooser, const char *directory, const char *filename,
                                       const char *extensions, gboolean saving) {
-    if (directory && directory[0]) {
-        gtk_file_chooser_set_current_folder(chooser, directory);
+    GFile *folder = directory && directory[0] ? g_file_new_for_path(directory) : NULL;
+    if (folder) {
+        gtk_file_chooser_set_current_folder(chooser, folder, NULL);
     }
     if (filename && filename[0]) {
         if (saving) {
             gtk_file_chooser_set_current_name(chooser, filename);
         } else {
-            char *folder =
-                directory && directory[0] ? g_strdup(directory) : gtk_file_chooser_get_current_folder(chooser);
-            char *path = g_path_is_absolute(filename) ? g_strdup(filename)
-                         : folder                     ? g_build_filename(folder, filename, NULL)
-                                                      : NULL;
-            if (path) {
-                gtk_file_chooser_set_filename(chooser, path);
+            GFile *file = g_path_is_absolute(filename) ? g_file_new_for_path(filename)
+                                                       : folder ? g_file_get_child(folder, filename) : NULL;
+            if (file) {
+                gtk_file_chooser_set_file(chooser, file, NULL);
+                g_object_unref(file);
             }
-            g_free(path);
-            g_free(folder);
         }
+    }
+    if (folder) {
+        g_object_unref(folder);
     }
     if (!extensions || !extensions[0]) {
         return;
     }
-
     GtkFileFilter *supported = gtk_file_filter_new();
     gtk_file_filter_set_name(supported, "Supported files");
     gchar **values = g_strsplit(extensions, ",", -1);
     for (gchar **next = values; next && *next; next++) {
-        if (!(*next)[0]) {
-            continue;
+        if ((*next)[0]) {
+            gchar *pattern = g_strdup_printf("*.%s", *next);
+            gtk_file_filter_add_pattern(supported, pattern);
+            g_free(pattern);
         }
-        gchar *pattern = g_strdup_printf("*.%s", *next);
-        gtk_file_filter_add_pattern(supported, pattern);
-        g_free(pattern);
     }
     g_strfreev(values);
     gtk_file_chooser_add_filter(chooser, supported);
-
     GtkFileFilter *all = gtk_file_filter_new();
     gtk_file_filter_set_name(all, "All files");
     gtk_file_filter_add_pattern(all, "*");
     gtk_file_chooser_add_filter(chooser, all);
 }
 
-static char *gkGTKPackPaths(GSList *paths, size_t *result_size) {
+typedef struct {
+    GMainLoop *loop;
+    int response;
+} GKGTKDialogState;
+
+static void gkGTKDialogResponse(GtkNativeDialog *dialog, int response, gpointer data) {
+    (void)dialog;
+    GKGTKDialogState *state = data;
+    state->response = response;
+    g_main_loop_quit(state->loop);
+}
+
+static int gkGTKRunDialog(GtkNativeDialog *dialog) {
+    GKGTKDialogState state = {g_main_loop_new(NULL, FALSE), GTK_RESPONSE_CANCEL};
+    g_signal_connect(dialog, "response", G_CALLBACK(gkGTKDialogResponse), &state);
+    gtk_native_dialog_show(dialog);
+    g_main_loop_run(state.loop);
+    g_main_loop_unref(state.loop);
+    return state.response;
+}
+
+static char *gkGTKPackFiles(GListModel *files, size_t *result_size) {
     size_t size = 0;
-    for (GSList *next = paths; next; next = next->next) {
-        const char *path = next->data;
+    guint count = files ? g_list_model_get_n_items(files) : 0;
+    GPtrArray *paths = g_ptr_array_new_with_free_func(g_free);
+    for (guint i = 0; i < count; i++) {
+        GFile *file = g_list_model_get_item(files, i);
+        char *path = file ? g_file_get_path(file) : NULL;
+        if (file) {
+            g_object_unref(file);
+        }
         if (path) {
             size += strlen(path) + 1;
+            g_ptr_array_add(paths, path);
         }
     }
     if (result_size) {
         *result_size = size;
     }
     if (!size) {
+        g_ptr_array_free(paths, TRUE);
         return NULL;
     }
-
     char *result = malloc(size);
-    if (!result) {
-        return NULL;
-    }
-    char *next_result = result;
-    for (GSList *next = paths; next; next = next->next) {
-        const char *path = next->data;
-        if (!path) {
-            continue;
-        }
+    char *next = result;
+    for (guint i = 0; i < paths->len; i++) {
+        const char *path = g_ptr_array_index(paths, i);
         size_t length = strlen(path) + 1;
-        memcpy(next_result, path, length);
-        next_result += length;
+        memcpy(next, path, length);
+        next += length;
     }
+    g_ptr_array_free(paths, TRUE);
     return result;
 }
 
@@ -1461,32 +1594,30 @@ char *gkGTKOpenDialog(void *window_pointer, const char *title, const char *direc
     if (!window) {
         return NULL;
     }
-
     GtkFileChooserAction action = directories ? GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER : GTK_FILE_CHOOSER_ACTION_OPEN;
-    GtkWidget *dialog = gtk_file_chooser_dialog_new(title && title[0] ? title
-                                                    : directories     ? "Select Folder"
-                                                                      : "Open File",
-                                                    GTK_WINDOW(window->window), action, "_Cancel", GTK_RESPONSE_CANCEL,
-                                                    "_Open", GTK_RESPONSE_ACCEPT, NULL);
+    GtkFileChooserNative *dialog = gtk_file_chooser_native_new(
+        title && title[0] ? title : directories ? "Select Folder" : "Open File", GTK_WINDOW(window->window), action,
+        "_Open", "_Cancel");
     GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
     gtk_file_chooser_set_select_multiple(chooser, multiple != 0);
     gkGTKConfigureFileChooser(chooser, directory, filename, extensions, FALSE);
-
     char *result = NULL;
-    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
-        GSList *paths = gtk_file_chooser_get_filenames(chooser);
-        result = gkGTKPackPaths(paths, result_size);
-        g_slist_free_full(paths, g_free);
+    if (gkGTKRunDialog(GTK_NATIVE_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        GListModel *files = gtk_file_chooser_get_files(chooser);
+        result = gkGTKPackFiles(files, result_size);
+        g_object_unref(files);
         if (cancelled) {
             *cancelled = result == NULL;
         }
     }
-    gtk_widget_destroy(dialog);
+    gtk_native_dialog_destroy(GTK_NATIVE_DIALOG(dialog));
+    g_object_unref(dialog);
     return result;
 }
 
 char *gkGTKSaveDialog(void *window_pointer, const char *title, const char *directory, const char *filename,
                       const char *extensions, int confirm_overwrite, size_t *result_size, int *cancelled) {
+    (void)confirm_overwrite;
     GKGTKWindow *window = window_pointer;
     if (result_size) {
         *result_size = 0;
@@ -1497,24 +1628,26 @@ char *gkGTKSaveDialog(void *window_pointer, const char *title, const char *direc
     if (!window) {
         return NULL;
     }
-
-    GtkWidget *dialog = gtk_file_chooser_dialog_new(title && title[0] ? title : "Save File", GTK_WINDOW(window->window),
-                                                    GTK_FILE_CHOOSER_ACTION_SAVE, "_Cancel", GTK_RESPONSE_CANCEL,
-                                                    "_Save", GTK_RESPONSE_ACCEPT, NULL);
+    GtkFileChooserNative *dialog = gtk_file_chooser_native_new(title && title[0] ? title : "Save File",
+                                                               GTK_WINDOW(window->window), GTK_FILE_CHOOSER_ACTION_SAVE,
+                                                               "_Save", "_Cancel");
     GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
-    gtk_file_chooser_set_do_overwrite_confirmation(chooser, confirm_overwrite != 0);
     gkGTKConfigureFileChooser(chooser, directory, filename, extensions, TRUE);
-
     char *result = NULL;
-    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
-        char *path = gtk_file_chooser_get_filename(chooser);
-        GSList *paths = path ? g_slist_append(NULL, path) : NULL;
-        result = gkGTKPackPaths(paths, result_size);
-        g_slist_free_full(paths, g_free);
+    if (gkGTKRunDialog(GTK_NATIVE_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        GFile *file = gtk_file_chooser_get_file(chooser);
+        GListStore *files = g_list_store_new(G_TYPE_FILE);
+        if (file) {
+            g_list_store_append(files, file);
+            g_object_unref(file);
+        }
+        result = gkGTKPackFiles(G_LIST_MODEL(files), result_size);
+        g_object_unref(files);
         if (cancelled) {
             *cancelled = result == NULL;
         }
     }
-    gtk_widget_destroy(dialog);
+    gtk_native_dialog_destroy(GTK_NATIVE_DIALOG(dialog));
+    g_object_unref(dialog);
     return result;
 }
