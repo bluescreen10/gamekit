@@ -20,11 +20,22 @@ func TestBackendRegistration(t *testing.T) {
 	ui.RegisterBackend("registry-one", func() ui.Backend {
 		return &registryBackend{name: "one"}
 	})
+	selected, err := ui.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.(*registryBackend).name != "one" {
+		t.Fatalf("only registered backend name = %q, want one", selected.(*registryBackend).name)
+	}
+
 	ui.RegisterBackend("registry-two", func() ui.Backend {
 		return &registryBackend{name: "two"}
 	})
+	if _, err := ui.New(nil); err == nil || !strings.Contains(err.Error(), "multiple backends") {
+		t.Fatalf("New(nil) error = %v, want multiple-backends error", err)
+	}
 
-	selected, err := ui.New(&ui.Config{Backend: "registry-one"})
+	selected, err = ui.New(&ui.Config{Backend: "registry-one"})
 	if err != nil {
 		t.Fatal(err)
 	}
