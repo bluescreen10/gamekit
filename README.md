@@ -91,10 +91,11 @@ import (
 backend, err := ui.New(&ui.Config{Backend: "gtk"})
 ```
 
-Run the native UI example:
+Run the native UI examples:
 
 ```sh
-go run ./examples/ui
+go run ./examples/ui/widget_gallery
+go run ./examples/ui/calculator
 ```
 
 Linux requires the GTK 4 development package.
@@ -124,11 +125,31 @@ Run all tests:
 go test ./...
 ```
 
-The UI conformance roadmap intentionally keeps this command failing while UI
-requirements are missing. Each `TestRoadmapConformance` subtest names one
-outstanding contract. To inspect only the currently executable native UI
-contract, run:
+The UI conformance tests intentionally keep this command failing while UI
+requirements are missing. Missing APIs fail during compilation. Implemented
+APIs can still fail their behavior tests. To run the UI package tests, use:
 
 ```sh
-go test ./ui/uitest -run TestCurrentBackendConformance -v
+go test ./ui -v
 ```
+
+## Format
+
+Format the Go code with `gofmt` and the C and Objective-C cgo bridges with
+`clang-format`, which reads its rules from `.clang-format`:
+
+```sh
+make fmt
+```
+
+To check the formatting without changing files, use:
+
+```sh
+make fmt-check
+```
+
+Install `clang-format` with `brew install clang-format` on macOS or
+`apt install clang-format` on Debian and Ubuntu. Different versions can format
+the same code differently; the files are formatted with clang-format 23. To use
+a different binary, set `CLANG_FORMAT`, for example
+`make fmt CLANG_FORMAT=clang-format-23`.

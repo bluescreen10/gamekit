@@ -2,13 +2,17 @@ package ui
 
 // Point is a position in logical pixels relative to a widget's parent.
 type Point struct {
+	// X is the distance from the left edge. It increases to the right.
 	X int
+	// Y is the distance from the top edge. It increases downward.
 	Y int
 }
 
 // Size is a width and height in logical pixels.
 type Size struct {
-	Width  int
+	// Width is the horizontal dimension.
+	Width int
+	// Height is the vertical dimension.
 	Height int
 }
 
@@ -19,6 +23,8 @@ func (s Size) IsValid() bool {
 
 // Rect is a widget's position and size in logical pixels.
 type Rect struct {
+	// Position is the top-left corner.
 	Position Point
-	Size     Size
+	// Size is the width and height.
+	Size Size
 }

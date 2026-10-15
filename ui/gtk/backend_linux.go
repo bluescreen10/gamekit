@@ -28,9 +28,12 @@ import (
 	"github.com/bluescreen10/gamekit/pointer"
 	"github.com/bluescreen10/gamekit/ui"
 	"github.com/bluescreen10/gamekit/ui/internal/pointerstate"
+	"github.com/bluescreen10/gamekit/ui/internal/unsupported"
 )
 
 type window struct {
+	unsupported.Window
+
 	mu       sync.RWMutex
 	native   unsafe.Pointer
 	handle   uintptr
@@ -393,6 +396,8 @@ type nativeWidget interface {
 }
 
 type widgetBase struct {
+	unsupported.Widget
+
 	window *window
 	native unsafe.Pointer
 	handle uintptr
@@ -409,7 +414,9 @@ func newWidgetBase(window *window, native unsafe.Pointer) *widgetBase {
 	return &widgetBase{window: window, native: native, visible: true, enabled: true}
 }
 
-func (w *widgetBase) base() *widgetBase { return w }
+func (w *widgetBase) base() *widgetBase {
+	return w
+}
 
 func (w *widgetBase) Close() {
 	if w == nil {
@@ -561,7 +568,9 @@ type layout struct {
 	spec ui.LayoutSpec
 }
 
-func (l *layout) base() *widgetBase { return l.widgetBase }
+func (l *layout) base() *widgetBase {
+	return l.widgetBase
+}
 
 func (l *layout) Close() {
 	if l == nil {
@@ -711,18 +720,30 @@ func copyLayoutSpec(spec ui.LayoutSpec) ui.LayoutSpec {
 	return spec
 }
 
-type label struct{ *widgetBase }
+type label struct {
+	*widgetBase
+	unsupported.Label
+}
 
-func (l *label) Text() string        { return nativeText(l.nativePointer()) }
-func (l *label) SetText(text string) { setNativeText(l.nativePointer(), text) }
+func (l *label) Text() string {
+	return nativeText(l.nativePointer())
+}
+func (l *label) SetText(text string) {
+	setNativeText(l.nativePointer(), text)
+}
 
 type button struct {
 	*widgetBase
+	unsupported.Button
 	clicks listeners[ui.ClickHandler]
 }
 
-func (b *button) Text() string        { return nativeText(b.nativePointer()) }
-func (b *button) SetText(text string) { setNativeText(b.nativePointer(), text) }
+func (b *button) Text() string {
+	return nativeText(b.nativePointer())
+}
+func (b *button) SetText(text string) {
+	setNativeText(b.nativePointer(), text)
+}
 func (b *button) OnClick(handler ui.ClickHandler) ui.Unsubscribe {
 	if handler == nil {
 		return noOpUnsubscribe
@@ -739,16 +760,22 @@ func (b *button) nativeEvent(event int) {
 
 type textField struct {
 	*widgetBase
+	unsupported.TextField
 	changes listeners[ui.TextChangeHandler]
 }
 
 type textArea struct {
 	*widgetBase
+	unsupported.TextArea
 	changes listeners[ui.TextChangeHandler]
 }
 
-func (t *textArea) Text() string        { return nativeText(t.nativePointer()) }
-func (t *textArea) SetText(text string) { setNativeText(t.nativePointer(), text) }
+func (t *textArea) Text() string {
+	return nativeText(t.nativePointer())
+}
+func (t *textArea) SetText(text string) {
+	setNativeText(t.nativePointer(), text)
+}
 func (t *textArea) Placeholder() string {
 	native := t.nativePointer()
 	if native == nil {
@@ -794,11 +821,16 @@ func (t *textArea) nativeEvent(event int) {
 
 type checkBox struct {
 	*widgetBase
+	unsupported.CheckBox
 	changes listeners[ui.ToggleHandler]
 }
 
-func (c *checkBox) Text() string        { return nativeText(c.nativePointer()) }
-func (c *checkBox) SetText(text string) { setNativeText(c.nativePointer(), text) }
+func (c *checkBox) Text() string {
+	return nativeText(c.nativePointer())
+}
+func (c *checkBox) SetText(text string) {
+	setNativeText(c.nativePointer(), text)
+}
 func (c *checkBox) IsChecked() bool {
 	native := c.nativePointer()
 	return native != nil && C.gkGTKWidgetChecked(native) != 0
@@ -830,7 +862,9 @@ type selection struct {
 	changes listeners[ui.SelectionChangeHandler]
 }
 
-func (s *selection) Items() []string { return append([]string(nil), s.items...) }
+func (s *selection) Items() []string {
+	return append([]string(nil), s.items...)
+}
 func (s *selection) SelectedIndex() int {
 	native := s.nativePointer()
 	if native == nil {
@@ -865,11 +899,22 @@ func (s *selection) nativeEvent(event int) {
 	}
 }
 
-type radioGroup struct{ *selection }
-type selectControl struct{ *selection }
+type radioGroup struct {
+	*selection
+	unsupported.RadioGroup
+}
 
-func (t *textField) Text() string        { return nativeText(t.nativePointer()) }
-func (t *textField) SetText(text string) { setNativeText(t.nativePointer(), text) }
+type selectControl struct {
+	*selection
+	unsupported.Select
+}
+
+func (t *textField) Text() string {
+	return nativeText(t.nativePointer())
+}
+func (t *textField) SetText(text string) {
+	setNativeText(t.nativePointer(), text)
+}
 func (t *textField) Placeholder() string {
 	native := t.nativePointer()
 	if native == nil {
@@ -905,10 +950,25 @@ func (t *textField) nativeEvent(event int) {
 
 type slider struct {
 	*widgetBase
-	changes listeners[ui.ValueChangeHandler]
+	unsupported.Slider
+	minimum, maximum, step float64
+	changes                listeners[ui.ValueChangeHandler]
 }
 
-type progressBar struct{ *widgetBase }
+func (s *slider) Minimum() float64 {
+	return s.minimum
+}
+func (s *slider) Maximum() float64 {
+	return s.maximum
+}
+func (s *slider) Step() float64 {
+	return s.step
+}
+
+type progressBar struct {
+	*widgetBase
+	unsupported.ProgressBar
+}
 
 func (p *progressBar) Value() float64 {
 	native := p.nativePointer()
@@ -923,7 +983,10 @@ func (p *progressBar) SetValue(value float64) {
 	}
 }
 
-type activityIndicator struct{ *widgetBase }
+type activityIndicator struct {
+	*widgetBase
+	unsupported.ActivityIndicator
+}
 
 func (a *activityIndicator) IsRunning() bool {
 	native := a.nativePointer()
@@ -937,13 +1000,17 @@ func (a *activityIndicator) SetRunning(running bool) {
 
 type separator struct {
 	*widgetBase
+	unsupported.Separator
 	direction ui.LayoutDirection
 }
 
-func (s *separator) Direction() ui.LayoutDirection { return s.direction }
+func (s *separator) Direction() ui.LayoutDirection {
+	return s.direction
+}
 
 type imageView struct {
 	*widgetBase
+	unsupported.ImageView
 	scaling ui.ImageScaling
 }
 
@@ -962,7 +1029,9 @@ func (i *imageView) SetImage(source stdimage.Image) error {
 		C.int(rgba.Rect.Dx()), C.int(rgba.Rect.Dy()), C.int(rgba.Stride))
 	return nil
 }
-func (i *imageView) Scaling() ui.ImageScaling { return i.scaling }
+func (i *imageView) Scaling() ui.ImageScaling {
+	return i.scaling
+}
 func (i *imageView) SetScaling(scaling ui.ImageScaling) error {
 	if scaling > ui.ImageScaleStretch {
 		return errors.New("ui: invalid image scaling")
@@ -978,11 +1047,16 @@ func (i *imageView) SetScaling(scaling ui.ImageScaling) error {
 
 type link struct {
 	*widgetBase
+	unsupported.Link
 	clicks listeners[ui.ClickHandler]
 }
 
-func (l *link) Text() string        { return nativeText(l.nativePointer()) }
-func (l *link) SetText(text string) { setNativeText(l.nativePointer(), text) }
+func (l *link) Text() string {
+	return nativeText(l.nativePointer())
+}
+func (l *link) SetText(text string) {
+	setNativeText(l.nativePointer(), text)
+}
 func (l *link) URL() string {
 	native := l.nativePointer()
 	if native == nil {
@@ -1018,6 +1092,7 @@ func (l *link) nativeEvent(event int) {
 
 type tabs struct {
 	*widgetBase
+	unsupported.Tabs
 	stateMu sync.RWMutex
 	items   []ui.TabItem
 	changes listeners[ui.SelectionChangeHandler]
@@ -1025,6 +1100,7 @@ type tabs struct {
 
 type scrollView struct {
 	*widgetBase
+	unsupported.ScrollView
 	content nativeWidget
 	axes    ui.ScrollAxes
 }
@@ -1187,10 +1263,16 @@ func (s *slider) Value() float64 {
 	}
 	return 0
 }
-func (s *slider) SetValue(value float64) {
-	if native := s.nativePointer(); native != nil {
-		C.gkGTKSliderSetValue(native, C.double(value))
+func (s *slider) SetValue(value float64) error {
+	if math.IsNaN(value) || value < s.minimum || value > s.maximum {
+		return errors.New("ui: slider value must be within its range")
 	}
+	native := s.nativePointer()
+	if native == nil {
+		return ui.ErrClosed
+	}
+	C.gkGTKSliderSetValue(native, C.double(value))
+	return nil
 }
 func (s *slider) OnChange(handler ui.ValueChangeHandler) ui.Unsubscribe {
 	if handler == nil {
@@ -1209,6 +1291,7 @@ func (s *slider) nativeEvent(event int) {
 
 type canvas struct {
 	*widgetBase
+	unsupported.Canvas
 	pointerstate.State
 	resizes listeners[ui.ResizeHandler]
 	redraw  atomic.Bool
@@ -1264,7 +1347,9 @@ func (c *canvas) RequestRedraw() {
 		C.gkGTKCanvasQueueDraw(native)
 	}
 }
-func (c *canvas) TakeRedrawRequest() bool { return c.redraw.Swap(false) }
+func (c *canvas) TakeRedrawRequest() bool {
+	return c.redraw.Swap(false)
+}
 
 func (c *canvas) PointerPosition() (x, y float64) {
 	native := c.nativePointer()
@@ -1278,6 +1363,7 @@ func (c *canvas) PointerPosition() (x, y float64) {
 
 type section struct {
 	*widgetBase
+	unsupported.Section
 	stateMu  sync.RWMutex
 	content  nativeWidget
 	expanded bool
@@ -1314,8 +1400,12 @@ func (s *section) PreferredSize() ui.Size {
 	size := content.PreferredSize()
 	return ui.Size{Width: max(120, size.Width), Height: size.Height + 28}
 }
-func (s *section) Title() string         { return nativeText(s.nativePointer()) }
-func (s *section) SetTitle(title string) { setNativeText(s.nativePointer(), title) }
+func (s *section) Title() string {
+	return nativeText(s.nativePointer())
+}
+func (s *section) SetTitle(title string) {
+	setNativeText(s.nativePointer(), title)
+}
 func (s *section) Content() ui.Widget {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
@@ -1485,7 +1575,7 @@ func (w *window) CreateLabel(text string) (ui.Label, error) {
 	if native == nil {
 		return nil, errors.New("ui/gtk: could not create label")
 	}
-	return &label{newWidgetBase(w, native)}, nil
+	return &label{widgetBase: newWidgetBase(w, native)}, nil
 }
 
 func (w *window) CreateButton(text string) (ui.Button, error) {
@@ -1597,7 +1687,7 @@ func (w *window) CreateSlider(options ui.SliderOptions) (ui.Slider, error) {
 	if err := options.Validate(); err != nil {
 		return nil, err
 	}
-	result := &slider{}
+	result := &slider{minimum: options.Minimum, maximum: options.Maximum, step: options.Step}
 	handle := cgo.NewHandle(result)
 	native := C.gkGTKCreateSlider(C.double(options.Minimum), C.double(options.Maximum),
 		C.double(options.Value), C.double(options.Step), C.uintptr_t(handle))
@@ -1904,7 +1994,9 @@ func fileExtensions(filters []ui.FileFilter) string {
 	return strings.Join(extensions, ",")
 }
 
-func (w *window) KeyState(key keyboard.Key) keyboard.KeyAction { return keyboard.KeyReleased }
+func (w *window) KeyState(key keyboard.Key) keyboard.KeyAction {
+	return keyboard.KeyReleased
+}
 func (w *window) PointerButtonState(button pointer.Button) pointer.ButtonAction {
 	return w.pointer.PointerButtonState(button)
 }
@@ -1920,10 +2012,17 @@ func (w *window) PointerPosition() (x, y float64) {
 func (w *window) ScrollOffset() (x, y float64) {
 	return w.pointer.ScrollOffset()
 }
-func (w *window) PointerMode() pointer.Mode                    { return pointer.Normal }
-func (w *window) SetPointerMode(mode pointer.Mode)             {}
-func (w *window) OnKey(handler ui.KeyHandler) ui.Unsubscribe   { return noOpUnsubscribe }
-func (w *window) OnText(handler ui.TextHandler) ui.Unsubscribe { return noOpUnsubscribe }
+func (w *window) PointerMode() pointer.Mode {
+	return pointer.Normal
+}
+func (w *window) SetPointerMode(mode pointer.Mode) {
+}
+func (w *window) OnKey(handler ui.KeyHandler) ui.Unsubscribe {
+	return noOpUnsubscribe
+}
+func (w *window) OnText(handler ui.TextHandler) ui.Unsubscribe {
+	return noOpUnsubscribe
+}
 func (w *window) OnPointerButton(handler ui.PointerButtonHandler) ui.Unsubscribe {
 	return w.pointer.OnPointerButton(handler)
 }
@@ -1956,7 +2055,8 @@ func boolInt(value bool) C.int {
 	return 0
 }
 
-func noOpUnsubscribe() {}
+func noOpUnsubscribe() {
+}
 
 var _ ui.Window = (*window)(nil)
 var _ ui.Layout = (*layout)(nil)

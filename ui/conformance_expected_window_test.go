@@ -3,6 +3,7 @@ package ui_test
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -138,46 +139,151 @@ func checkExpectedSystemPreferences(r *recorder, window ui.Window) {
 	})
 }
 
+// fullscreenTimeout bounds animated fullscreen transitions.
+const fullscreenTimeout = 5 * time.Second
+
+// waitFor polls window events until done reports true or timeout passes.
+func waitFor(window ui.Window, timeout time.Duration, done func() bool) bool {
+	deadline := time.Now().Add(timeout)
+	for !done() {
+		if time.Now().After(deadline) {
+			return false
+		}
+		window.PollEvents()
+		time.Sleep(10 * time.Millisecond)
+	}
+	return true
+}
+
 func checkExpectedFullscreen(r *recorder, backend ui.Backend) {
+	size := ui.Size{Width: 640, Height: 480}
 	var window ui.Window
-	r.check("window/fullscreen/startup", func() error {
+	r.check("window/fullscreen/create", func() error {
 		var err error
 		window, err = backend.CreateWindow(ui.WindowOptions{
 			Title:      "Fullscreen conformance",
-			Size:       ui.Size{Width: 640, Height: 480},
+			Size:       size,
 			Hidden:     true,
+			Resizable:  true,
 			Fullscreen: true,
 		})
-		if err != nil {
-			return err
-		}
-		if !window.IsFullscreen() {
-			return errors.New("startup fullscreen window is not fullscreen")
-		}
-		return nil
+		return err
 	})
 	if window == nil {
 		return
 	}
 	defer window.Close()
 
-	r.check("window/fullscreen/runtime", func() error {
+	var changes []bool
+	unsubscribe := window.OnFullscreenChange(func(fullscreen bool) {
+		changes = append(changes, fullscreen)
+	})
+	defer unsubscribe()
+	lastChange := func(want bool) func() bool {
+		return func() bool {
+			return len(changes) > 0 && changes[len(changes)-1] == want
+		}
+	}
+	// enter requests fullscreen and waits for it. A platform that cannot
+	// enter fullscreen now, such as while the display is locked, skips.
+	enter := func() error {
+		if err := window.SetFullscreen(true); err != nil {
+			if errors.Is(err, ui.ErrUnavailable) {
+				return skipCheck("fullscreen is unavailable: %v", err)
+			}
+			return err
+		}
+		if !waitFor(window, fullscreenTimeout, window.IsFullscreen) {
+			return errors.New("window did not enter fullscreen")
+		}
+		return nil
+	}
+	requireFullscreen := func() error {
+		if !window.IsFullscreen() {
+			return skipCheck("the window could not enter fullscreen in an earlier check")
+		}
+		return nil
+	}
+
+	r.check("window/fullscreen/subscription", func() error {
+		extra := window.OnFullscreenChange(func(bool) {
+		})
+		if extra == nil {
+			return errors.New("OnFullscreenChange returned nil")
+		}
+		extra()
+		extra()
+		return nil
+	})
+
+	r.check("window/fullscreen/startup_when_shown", func() error {
+		window.SetVisible(true)
+		if !waitFor(window, fullscreenTimeout, window.IsFullscreen) {
+			// Distinguish an environment that cannot show fullscreen from
+			// a backend that ignored the creation option.
+			if err := window.SetFullscreen(true); errors.Is(err, ui.ErrUnavailable) {
+				return skipCheck("fullscreen is unavailable: %v", err)
+			}
+			return errors.New("a window created with Fullscreen did not enter fullscreen when shown")
+		}
+		if !waitFor(window, fullscreenTimeout, lastChange(true)) {
+			return fmt.Errorf("OnFullscreenChange reported %v, want a final true", changes)
+		}
+		return nil
+	})
+
+	r.check("window/fullscreen/framebuffer", func() error {
+		if err := requireFullscreen(); err != nil {
+			return err
+		}
+		screen := window.Screen()
+		framebuffer := window.FramebufferSize()
+		want := int(float64(screen.Bounds.Size.Width) * screen.ScaleFactor)
+		if framebuffer.Width != want {
+			return fmt.Errorf("fullscreen framebuffer width = %d, want the screen's %d", framebuffer.Width, want)
+		}
+		return nil
+	})
+
+	r.check("window/fullscreen/exit_restores_size", func() error {
+		if err := requireFullscreen(); err != nil {
+			return err
+		}
 		if err := window.SetFullscreen(false); err != nil {
 			return err
 		}
-		window.PollEvents()
-		if window.IsFullscreen() {
+		if !waitFor(window, fullscreenTimeout, func() bool {
+			return !window.IsFullscreen()
+		}) {
 			return errors.New("window remained fullscreen")
 		}
-		if err := window.SetFullscreen(true); err != nil {
-			return err
+		if !waitFor(window, fullscreenTimeout, lastChange(false)) {
+			return fmt.Errorf("OnFullscreenChange reported %v, want a final false", changes)
 		}
-		window.PollEvents()
-		if !window.IsFullscreen() {
-			return errors.New("window did not enter fullscreen")
+		return wantEqual(window.Size(), size)
+	})
+
+	r.check("window/fullscreen/runtime", func() error {
+		if err := enter(); err != nil {
+			return err
 		}
 		if !window.FramebufferSize().IsValid() {
 			return errors.New("fullscreen window has an invalid framebuffer size")
+		}
+		return nil
+	})
+
+	r.check("window/fullscreen/restore", func() error {
+		if err := requireFullscreen(); err != nil {
+			return err
+		}
+		if err := window.Restore(); err != nil {
+			return err
+		}
+		if !waitFor(window, fullscreenTimeout, func() bool {
+			return !window.IsFullscreen()
+		}) {
+			return errors.New("Restore did not leave fullscreen")
 		}
 		return nil
 	})

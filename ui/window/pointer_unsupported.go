@@ -1,4 +1,4 @@
-//go:build !cgo || (!darwin && !linux && !windows)
+//go:build !cgo || (!linux && !windows)
 
 package window
 
@@ -61,22 +61,32 @@ func (w *Window) SetPointerButtonCallback(cb PointerButtonCallback) PointerButto
 }
 
 // GetScroll returns zeroes when native windows are unavailable.
-func (w *Window) GetScroll() (x, y float64) { return 0, 0 }
+func (w *Window) GetScroll() (x, y float64) {
+	return 0, 0
+}
 
 // SetPointerMode does nothing when native windows are unavailable.
-func (w *Window) SetPointerMode(pointer.Mode) {}
+func (w *Window) SetPointerMode(pointer.Mode) {
+}
 
 // GetPointerMode reports the normal cursor when native windows are unavailable.
-func (w *Window) GetPointerMode() pointer.Mode { return pointer.Normal }
+func (w *Window) GetPointerMode() pointer.Mode {
+	return pointer.Normal
+}
 
 // DisablePointer does nothing when native windows are unavailable.
-func (w *Window) DisablePointer() {}
+func (w *Window) DisablePointer() {
+}
 
 // EnablePointer does nothing when native windows are unavailable.
-func (w *Window) EnablePointer() {}
+func (w *Window) EnablePointer() {
+}
 
 // Handles are meaningless without a C layer to hand them to, so these are no-ops:
 // nothing ever dispatches an event here.
-func newWindowHandle(*Window) uintptr { return 0 }
+func newWindowHandle(*Window) uintptr {
+	return 0
+}
 
-func deleteWindowHandle(uintptr) {}
+func deleteWindowHandle(uintptr) {
+}

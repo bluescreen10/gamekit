@@ -17,6 +17,7 @@ func (*registryBackend) CreateWindow(ui.WindowOptions) (ui.Window, error) {
 }
 
 func TestBackendRegistration(t *testing.T) {
+	t.Cleanup(ui.IsolateRegistry())
 	ui.RegisterBackend("registry-one", func() ui.Backend {
 		return &registryBackend{name: "one"}
 	})
@@ -65,6 +66,7 @@ func TestBackendRegistration(t *testing.T) {
 }
 
 func TestNewRejectsUnknownBackend(t *testing.T) {
+	t.Cleanup(ui.IsolateRegistry())
 	_, err := ui.New(&ui.Config{Backend: "registry-missing"})
 	if err == nil || !strings.Contains(err.Error(), `backend "registry-missing" is not registered`) {
 		t.Fatalf("New() error = %v, want missing-backend error", err)

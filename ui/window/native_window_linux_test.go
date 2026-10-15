@@ -1,0 +1,68 @@
+//go:build linux && cgo
+
+package window_test
+
+import (
+	"math"
+	"os"
+	"testing"
+
+	"github.com/bluescreen10/gamekit/gpu"
+	"github.com/bluescreen10/gamekit/gpu/vulkan"
+	"github.com/bluescreen10/gamekit/keyboard"
+	"github.com/bluescreen10/gamekit/ui/window"
+)
+
+func TestNativeWindowAndVulkanSurface(t *testing.T) {
+	if os.Getenv("DISPLAY") == "" {
+		t.Skip("DISPLAY is not set")
+	}
+
+	win, err := window.CreateWindow("gamekit test", 320, 200, &window.WindowOptions{Hidden: true, Resizable: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer win.Destroy()
+	if win.GetNativeDisplay() == nil || win.GetNativeHandle() == 0 {
+		t.Fatal("native X11 handles are missing")
+	}
+	if width, height := win.GetSize(); width != 320 || height != 200 {
+		t.Fatalf("window size = %dx%d, want 320x200", width, height)
+	}
+	x, y := win.GetPointerPos()
+	if math.IsNaN(x) || math.IsNaN(y) || math.IsInf(x, 0) || math.IsInf(y, 0) {
+		t.Fatalf("cursor position = (%v, %v), want finite coordinates", x, y)
+	}
+	if action := win.GetKey(keyboard.KeyEsc); action != keyboard.KeyReleased {
+		t.Fatalf("initial escape action = %v, want KeyReleased", action)
+	}
+	win.SetTitle("renamed")
+	if win.GetTitle() != "renamed" {
+		t.Fatalf("title = %q, want renamed", win.GetTitle())
+	}
+	win.SetShouldClose(true)
+	if !win.ShouldClose() {
+		t.Fatal("SetShouldClose(true) was ignored")
+	}
+	win.SetShouldClose(false)
+
+	backend := vulkan.New("VK_KHR_surface", "VK_KHR_xlib_surface")
+	if err := backend.Init(); err != nil {
+		t.Fatalf("initialize Vulkan: %v", err)
+	}
+	defer backend.Destroy()
+	surface, err := backend.CreateSurface(win)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if surface == 0 {
+		t.Fatal("Vulkan surface is nil")
+	}
+	swapchain, err := backend.CreateSwapchain(surface, gpu.SwapchainDescriptor{Width: 320, Height: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if swapchain.H == 0 {
+		t.Fatal("Vulkan swapchain is invalid")
+	}
+}

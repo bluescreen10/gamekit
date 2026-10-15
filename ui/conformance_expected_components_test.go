@@ -323,6 +323,38 @@ func checkExpectedCalendarKeyRecorderAndDial(r *recorder, window ui.Window) {
 		Selection:     ui.CalendarRange,
 	})
 	checkExpectedCreation(r, "calendar", calendar, calendarErr)
+	if calendar != nil {
+		r.check("calendar/visible_month", func() error {
+			if err := skipOnDarwin("NSDatePicker always shows the month of its date"); err != nil {
+				return err
+			}
+			month := time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC)
+			calendar.SetVisibleMonth(month)
+			if !calendar.VisibleMonth().Equal(month) {
+				return fmt.Errorf("VisibleMonth() = %v, want %v", calendar.VisibleMonth(), month)
+			}
+			if dates := calendar.SelectedDates(); len(dates) == 0 || !dates[0].Equal(date) {
+				return fmt.Errorf("SetVisibleMonth changed the selection to %v", dates)
+			}
+			return nil
+		})
+	}
+	r.check("calendar/multiple_selection", func() error {
+		if err := skipOnDarwin("NSDatePicker selects one date or one range, not disjoint dates"); err != nil {
+			return err
+		}
+		dates := []time.Time{date, date.AddDate(0, 0, 3)}
+		multiple, err := window.CreateCalendar(ui.CalendarOptions{SelectedDates: dates, Selection: ui.CalendarMultiple})
+		if err != nil {
+			return err
+		}
+		defer multiple.Close()
+		got := multiple.SelectedDates()
+		if len(got) != len(dates) || !got[0].Equal(dates[0]) || !got[1].Equal(dates[1]) {
+			return fmt.Errorf("SelectedDates() = %v, want %v", got, dates)
+		}
+		return nil
+	})
 
 	recorder, recorderErr := window.CreateKeyRecorder(ui.KeyRecorderOptions{
 		Shortcut: ui.Shortcut{Key: "K", Command: true, Shift: true},

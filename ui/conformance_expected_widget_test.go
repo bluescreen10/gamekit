@@ -3,6 +3,7 @@ package ui_test
 import (
 	"errors"
 	"fmt"
+	"image/color"
 	"reflect"
 
 	"github.com/bluescreen10/gamekit/ui"
@@ -30,7 +31,7 @@ func checkExpectedWidgetContract(r *recorder, window ui.Window) {
 	checkExpectedAccessibility(r, label, field)
 	checkExpectedFocus(r, window, field)
 	checkExpectedWidgetGeometry(r, label)
-	checkExpectedWidgetPresentation(r, label)
+	checkExpectedWidgetPresentation(r, window, label)
 	checkExpectedWidgetInteraction(r, window, label)
 	checkExpectedAccessibilityTree(r, window, label, field)
 }
@@ -45,14 +46,41 @@ func checkExpectedAccessibility(r *recorder, label ui.Label, field ui.TextField)
 			LabeledBy:   []ui.Widget{label},
 			DescribedBy: []ui.Widget{label},
 			IsRequired:  true,
-			IsInvalid:   true,
-			Live:        ui.LivePolite,
 		}
 		if err := field.SetAccessibility(want); err != nil {
 			return err
 		}
 		if got := field.Accessibility(); !reflect.DeepEqual(got, want) {
 			return fmt.Errorf("Accessibility() = %#v, want %#v", got, want)
+		}
+		return nil
+	})
+
+	r.check("widget/accessibility/invalid", func() error {
+		if err := skipOnDarwin("NSAccessibility has no invalid state"); err != nil {
+			return err
+		}
+		want := field.Accessibility()
+		want.IsInvalid = true
+		defer restoreAccessibility(field, want)
+		if err := field.SetAccessibility(want); err != nil {
+			return err
+		}
+		if !field.Accessibility().IsInvalid {
+			return errors.New("the invalid state was not preserved")
+		}
+		return nil
+	})
+
+	r.check("widget/accessibility/live", func() error {
+		want := field.Accessibility()
+		want.Live = ui.LivePolite
+		defer restoreAccessibility(field, want)
+		if err := field.SetAccessibility(want); err != nil {
+			return err
+		}
+		if field.Accessibility().Live != ui.LivePolite {
+			return errors.New("the live region was not preserved")
 		}
 		return nil
 	})
@@ -132,7 +160,7 @@ func checkExpectedWidgetGeometry(r *recorder, widget ui.Widget) {
 	})
 }
 
-func checkExpectedWidgetPresentation(r *recorder, widget ui.Widget) {
+func checkExpectedWidgetPresentation(r *recorder, window ui.Window, widget ui.Widget) {
 	r.check("widget/presentation/tooltip", func() error {
 		widget.SetTooltip("More information")
 		return wantEqual(widget.Tooltip(), "More information")
@@ -154,6 +182,30 @@ func checkExpectedWidgetPresentation(r *recorder, widget ui.Widget) {
 		}
 		if got := widget.Style(); got != want {
 			return fmt.Errorf("Style() = %#v, want %#v", got, want)
+		}
+		return nil
+	})
+	r.check("widget/presentation/style_exact_colors", func() error {
+		button, err := window.CreateButton("Filled")
+		if err != nil {
+			return err
+		}
+		defer button.Close()
+		want := ui.WidgetStyle{
+			Font:            ui.Font{Size: 24},
+			ForegroundColor: color.RGBA{R: 255, G: 255, B: 255, A: 255},
+			BackgroundColor: color.RGBA{R: 255, G: 159, B: 10, A: 255},
+			CornerRadius:    12,
+		}
+		if err := button.SetStyle(want); err != nil {
+			return err
+		}
+		button.SetText("Renamed")
+		if got := button.Style(); got != want {
+			return fmt.Errorf("Style() = %#v, want %#v", got, want)
+		}
+		if err := button.SetStyle(ui.WidgetStyle{CornerRadius: -1}); err == nil {
+			return errors.New("SetStyle accepted a negative corner radius")
 		}
 		return nil
 	})
@@ -218,4 +270,11 @@ func checkExpectedAccessibilityTree(r *recorder, window ui.Window, label ui.Labe
 		}
 		return nil
 	})
+}
+
+// restoreAccessibility clears the states that a check added to metadata.
+func restoreAccessibility(widget ui.Widget, metadata ui.Accessibility) {
+	metadata.IsInvalid = false
+	metadata.Live = ui.LiveOff
+	_ = widget.SetAccessibility(metadata)
 }

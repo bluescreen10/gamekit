@@ -162,11 +162,17 @@ func checkExpectedChoiceExtensions(r *recorder, window ui.Window) {
 			selectControl.SetPlaceholder("Choose")
 			selectControl.SetChoices([]ui.Choice{{ID: "one", Text: "One", Enabled: true}})
 			selectControl.SetPopupWidth(240)
-			selectControl.SetVisibleRowCount(8)
 			if selectControl.Placeholder() != "Choose" || selectControl.PopupWidth() != 240 {
 				return errors.New("select placeholder or popup width was not preserved")
 			}
 			return nil
+		})
+		r.check("select/complete/visible_rows", func() error {
+			if err := skipOnDarwin("NSPopUpButton menus size themselves to the screen"); err != nil {
+				return err
+			}
+			selectControl.SetVisibleRowCount(8)
+			return wantEqual(selectControl.VisibleRowCount(), 8)
 		})
 	}
 }
@@ -218,8 +224,14 @@ func checkExpectedPresentationExtensions(r *recorder, window ui.Window) {
 	})
 	if activity != nil {
 		defer activity.Close()
-		activity.SetControlSize(ui.ControlSizeLarge)
-		activity.SetLabel("Loading")
+		r.check("activity_indicator/complete/state", func() error {
+			activity.SetControlSize(ui.ControlSizeLarge)
+			activity.SetLabel("Loading")
+			if activity.ControlSize() != ui.ControlSizeLarge || activity.Label() != "Loading" {
+				return errors.New("activity indicator size or label was not preserved")
+			}
+			return nil
+		})
 	}
 
 	separator, err := window.CreateSeparator(ui.Horizontal)
@@ -228,10 +240,17 @@ func checkExpectedPresentationExtensions(r *recorder, window ui.Window) {
 	})
 	if separator != nil {
 		defer separator.Close()
-		separator.SetDirection(ui.Vertical)
-		separator.SetLabel("Advanced")
-		separator.SetPresentation(ui.SeparatorInset)
-		separator.SetThickness(2)
+		r.check("separator/complete/state", func() error {
+			separator.SetDirection(ui.Vertical)
+			separator.SetLabel("Advanced")
+			separator.SetPresentation(ui.SeparatorInset)
+			separator.SetThickness(2)
+			if separator.Direction() != ui.Vertical || separator.Label() != "Advanced" ||
+				separator.Presentation() != ui.SeparatorInset || separator.Thickness() != 2 {
+				return errors.New("separator attributes were not preserved")
+			}
+			return nil
+		})
 	}
 
 	imageView, err := window.CreateImage(ui.ImageOptions{Source: testImage(), Scaling: ui.ImageScaleFit})
@@ -258,10 +277,17 @@ func checkExpectedPresentationExtensions(r *recorder, window ui.Window) {
 	})
 	if link != nil {
 		defer link.Close()
-		link.SetVisited(true)
-		link.SetOpenPolicy(ui.LinkOpenPlatform)
-		link.SetTooltip("Open documentation")
-		link.SetIcon(ui.IconSource{SystemName: "link"})
+		r.check("link/complete/state", func() error {
+			link.SetVisited(true)
+			link.SetOpenPolicy(ui.LinkOpenPlatform)
+			link.SetTooltip("Open documentation")
+			link.SetIcon(ui.IconSource{SystemName: "link"})
+			if !link.IsVisited() || link.OpenPolicy() != ui.LinkOpenPlatform ||
+				link.Tooltip() != "Open documentation" || link.Icon().SystemName != "link" {
+				return errors.New("link attributes were not preserved")
+			}
+			return nil
+		})
 	}
 }
 
@@ -285,11 +311,17 @@ func checkExpectedContainerExtensions(r *recorder, window ui.Window) {
 		defer tabs.Close()
 		r.check("tabs/complete/placement", func() error {
 			tabs.SetPlacement(ui.TabPlacementLeft)
-			tabs.SetOverflowPolicy(ui.TabOverflowScroll)
 			if tabs.Placement() != ui.TabPlacementLeft {
 				return fmt.Errorf("Placement() = %v", tabs.Placement())
 			}
 			return nil
+		})
+		r.check("tabs/complete/overflow_scroll", func() error {
+			if err := skipOnDarwin("NSTabView puts extra tabs in a menu and cannot scroll them"); err != nil {
+				return err
+			}
+			tabs.SetOverflowPolicy(ui.TabOverflowScroll)
+			return wantEqual(tabs.OverflowPolicy(), ui.TabOverflowScroll)
 		})
 	}
 
@@ -350,10 +382,24 @@ func checkExpectedContainerExtensions(r *recorder, window ui.Window) {
 		})
 		if section != nil {
 			defer section.Close()
-			section.SetSubtitle("Details")
-			section.SetIcon(ui.IconSource{SystemName: "gear"})
-			section.SetBadge("2")
-			section.SetAnimationEnabled(false)
+			r.check("section/complete/state", func() error {
+				section.SetSubtitle("Details")
+				section.SetIcon(ui.IconSource{SystemName: "gear"})
+				section.SetBadge("2")
+				section.SetAnimationEnabled(false)
+				if section.Subtitle() != "Details" || section.Icon().SystemName != "gear" ||
+					section.Badge() != "2" || section.IsAnimationEnabled() {
+					return errors.New("section attributes were not preserved")
+				}
+				return nil
+			})
+			r.check("section/complete/animation", func() error {
+				section.SetAnimationEnabled(true)
+				if !section.IsAnimationEnabled() {
+					return errors.New("IsAnimationEnabled() = false after SetAnimationEnabled(true)")
+				}
+				return nil
+			})
 		}
 	}
 

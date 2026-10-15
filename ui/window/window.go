@@ -8,6 +8,7 @@ import (
 	"github.com/bluescreen10/gamekit/keyboard"
 	"github.com/bluescreen10/gamekit/pointer"
 	"github.com/bluescreen10/gamekit/ui"
+	"github.com/bluescreen10/gamekit/ui/internal/unsupported"
 )
 
 // WindowOptions controls optional native-window behavior. Its zero value creates
@@ -29,6 +30,8 @@ type WindowOptions struct {
 // be called from the goroutine that called CreateWindow. On macOS that goroutine
 // must be the program's main goroutine.
 type Window struct {
+	unsupported.Window
+
 	mu        sync.RWMutex
 	native    unsafe.Pointer
 	title     string

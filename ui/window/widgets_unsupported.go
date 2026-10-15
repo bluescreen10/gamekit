@@ -1,4 +1,4 @@
-//go:build (!darwin && !windows) || !cgo
+//go:build !windows || !cgo
 
 package window
 

@@ -12,6 +12,7 @@ type LayoutDirection uint8
 const (
 	// Horizontal places children from left to right.
 	Horizontal LayoutDirection = iota
+
 	// Vertical places children from top to bottom.
 	Vertical
 )
@@ -20,18 +21,32 @@ const (
 type Alignment uint8
 
 const (
+	// AlignStretch makes the child fill the secondary axis.
 	AlignStretch Alignment = iota
+
+	// AlignStart places the child at the top or left edge.
 	AlignStart
+
+	// AlignCenter places the child in the middle.
 	AlignCenter
+
+	// AlignEnd places the child at the bottom or right edge.
 	AlignEnd
 )
 
 // Insets are logical-pixel distances from the four edges of a layout.
 type Insets struct {
-	Top    int
-	Right  int
+	// Top is the distance from the top edge.
+	Top int
+
+	// Right is the distance from the right edge.
+	Right int
+
+	// Bottom is the distance from the bottom edge.
 	Bottom int
-	Left   int
+
+	// Left is the distance from the left edge.
+	Left int
 }
 
 // UniformInsets returns equal insets on all four edges.
@@ -46,11 +61,21 @@ func UniformInsets(size int) Insets {
 
 // LayoutItem describes one child or flexible spacer in a LayoutSpec.
 type LayoutItem struct {
-	Widget     Widget
+	// Widget is the child. It is nil for a spacer.
+	Widget Widget
+
+	// GrowWeight is the share of the remaining space that the item receives.
+	// Zero keeps the preferred size.
 	GrowWeight float32
-	Alignment  Alignment
-	Minimum    Size
-	IsSpacer   bool
+
+	// Alignment places the item on the secondary axis.
+	Alignment Alignment
+
+	// Minimum is the smallest size of the item.
+	Minimum Size
+
+	// IsSpacer marks an empty item that only takes space.
+	IsSpacer bool
 }
 
 // Item creates a layout item for widget.
@@ -87,10 +112,17 @@ func (item LayoutItem) MinimumSize(size Size) LayoutItem {
 
 // LayoutSpec declaratively describes a row or column of native controls.
 type LayoutSpec struct {
+	// Direction is the primary axis of the layout.
 	Direction LayoutDirection
-	Items     []LayoutItem
-	Padding   Insets
-	Gap       int
+
+	// Items are the children and spacers in order.
+	Items []LayoutItem
+
+	// Padding is the space between the edges of the layout and its items.
+	Padding Insets
+
+	// Gap is the space between adjacent items in logical pixels.
+	Gap int
 }
 
 // Row describes a horizontal layout containing items.
@@ -213,24 +245,69 @@ func (spec LayoutSpec) Resolve(size Size) ([]Rect, error) {
 		_, itemCross := spec.axes(itemSize)
 		_, minimumCross := spec.axes(minimumSize)
 		crossPosition, resolvedCross := spec.alignCross(item.Alignment, crossSize, itemCross, minimumCross)
-		positions[i] = spec.rect(primaryPosition, crossPosition, primarySizes[i], resolvedCross)
+		positions[i] = item.place(spec.rect(primaryPosition, crossPosition, primarySizes[i], resolvedCross))
 		primaryPosition += primarySizes[i] + spec.Gap
 	}
 	return positions, nil
 }
 
+// preferredSize includes the widget's size hints and margins.
 func (item LayoutItem) preferredSize() Size {
 	size := Size{}
 	if item.Widget != nil {
 		size = item.Widget.PreferredSize()
+		minimum := item.Widget.MinimumSize()
+		size.Width = max(size.Width, minimum.Width)
+		size.Height = max(size.Height, minimum.Height)
+		if maximum := item.Widget.MaximumSize(); maximum.Width > 0 {
+			size.Width = min(size.Width, maximum.Width)
+		}
+		if maximum := item.Widget.MaximumSize(); maximum.Height > 0 {
+			size.Height = min(size.Height, maximum.Height)
+		}
 	}
-	size.Width = max(size.Width, item.Minimum.Width)
-	size.Height = max(size.Height, item.Minimum.Height)
+	margins := item.margins()
+	size.Width = max(size.Width+margins.Left+margins.Right, item.Minimum.Width)
+	size.Height = max(size.Height+margins.Top+margins.Bottom, item.Minimum.Height)
 	return size
 }
 
 func (item LayoutItem) minimumSize() Size {
-	return item.Minimum
+	size := item.Minimum
+	if item.Widget != nil {
+		minimum := item.Widget.MinimumSize()
+		margins := item.margins()
+		size.Width = max(size.Width, minimum.Width+margins.Left+margins.Right)
+		size.Height = max(size.Height, minimum.Height+margins.Top+margins.Bottom)
+	}
+	return size
+}
+
+func (item LayoutItem) margins() Insets {
+	if item.Widget == nil {
+		return Insets{}
+	}
+	return item.Widget.Margins()
+}
+
+// place converts an item's allocated rectangle into the widget's bounds by
+// removing its margins and applying its maximum size.
+func (item LayoutItem) place(rect Rect) Rect {
+	if item.Widget == nil {
+		return rect
+	}
+	margins := item.margins()
+	rect.Position.X += margins.Left
+	rect.Position.Y += margins.Top
+	rect.Size.Width = max(0, rect.Size.Width-margins.Left-margins.Right)
+	rect.Size.Height = max(0, rect.Size.Height-margins.Top-margins.Bottom)
+	if maximum := item.Widget.MaximumSize(); maximum.Width > 0 && rect.Size.Width > maximum.Width {
+		rect.Size.Width = maximum.Width
+	}
+	if maximum := item.Widget.MaximumSize(); maximum.Height > 0 && rect.Size.Height > maximum.Height {
+		rect.Size.Height = maximum.Height
+	}
+	return rect
 }
 
 func (spec LayoutSpec) axes(size Size) (primary, cross int) {

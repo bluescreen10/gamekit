@@ -1,0 +1,2 @@
+CompileFlags:
+  Add: [-xobjective-c, -fno-objc-arc]

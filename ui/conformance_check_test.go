@@ -58,6 +58,7 @@ func checkBackend(backend ui.Backend) conformanceReport {
 	checkWindowContent(&r, backend)
 	checkWidgetCreationValidation(&r, window)
 	checkWidgetOwnership(&r, backend)
+	checkContainerRollback(&r, window)
 	checkWidgets(&r, window)
 	checkExpectedWidgetContract(&r, window)
 	checkExpectedComponents(&r, window)
@@ -364,6 +365,54 @@ func checkWindowClose(r *recorder, backend ui.Backend) {
 		}
 		window.Close()
 		window.Close()
+		return nil
+	})
+	r.check("window/close_releases_owned_objects", func() error {
+		window, err := backend.CreateWindow(ui.WindowOptions{
+			Title:  "Close ownership conformance",
+			Size:   ui.Size{Width: 160, Height: 100},
+			Hidden: true,
+		})
+		if err != nil {
+			return err
+		}
+		detached, err := window.CreateButton("Detached")
+		if err != nil {
+			window.Close()
+			return err
+		}
+		anchor, err := window.CreateButton("Anchor")
+		if err != nil {
+			window.Close()
+			return err
+		}
+		popoverContent, err := window.CreateLabel("Popover")
+		if err != nil {
+			window.Close()
+			return err
+		}
+		popover, err := window.CreatePopover(ui.PopoverOptions{Anchor: anchor, Content: popoverContent})
+		if err != nil {
+			window.Close()
+			return err
+		}
+		menu, err := window.CreateMenu(ui.MenuOptions{Items: []ui.MenuItem{{ActionID: "item"}},
+			Actions: []ui.Action{{ID: "item", Text: "Item", Enabled: true}}})
+		if err != nil {
+			window.Close()
+			return err
+		}
+		window.Close()
+
+		if err := detached.SetAccessibility(ui.Accessibility{Name: "closed"}); !errors.Is(err, ui.ErrClosed) {
+			return fmt.Errorf("SetAccessibility on a widget of a closed window error = %v, want ErrClosed", err)
+		}
+		if err := popover.Show(); !errors.Is(err, ui.ErrClosed) {
+			return fmt.Errorf("Show on a popover of a closed window error = %v, want ErrClosed", err)
+		}
+		if err := menu.SetItems(nil); !errors.Is(err, ui.ErrClosed) {
+			return fmt.Errorf("SetItems on a menu of a closed window error = %v, want ErrClosed", err)
+		}
 		return nil
 	})
 }
@@ -821,4 +870,62 @@ func wantError(got, want error) error {
 		return fmt.Errorf("error = %v, want %v", got, want)
 	}
 	return nil
+}
+
+// checkContainerRollback checks that a container which rejects one child
+// leaves every other child unchanged, so the caller can still use them.
+func checkContainerRollback(r *recorder, window ui.Window) {
+	containers := []struct {
+		name   string
+		create func(children []ui.Widget) (ui.Widget, error)
+	}{
+		{name: "flow_layout", create: func(children []ui.Widget) (ui.Widget, error) {
+			return window.CreateFlowLayout(ui.FlowLayoutOptions{Children: children})
+		}},
+		{name: "tabs", create: func(children []ui.Widget) (ui.Widget, error) {
+			items := make([]ui.TabItem, len(children))
+			for i, child := range children {
+				items[i] = ui.TabItem{Title: fmt.Sprint("Tab ", i), Content: child}
+			}
+			return window.CreateTabs(ui.TabsOptions{Items: items})
+		}},
+		{name: "split_view", create: func(children []ui.Widget) (ui.Widget, error) {
+			panes := make([]ui.SplitPane, len(children))
+			for i, child := range children {
+				panes[i] = ui.SplitPane{Content: child}
+			}
+			return window.CreateSplitView(ui.SplitViewOptions{Panes: panes})
+		}},
+	}
+	for _, container := range containers {
+		container := container
+		r.check("containers/rollback/"+container.name, func() error {
+			valid, err := window.CreateLabel("Valid child")
+			if err != nil {
+				return err
+			}
+			defer valid.Close()
+			other, err := window.CreateLabel("Other child")
+			if err != nil {
+				return err
+			}
+			defer other.Close()
+			closed, err := window.CreateLabel("Closed child")
+			if err != nil {
+				return err
+			}
+			closed.Close()
+
+			if rejected, err := container.create([]ui.Widget{valid, closed}); err == nil {
+				rejected.Close()
+				return errors.New("a container accepted a closed child")
+			}
+			accepted, err := container.create([]ui.Widget{valid, other})
+			if err != nil {
+				return fmt.Errorf("children of a rejected container are unusable: %w", err)
+			}
+			accepted.Close()
+			return nil
+		})
+	}
 }

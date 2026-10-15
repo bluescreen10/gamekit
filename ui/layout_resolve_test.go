@@ -4,9 +4,11 @@ import (
 	"testing"
 
 	"github.com/bluescreen10/gamekit/ui"
+	"github.com/bluescreen10/gamekit/ui/internal/unsupported"
 )
 
 type widget struct {
+	unsupported.Widget
 	preferred ui.Size
 }
 

@@ -1,4 +1,4 @@
-//go:build cgo && (darwin || linux || windows)
+//go:build cgo && (linux || windows)
 
 package window_test
 

@@ -13,6 +13,8 @@ func checkExpectedDialogsAndServices(r *recorder, window ui.Window) {
 	checkExpectedDialogs(r, window)
 	checkExpectedClipboard(r, window)
 	checkExpectedPlatformServices(r, window)
+	checkPlatformNotifications(r, window)
+	checkExpectedSystemTray(r, window)
 }
 
 func checkExpectedDialogs(r *recorder, window ui.Window) {

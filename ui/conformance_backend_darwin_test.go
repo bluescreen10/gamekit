@@ -13,6 +13,9 @@ import (
 var backendReport conformanceReport
 
 func TestMain(m *testing.M) {
+	if code, isHelper := runBundleHelper(); isHelper {
+		os.Exit(code)
+	}
 	runtime.LockOSThread()
 	backendReport = checkBackend(&cocoa.Backend{})
 	code := m.Run()

@@ -1,4 +1,4 @@
-//go:build cgo && (darwin || linux || windows)
+//go:build cgo && (linux || windows)
 
 package window
 
@@ -45,8 +45,12 @@ func (w *Window) GetPointerMode() pointer.Mode {
 // This is what a first-person camera needs: the pointer never reaches the edge of the
 // display, so there is no limit on how far the view can turn. Shorthand for
 // SetPointerMode(pointer.Disabled).
-func (w *Window) DisablePointer() { w.SetPointerMode(pointer.Disabled) }
+func (w *Window) DisablePointer() {
+	w.SetPointerMode(pointer.Disabled)
+}
 
 // EnablePointer restores the normal visible, free-moving cursor. Shorthand for
 // SetPointerMode(pointer.Normal).
-func (w *Window) EnablePointer() { w.SetPointerMode(pointer.Normal) }
+func (w *Window) EnablePointer() {
+	w.SetPointerMode(pointer.Normal)
+}

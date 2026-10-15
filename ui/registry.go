@@ -11,6 +11,7 @@ import (
 // the registered default. If no default exists, New uses the only registered
 // backend.
 type Config struct {
+	// Backend is the name that the backend used with RegisterBackend.
 	Backend string
 }
 

@@ -1,9 +1,8 @@
-//go:build cgo && (darwin || windows)
+//go:build cgo && windows
 
 package window
 
 /*
-#cgo darwin LDFLAGS: -framework QuartzCore
 #include "widget_bridge.h"
 #include <stdlib.h>
 */
@@ -14,7 +13,6 @@ import (
 	stdimage "image"
 	"image/draw"
 	"math"
-	"runtime"
 	"runtime/cgo"
 	"sync"
 	"sync/atomic"
@@ -22,6 +20,7 @@ import (
 
 	"github.com/bluescreen10/gamekit/gpu"
 	"github.com/bluescreen10/gamekit/ui"
+	"github.com/bluescreen10/gamekit/ui/internal/unsupported"
 )
 
 type nativeWidget interface {
@@ -30,6 +29,8 @@ type nativeWidget interface {
 }
 
 type widgetBase struct {
+	unsupported.Widget
+
 	window *Window
 	native unsafe.Pointer
 	handle uintptr
@@ -337,6 +338,9 @@ func (l *layout) validateChildren(spec ui.LayoutSpec) ([]nativeWidget, error) {
 		if base.parent != nil && base.parent.base() != l.widgetBase {
 			return nil, errors.New("ui/window: layout child already has a parent")
 		}
+		if l.window.isContent(base) {
+			return nil, errors.New("ui/window: layout child is the window content")
+		}
 		if _, exists := seen[base]; exists {
 			return nil, errors.New("ui/window: layout contains the same child more than once")
 		}
@@ -397,6 +401,7 @@ func copyLayoutSpec(spec ui.LayoutSpec) ui.LayoutSpec {
 
 type label struct {
 	*widgetBase
+	unsupported.Label
 }
 
 func (l *label) Text() string {
@@ -409,6 +414,7 @@ func (l *label) SetText(text string) {
 
 type button struct {
 	*widgetBase
+	unsupported.Button
 	clicks listeners[ui.ClickHandler]
 }
 
@@ -438,16 +444,22 @@ func (b *button) nativeEvent(event int) {
 
 type textField struct {
 	*widgetBase
+	unsupported.TextField
 	changes listeners[ui.TextChangeHandler]
 }
 
 type textArea struct {
 	*widgetBase
+	unsupported.TextArea
 	changes listeners[ui.TextChangeHandler]
 }
 
-func (t *textArea) Text() string        { return nativeText(t.nativePointer()) }
-func (t *textArea) SetText(text string) { setNativeText(t.nativePointer(), text) }
+func (t *textArea) Text() string {
+	return nativeText(t.nativePointer())
+}
+func (t *textArea) SetText(text string) {
+	setNativeText(t.nativePointer(), text)
+}
 func (t *textArea) Placeholder() string {
 	native := t.nativePointer()
 	if native == nil {
@@ -496,11 +508,16 @@ func (t *textArea) nativeEvent(event int) {
 
 type checkBox struct {
 	*widgetBase
+	unsupported.CheckBox
 	changes listeners[ui.ToggleHandler]
 }
 
-func (c *checkBox) Text() string        { return nativeText(c.nativePointer()) }
-func (c *checkBox) SetText(text string) { setNativeText(c.nativePointer(), text) }
+func (c *checkBox) Text() string {
+	return nativeText(c.nativePointer())
+}
+func (c *checkBox) SetText(text string) {
+	setNativeText(c.nativePointer(), text)
+}
 func (c *checkBox) IsChecked() bool {
 	native := c.nativePointer()
 	return native != nil && C.gkUIChecked(native) != 0
@@ -532,7 +549,9 @@ type selection struct {
 	changes listeners[ui.SelectionChangeHandler]
 }
 
-func (s *selection) Items() []string { return append([]string(nil), s.items...) }
+func (s *selection) Items() []string {
+	return append([]string(nil), s.items...)
+}
 func (s *selection) SelectedIndex() int {
 	native := s.nativePointer()
 	if native == nil {
@@ -567,8 +586,15 @@ func (s *selection) nativeEvent(event int) {
 	}
 }
 
-type radioGroup struct{ *selection }
-type selectControl struct{ *selection }
+type radioGroup struct {
+	*selection
+	unsupported.RadioGroup
+}
+
+type selectControl struct {
+	*selection
+	unsupported.Select
+}
 
 func (t *textField) Text() string {
 	return nativeText(t.nativePointer())
@@ -620,10 +646,25 @@ func (t *textField) nativeEvent(event int) {
 
 type slider struct {
 	*widgetBase
-	changes listeners[ui.ValueChangeHandler]
+	unsupported.Slider
+	minimum, maximum, step float64
+	changes                listeners[ui.ValueChangeHandler]
 }
 
-type progressBar struct{ *widgetBase }
+func (s *slider) Minimum() float64 {
+	return s.minimum
+}
+func (s *slider) Maximum() float64 {
+	return s.maximum
+}
+func (s *slider) Step() float64 {
+	return s.step
+}
+
+type progressBar struct {
+	*widgetBase
+	unsupported.ProgressBar
+}
 
 func (p *progressBar) Value() float64 {
 	native := p.nativePointer()
@@ -638,7 +679,10 @@ func (p *progressBar) SetValue(value float64) {
 	}
 }
 
-type activityIndicator struct{ *widgetBase }
+type activityIndicator struct {
+	*widgetBase
+	unsupported.ActivityIndicator
+}
 
 func (a *activityIndicator) IsRunning() bool {
 	native := a.nativePointer()
@@ -652,13 +696,17 @@ func (a *activityIndicator) SetRunning(running bool) {
 
 type separator struct {
 	*widgetBase
+	unsupported.Separator
 	direction ui.LayoutDirection
 }
 
-func (s *separator) Direction() ui.LayoutDirection { return s.direction }
+func (s *separator) Direction() ui.LayoutDirection {
+	return s.direction
+}
 
 type imageView struct {
 	*widgetBase
+	unsupported.ImageView
 	scaling ui.ImageScaling
 }
 
@@ -677,7 +725,9 @@ func (i *imageView) SetImage(source stdimage.Image) error {
 		C.int(rgba.Rect.Dx()), C.int(rgba.Rect.Dy()), C.int(rgba.Stride))
 	return nil
 }
-func (i *imageView) Scaling() ui.ImageScaling { return i.scaling }
+func (i *imageView) Scaling() ui.ImageScaling {
+	return i.scaling
+}
 func (i *imageView) SetScaling(scaling ui.ImageScaling) error {
 	if scaling > ui.ImageScaleStretch {
 		return errors.New("ui: invalid image scaling")
@@ -693,11 +743,16 @@ func (i *imageView) SetScaling(scaling ui.ImageScaling) error {
 
 type link struct {
 	*widgetBase
+	unsupported.Link
 	clicks listeners[ui.ClickHandler]
 }
 
-func (l *link) Text() string        { return nativeText(l.nativePointer()) }
-func (l *link) SetText(text string) { setNativeText(l.nativePointer(), text) }
+func (l *link) Text() string {
+	return nativeText(l.nativePointer())
+}
+func (l *link) SetText(text string) {
+	setNativeText(l.nativePointer(), text)
+}
 func (l *link) URL() string {
 	native := l.nativePointer()
 	if native == nil {
@@ -736,6 +791,7 @@ func (l *link) nativeEvent(event int) {
 
 type tabs struct {
 	*widgetBase
+	unsupported.Tabs
 	stateMu sync.RWMutex
 	items   []ui.TabItem
 	changes listeners[ui.SelectionChangeHandler]
@@ -743,6 +799,7 @@ type tabs struct {
 
 type scrollView struct {
 	*widgetBase
+	unsupported.ScrollView
 	content nativeWidget
 	axes    ui.ScrollAxes
 }
@@ -785,6 +842,12 @@ func (s *scrollView) ScrollOffset() ui.Point {
 }
 
 func (s *scrollView) SetScrollOffset(offset ui.Point) {
+	switch s.axes {
+	case ui.ScrollVertical:
+		offset.X = 0
+	case ui.ScrollHorizontal:
+		offset.Y = 0
+	}
 	if native := s.nativePointer(); native != nil {
 		C.gkUIScrollSetOffset(native, C.int(max(0, offset.X)), C.int(max(0, offset.Y)))
 	}
@@ -911,10 +974,16 @@ func (s *slider) Value() float64 {
 	return float64(C.gkUISliderValue(native))
 }
 
-func (s *slider) SetValue(value float64) {
-	if native := s.nativePointer(); native != nil {
-		C.gkUISetSliderValue(native, C.double(value))
+func (s *slider) SetValue(value float64) error {
+	if math.IsNaN(value) || value < s.minimum || value > s.maximum {
+		return errors.New("ui: slider value must be within its range")
 	}
+	native := s.nativePointer()
+	if native == nil {
+		return ui.ErrClosed
+	}
+	C.gkUISetSliderValue(native, C.double(value))
+	return nil
 }
 
 func (s *slider) OnChange(handler ui.ValueChangeHandler) ui.Unsubscribe {
@@ -936,6 +1005,7 @@ func (s *slider) nativeEvent(event int) {
 
 type canvas struct {
 	*widgetBase
+	unsupported.Canvas
 	canvasPointer
 	resizes listeners[ui.ResizeHandler]
 	redraw  atomic.Bool
@@ -977,12 +1047,8 @@ func (c *canvas) NativeSurface() gpu.NativeSurface {
 	if native == nil {
 		return gpu.NativeSurface{}
 	}
-	kind := gpu.NativeSurfaceCocoaView
-	if runtime.GOOS == "windows" {
-		kind = gpu.NativeSurfaceWin32Window
-	}
 	return gpu.NativeSurface{
-		Kind:   kind,
+		Kind:   gpu.NativeSurfaceWin32Window,
 		Handle: uintptr(C.gkUIControlHandle(native)),
 	}
 }
@@ -1016,6 +1082,7 @@ const sectionHeaderHeight = 28
 
 type section struct {
 	*widgetBase
+	unsupported.Section
 
 	stateMu  sync.RWMutex
 	content  nativeWidget
@@ -1158,6 +1225,9 @@ func validateContainerChild(container nativeWidget, content ui.Widget) (nativeWi
 	if base.parent != nil && base.parent.base() != owner {
 		return nil, errors.New("ui/window: container content already has a parent")
 	}
+	if owner.window.isContent(base) {
+		return nil, errors.New("ui/window: container content is the window content")
+	}
 	for ancestor := container; ancestor != nil; ancestor = ancestor.base().parent {
 		if base == ancestor.base() {
 			return nil, errors.New("ui/window: container cycle")
@@ -1179,6 +1249,12 @@ func gkUIGoEvent(handle C.uintptr_t, event C.int) {
 	if ok {
 		receiver.nativeEvent(int(event))
 	}
+}
+
+// isContent reports whether base is the window's root content.
+func (w *Window) isContent(base *widgetBase) bool {
+	content, ok := w.content.(nativeWidget)
+	return ok && content.base() == base
 }
 
 // SetContent makes content fill the native window's content area.
@@ -1346,7 +1422,7 @@ func (w *Window) CreateSlider(options ui.SliderOptions) (ui.Slider, error) {
 	if err := options.Validate(); err != nil {
 		return nil, err
 	}
-	result := &slider{}
+	result := &slider{minimum: options.Minimum, maximum: options.Maximum, step: options.Step}
 	handle := cgo.NewHandle(result)
 	native := C.gkUICreateSlider(
 		w.nativeWindowHandle(),

@@ -820,8 +820,7 @@ void gkGTKSelectionSetIndex(void *pointer, int index) {
     }
     native->suppress = TRUE;
     if (native->kind == GK_GTK_WIDGET_SELECT) {
-        gtk_drop_down_set_selected(GTK_DROP_DOWN(native->widget),
-                                   index < 0 ? GTK_INVALID_LIST_POSITION : (guint)index);
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(native->widget), index < 0 ? GTK_INVALID_LIST_POSITION : (guint)index);
     } else if (native->kind == GK_GTK_WIDGET_RADIO_GROUP && native->items && index >= 0 &&
                index < (int)native->items->len) {
         native->selected = index;
@@ -1496,7 +1495,8 @@ static void gkGTKConfigureFileChooser(GtkFileChooser *chooser, const char *direc
             gtk_file_chooser_set_current_name(chooser, filename);
         } else {
             GFile *file = g_path_is_absolute(filename) ? g_file_new_for_path(filename)
-                                                       : folder ? g_file_get_child(folder, filename) : NULL;
+                          : folder                     ? g_file_get_child(folder, filename)
+                                                       : NULL;
             if (file) {
                 gtk_file_chooser_set_file(chooser, file, NULL);
                 g_object_unref(file);
@@ -1595,9 +1595,10 @@ char *gkGTKOpenDialog(void *window_pointer, const char *title, const char *direc
         return NULL;
     }
     GtkFileChooserAction action = directories ? GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER : GTK_FILE_CHOOSER_ACTION_OPEN;
-    GtkFileChooserNative *dialog = gtk_file_chooser_native_new(
-        title && title[0] ? title : directories ? "Select Folder" : "Open File", GTK_WINDOW(window->window), action,
-        "_Open", "_Cancel");
+    GtkFileChooserNative *dialog = gtk_file_chooser_native_new(title && title[0] ? title
+                                                               : directories     ? "Select Folder"
+                                                                                 : "Open File",
+                                                               GTK_WINDOW(window->window), action, "_Open", "_Cancel");
     GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
     gtk_file_chooser_set_select_multiple(chooser, multiple != 0);
     gkGTKConfigureFileChooser(chooser, directory, filename, extensions, FALSE);
@@ -1628,9 +1629,9 @@ char *gkGTKSaveDialog(void *window_pointer, const char *title, const char *direc
     if (!window) {
         return NULL;
     }
-    GtkFileChooserNative *dialog = gtk_file_chooser_native_new(title && title[0] ? title : "Save File",
-                                                               GTK_WINDOW(window->window), GTK_FILE_CHOOSER_ACTION_SAVE,
-                                                               "_Save", "_Cancel");
+    GtkFileChooserNative *dialog =
+        gtk_file_chooser_native_new(title && title[0] ? title : "Save File", GTK_WINDOW(window->window),
+                                    GTK_FILE_CHOOSER_ACTION_SAVE, "_Save", "_Cancel");
     GtkFileChooser *chooser = GTK_FILE_CHOOSER(dialog);
     gkGTKConfigureFileChooser(chooser, directory, filename, extensions, TRUE);
     char *result = NULL;

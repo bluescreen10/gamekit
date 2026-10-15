@@ -1,4 +1,4 @@
-//go:build cgo && (darwin || linux || windows)
+//go:build cgo && (linux || windows)
 
 package window
 
@@ -172,7 +172,9 @@ func gkGoWindowMove(h C.uintptr_t, x, y C.int) {
 
 // newWindowHandle allocates the cgo.Handle naming w to the C layer, and
 // deleteWindowHandle releases it. Split out so window.go stays free of cgo.
-func newWindowHandle(w *Window) uintptr { return uintptr(cgo.NewHandle(w)) }
+func newWindowHandle(w *Window) uintptr {
+	return uintptr(cgo.NewHandle(w))
+}
 
 func deleteWindowHandle(h uintptr) {
 	if h != 0 {

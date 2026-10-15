@@ -218,13 +218,14 @@ func checkExpectedCommandComponents(r *recorder, window ui.Window) {
 			{ActionID: "save"},
 		},
 	})
-	checkExpectedCreation(r, "menu", menu, menuErr)
-
+	// The menu bar uses the menu, so it is created while the menu is open
+	// and closed before it.
 	menuBar, menuBarErr := window.CreateMenuBar(ui.MenuBarOptions{
 		Actions: actions,
 		Menus:   []ui.NamedMenu{{Title: "File", Menu: menu}},
 	})
 	checkExpectedCreation(r, "menu_bar", menuBar, menuBarErr)
+	checkExpectedCreation(r, "menu", menu, menuErr)
 
 	toolbar, toolbarErr := window.CreateToolbar(ui.ToolbarOptions{
 		Actions: actions,

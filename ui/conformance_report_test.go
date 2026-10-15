@@ -1,7 +1,9 @@
 package ui_test
 
 import (
+	"errors"
 	"fmt"
+	"runtime"
 	"testing"
 )
 
@@ -10,7 +12,33 @@ type conformanceStatus uint8
 const (
 	conformancePassed conformanceStatus = iota
 	conformanceFailed
+	// conformanceSkipped marks a check whose precondition the test
+	// environment cannot provide, such as a permission the user must grant.
+	conformanceSkipped
 )
+
+// skipError reports that a check cannot run in this environment.
+type skipError struct {
+	reason string
+}
+
+func (err skipError) Error() string {
+	return err.reason
+}
+
+// skipCheck returns an error that records the current check as skipped.
+func skipCheck(format string, args ...any) error {
+	return skipError{reason: fmt.Sprintf(format, args...)}
+}
+
+// skipOnDarwin returns a skip error on macOS, where AppKit has no public API
+// for the feature. It returns nil on other platforms.
+func skipOnDarwin(reason string) error {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	return skipCheck("AppKit cannot do this: %s", reason)
+}
 
 type conformanceResult struct {
 	Name   string
@@ -40,6 +68,8 @@ func (report conformanceReport) assert(t *testing.T) {
 				return
 			case conformanceFailed:
 				t.Error(result.Detail)
+			case conformanceSkipped:
+				t.Skip(result.Detail)
 			default:
 				t.Errorf("invalid conformance status %d", result.Status)
 			}
@@ -48,7 +78,8 @@ func (report conformanceReport) assert(t *testing.T) {
 }
 
 func (report conformanceReport) summary() string {
-	return fmt.Sprintf("%d passed, %d failed", report.passed(), report.failed())
+	return fmt.Sprintf("%d passed, %d failed, %d skipped",
+		report.passed(), report.failed(), report.count(conformanceSkipped))
 }
 
 func (report conformanceReport) count(status conformanceStatus) int {
@@ -76,6 +107,9 @@ func (r *recorder) check(name string, check func() error) {
 		}()
 		if err := check(); err != nil {
 			result.Status = conformanceFailed
+			if errors.As(err, new(skipError)) {
+				result.Status = conformanceSkipped
+			}
 			result.Detail = err.Error()
 		}
 	}()

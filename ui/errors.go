@@ -9,4 +9,7 @@ var (
 	ErrClosed = errors.New("ui: object is closed")
 	// ErrNotSupported reports that a backend cannot provide an optional feature.
 	ErrNotSupported = errors.New("ui: feature not supported")
+	// ErrUnavailable reports that a supported feature cannot be used right
+	// now, for example fullscreen while the display is locked or asleep.
+	ErrUnavailable = errors.New("ui: feature temporarily unavailable")
 )

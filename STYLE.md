@@ -4,7 +4,7 @@ This guide favors **clear, simple, idiomatic Go**. Code is written primarily for
 
 ## General
 
-Always run `gofmt`. Do not manually fight its formatting.
+Always run `make fmt`, which runs `gofmt` and `clang-format`. Do not manually fight their formatting.
 
 Prefer simple, explicit code over clever abstractions or compressed expressions. Keep the normal execution path visually clear and handle exceptional cases early.
 

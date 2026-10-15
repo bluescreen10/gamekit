@@ -1,10 +1,8 @@
-//go:build cgo && (darwin || linux || windows)
+//go:build cgo && (linux || windows)
 
 package window
 
 /*
-#cgo darwin CFLAGS: -x objective-c
-#cgo darwin LDFLAGS: -framework Cocoa
 #cgo linux LDFLAGS: -lX11
 #cgo windows LDFLAGS: -luser32 -lgdi32 -lcomctl32 -lcomdlg32 -lshell32 -lole32 -luuid -ldwmapi -luxtheme -ladvapi32
 #include "window_bridge.h"
@@ -57,9 +55,15 @@ func createNativeWindow(title string, width, height int, hints WindowOptions, ow
 	return native, nil
 }
 
-func destroyNativeWindow(native unsafe.Pointer)          { C.gkWindowDestroy(native) }
-func pollNativeWindow(native unsafe.Pointer)             { C.gkWindowPoll(native) }
-func nativeWindowShouldClose(native unsafe.Pointer) bool { return C.gkWindowShouldClose(native) != 0 }
+func destroyNativeWindow(native unsafe.Pointer) {
+	C.gkWindowDestroy(native)
+}
+func pollNativeWindow(native unsafe.Pointer) {
+	C.gkWindowPoll(native)
+}
+func nativeWindowShouldClose(native unsafe.Pointer) bool {
+	return C.gkWindowShouldClose(native) != 0
+}
 func setNativeWindowShouldClose(native unsafe.Pointer, close bool) {
 	value := C.int(0)
 	if close {
