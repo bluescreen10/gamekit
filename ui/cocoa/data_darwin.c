@@ -5,7 +5,6 @@
 #include <string.h>
 
 void gkCocoaSendView(NSView *view, int kind, int a, int b, double x, double y, NSString *text);
-NSTextField *gkCocoaBadgeLabel(NSString *text, NSColor *color);
 
 static NSArray<NSString *> *gkSplit(const char *buffer, size_t size) {
     NSMutableArray *values = [NSMutableArray array];
@@ -301,6 +300,16 @@ int gkCocoaTableScrollTo(void *pointer, const char *identifier) {
 - (id)gkAccessibleElement {
     return self.outline;
 }
+/* tile makes the only column as wide as the visible area. The column
+   otherwise keeps its first width, and the rows truncate their text. */
+- (void)tile {
+    [super tile];
+    NSTableColumn *column = self.outline.tableColumns.firstObject;
+    CGFloat width = MAX(column.minWidth, self.contentView.bounds.size.width - self.outline.intercellSpacing.width);
+    if (column && fabs(column.width - width) >= 0.5) {
+        column.width = width;
+    }
+}
 - (NSArray *)childrenOf:(GKCocoaNode *)item {
     return item ? item.children : self.roots;
 }
@@ -346,7 +355,7 @@ int gkCocoaTableScrollTo(void *pointer, const char *identifier) {
         NSTextField *text = [NSTextField labelWithString:@""];
         text.lineBreakMode = NSLineBreakByTruncatingTail;
         text.translatesAutoresizingMaskIntoConstraints = NO;
-        NSTextField *badge = gkCocoaBadgeLabel(@"", NSColor.systemGrayColor);
+        NSTextField *badge = gkUIBadgeLabel(@"", NSColor.systemGrayColor);
         badge.translatesAutoresizingMaskIntoConstraints = NO;
         badge.tag = 7;
         [cell addSubview:image];

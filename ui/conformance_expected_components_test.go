@@ -322,7 +322,6 @@ func checkExpectedCalendarKeyRecorderAndDial(r *recorder, window ui.Window) {
 		SelectedDates: []time.Time{date},
 		Selection:     ui.CalendarRange,
 	})
-	checkExpectedCreation(r, "calendar", calendar, calendarErr)
 	if calendar != nil {
 		r.check("calendar/visible_month", func() error {
 			if err := skipOnDarwin("NSDatePicker always shows the month of its date"); err != nil {
@@ -339,6 +338,7 @@ func checkExpectedCalendarKeyRecorderAndDial(r *recorder, window ui.Window) {
 			return nil
 		})
 	}
+	checkExpectedCreation(r, "calendar", calendar, calendarErr)
 	r.check("calendar/multiple_selection", func() error {
 		if err := skipOnDarwin("NSDatePicker selects one date or one range, not disjoint dates"); err != nil {
 			return err

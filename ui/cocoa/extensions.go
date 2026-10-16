@@ -111,6 +111,8 @@ func (b *button) apply() {
 	value := cString(key)
 	defer freeCString(value)
 	C.gkCocoaButtonConfigure(native, icon, C.int(b.state.placement), C.int(b.state.role), value, C.int(modifiers))
+	// The icon and its placement change the preferred size.
+	b.relayoutParent()
 }
 
 func (b *button) Icon() (ui.IconSource, ui.IconPlacement) {
@@ -736,6 +738,8 @@ func (i *imageView) apply() {
 		C.gkCocoaImageConfigure(native, C.int(i.state.alignment),
 			boolInt(i.state.interpolation == ui.InterpolationNearest), alternative, C.double(i.SourceScale()))
 	}
+	// The source scale changes the preferred size.
+	i.relayoutParent()
 }
 
 func (i *imageView) Alignment() ui.Anchor {
@@ -946,6 +950,7 @@ type sectionState struct {
 	subtitle string
 	icon     ui.IconSource
 	badge    string
+	animated bool
 }
 
 func (s *section) apply() {
@@ -982,16 +987,18 @@ func (s *section) SetBadge(badge string) {
 	s.apply()
 }
 
-// IsAnimationEnabled returns false: the section shows and hides its content
-// immediately.
+// IsAnimationEnabled reports whether the content fades in when the section
+// expands.
 func (s *section) IsAnimationEnabled() bool {
-	return false
+	return s.state.animated
 }
 
-// SetAnimationEnabled accepts only false. The section cannot animate
-// expansion yet, because the parent layout sets its size.
+// SetAnimationEnabled makes the content fade in when the section expands, and
+// fade out when it collapses. The parent layout changes the size of the
+// section immediately.
 func (s *section) SetAnimationEnabled(enabled bool) {
-	if enabled {
-		unsupported.Panic("ui/cocoa: Section.SetAnimationEnabled")
+	s.state.animated = enabled
+	if native := s.nativePointer(); native != nil {
+		C.gkCocoaSectionSetAnimated(native, boolInt(enabled))
 	}
 }

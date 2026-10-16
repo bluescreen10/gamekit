@@ -326,6 +326,51 @@ void gkCocoaSetTooltip(void *pointer, const char *text) {
 
 static char gkCocoaCursorKey;
 
+/* gkCocoaWaitCursor returns an hourglass cursor. AppKit has no public wait
+   cursor, because the system shows its own when an application stops
+   responding. The black symbol has a white outline, so that it shows on dark
+   and light content. */
+static NSCursor *gkCocoaWaitCursor(void) {
+    static NSCursor *cursor;
+    if (cursor) {
+        return cursor;
+    }
+    NSImageSymbolConfiguration *configuration =
+        [NSImageSymbolConfiguration configurationWithPointSize:14 weight:NSFontWeightBold];
+    NSImage *symbol = [[NSImage imageWithSystemSymbolName:@"hourglass" accessibilityDescription:@"Wait"]
+        imageWithSymbolConfiguration:configuration];
+    if (!symbol) {
+        return NSCursor.arrowCursor;
+    }
+    NSSize size = NSMakeSize(ceil(symbol.size.width) + 4, ceil(symbol.size.height) + 4);
+    NSImage *image = [NSImage imageWithSize:size
+                                    flipped:NO
+                             drawingHandler:^BOOL(NSRect rect) {
+                               (void)rect;
+                               NSImage *white = [symbol imageWithSymbolConfiguration:
+                                                            [NSImageSymbolConfiguration
+                                                                configurationWithPaletteColors:@[ NSColor.whiteColor ]]];
+                               NSImage *black = [symbol imageWithSymbolConfiguration:
+                                                            [NSImageSymbolConfiguration
+                                                                configurationWithPaletteColors:@[ NSColor.blackColor ]]];
+                               for (int dx = -1; dx <= 1; dx++) {
+                                   for (int dy = -1; dy <= 1; dy++) {
+                                       [white drawAtPoint:NSMakePoint(2 + dx * 1.5, 2 + dy * 1.5)
+                                                 fromRect:NSZeroRect
+                                                operation:NSCompositingOperationSourceOver
+                                                 fraction:1];
+                                   }
+                               }
+                               [black drawAtPoint:NSMakePoint(2, 2)
+                                         fromRect:NSZeroRect
+                                        operation:NSCompositingOperationSourceOver
+                                         fraction:1];
+                               return YES;
+                             }];
+    cursor = [[NSCursor alloc] initWithImage:image hotSpot:NSMakePoint(size.width / 2, size.height / 2)];
+    return cursor;
+}
+
 static NSCursor *gkCocoaCursor(int cursor) {
     switch (cursor) {
     case 1:
@@ -343,6 +388,8 @@ static NSCursor *gkCocoaCursor(int cursor) {
         return NSCursor.resizeUpDownCursor;
     case 7:
         return NSCursor.operationNotAllowedCursor;
+    case 8:
+        return gkCocoaWaitCursor();
     case 10:
         return NSCursor.closedHandCursor;
     default:
@@ -500,8 +547,10 @@ static void gkCocoaFillButton(NSButton *button, NSColor *background, NSColor *fo
     }
     button.bordered = NO;
     button.wantsLayer = YES;
+    /* The layer rounds its background without a mask, so a badge can extend
+       past the corner. */
     button.layer.cornerRadius = cornerRadius;
-    button.layer.masksToBounds = cornerRadius > 0;
+    button.layer.masksToBounds = NO;
     NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle new] autorelease];
     paragraph.alignment = NSTextAlignmentCenter;
     button.attributedTitle =
@@ -829,6 +878,12 @@ int gkCocoaHandleDragEvent(void *pointer) {
         hasItem = YES;
     }
     if (source.image) {
+        /* Targets ask for PNG or TIFF, so the item has both. */
+        NSBitmapImageRep *bitmap = [NSBitmapImageRep imageRepWithData:source.image.TIFFRepresentation];
+        NSData *png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+        if (png) {
+            [item setData:png forType:NSPasteboardTypePNG];
+        }
         [item setData:source.image.TIFFRepresentation forType:NSPasteboardTypeTIFF];
         hasItem = YES;
     }
@@ -997,6 +1052,11 @@ void gkCocoaSetDropTarget(void *pointer, int operations, const char *types, size
     NSMutableArray *pasteboardTypes = [NSMutableArray array];
     for (NSString *mime in gkCocoaSplit(types, typesSize)) {
         [pasteboardTypes addObject:gkCocoaTypeForMIME(mime)];
+        /* Many applications put images on the pasteboard only as TIFF. The
+           drop reads any image type and converts it. */
+        if ([mime hasPrefix:@"image/"] && ![pasteboardTypes containsObject:NSPasteboardTypeTIFF]) {
+            [pasteboardTypes addObject:NSPasteboardTypeTIFF];
+        }
     }
     if (!pasteboardTypes.count) {
         [pasteboardTypes addObjectsFromArray:@[ NSPasteboardTypeString, NSPasteboardTypeFileURL ]];

@@ -157,11 +157,17 @@ func (w *widgetBase) SetVisible(visible bool) {
 		w.mu.Unlock()
 		return
 	}
+	changed := w.visible != visible
 	w.visible = visible
 	native := w.native
 	w.mu.Unlock()
 
 	C.gkUISetVisible(native, boolInt(visible))
+	if changed {
+		// A hidden widget measures as empty, so the parent must lay out
+		// again when the widget shows.
+		w.relayoutParent()
+	}
 }
 
 func (w *widgetBase) IsEnabled() bool {
@@ -245,8 +251,42 @@ func (l *listeners[T]) snapshot() []T {
 type layout struct {
 	*widgetBase
 
-	mu   sync.RWMutex
-	spec ui.LayoutSpec
+	mu          sync.RWMutex
+	spec        ui.LayoutSpec
+	arrangement arrangement
+}
+
+// maximumArrangementPasses limits how often a container arranges its children
+// again in one arrangement.
+const maximumArrangementPasses = 4
+
+// arrangement tracks a running arrangement of a container's children. A child
+// whose preferred size changes when it gets its bounds, such as a group box
+// whose subtitle wraps at the new width, asks its parent to arrange again
+// while the parent arranges. The positions that the running pass computed are
+// then out of date, so the pass runs again when it ends, instead of nesting.
+type arrangement struct {
+	running bool
+	again   bool
+}
+
+// run calls arrange, and calls it again while children ask for it.
+func (a *arrangement) run(arrange func()) {
+	if a.running {
+		a.again = true
+		return
+	}
+	a.running = true
+	defer func() {
+		a.running = false
+	}()
+	for range maximumArrangementPasses {
+		a.again = false
+		arrange()
+		if !a.again {
+			return
+		}
+	}
 }
 
 func (l *layout) base() *widgetBase {
@@ -375,19 +415,21 @@ func (l *layout) validateChildren(spec ui.LayoutSpec) ([]nativeWidget, error) {
 }
 
 func (l *layout) applyLayout(size ui.Size) {
-	l.mu.RLock()
-	spec := copyLayoutSpec(l.spec)
-	l.mu.RUnlock()
+	l.arrangement.run(func() {
+		l.mu.RLock()
+		spec := copyLayoutSpec(l.spec)
+		l.mu.RUnlock()
 
-	positions, err := spec.Resolve(size)
-	if err != nil {
-		return
-	}
-	for i, item := range spec.Items {
-		if item.Widget != nil {
-			item.Widget.SetBounds(positions[i])
+		positions, err := spec.Resolve(size)
+		if err != nil {
+			return
 		}
-	}
+		for i, item := range spec.Items {
+			if item.Widget != nil {
+				item.Widget.SetBounds(positions[i])
+			}
+		}
+	})
 }
 
 func layoutChildren(spec ui.LayoutSpec) []nativeWidget {
@@ -754,6 +796,8 @@ func (i *imageView) SetImage(source stdimage.Image) error {
 	draw.Draw(rgba, rgba.Bounds(), source, bounds.Min, draw.Src)
 	C.gkUIImageSet(native, (*C.uchar)(unsafe.Pointer(&rgba.Pix[0])),
 		C.int(rgba.Rect.Dx()), C.int(rgba.Rect.Dy()), C.int(rgba.Stride))
+	// The size of the source changes the preferred size.
+	i.relayoutParent()
 	return nil
 }
 func (i *imageView) Scaling() ui.ImageScaling {

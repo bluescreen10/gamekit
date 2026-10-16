@@ -269,6 +269,12 @@ func checkExpectedSystemTray(r *recorder, window ui.Window) {
 	})
 
 	r.check("system_tray/bounds", func() error {
+		if skip := skipOnLinux("StatusNotifierItem hosts do not report where they show an item"); skip != nil {
+			if _, err := tray.Bounds(); !errors.Is(err, ui.ErrNotSupported) {
+				return fmt.Errorf("Bounds() error = %v, want ui.ErrNotSupported", err)
+			}
+			return skip
+		}
 		var bounds ui.Rect
 		var err error
 		for i := 0; i < 100; i++ {

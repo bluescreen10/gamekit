@@ -425,6 +425,9 @@ void gkCocoaToastRelease(void *pointer) {
 @end
 
 @implementation GKCocoaBadge
++ (Class)cellClass {
+    return GKUICenteredTextFieldCell.class;
+}
 - (NSSize)fittingSize {
     NSSize size = [super fittingSize];
     return NSMakeSize(MAX(18, size.width + 10), 18);

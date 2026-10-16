@@ -233,8 +233,6 @@ void gkCocoaLabelPreferredWidth(void *pointer, int width) {
 
 /* ---- Button ---- */
 
-static char gkBusyKey;
-static char gkBadgeKey;
 
 void gkCocoaButtonConfigure(void *pointer, void *icon, int placement, int role, const char *key, int modifiers) {
     NSButton *button = pointer;
@@ -274,64 +272,26 @@ void gkCocoaButtonConfigure(void *pointer, void *icon, int placement, int role, 
     button.hasDestructiveAction = role == 3;
     button.contentTintColor = role == 3 ? NSColor.systemRedColor : nil;
     button.bezelColor = role == 1 ? NSColor.controlAccentColor : nil;
+    if ([button isKindOfClass:GKUIPushButton.class]) {
+        ((GKUIPushButton *)button).stackedContent = icon && (placement == 2 || placement == 3);
+    }
 }
 
 void gkCocoaButtonSetBusy(void *pointer, int busy) {
     NSButton *button = pointer;
-    NSProgressIndicator *spinner = objc_getAssociatedObject(button, &gkBusyKey);
-    if (busy && !spinner) {
-        spinner = [[[NSProgressIndicator alloc] initWithFrame:NSMakeRect(0, 0, 16, 16)] autorelease];
-        spinner.style = NSProgressIndicatorStyleSpinning;
-        spinner.controlSize = NSControlSizeSmall;
-        spinner.indeterminate = YES;
-        spinner.autoresizingMask = NSViewMinXMargin | NSViewMinYMargin | NSViewMaxYMargin;
-        NSRect bounds = button.bounds;
-        spinner.frame = NSMakeRect(NSMaxX(bounds) - 22, NSMidY(bounds) - 8, 16, 16);
-        [button addSubview:spinner];
-        [spinner startAnimation:nil];
-        objc_setAssociatedObject(button, &gkBusyKey, spinner, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    } else if (!busy && spinner) {
-        [spinner stopAnimation:nil];
-        [spinner removeFromSuperview];
-        objc_setAssociatedObject(button, &gkBusyKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if ([button isKindOfClass:GKUIPushButton.class]) {
+        ((GKUIPushButton *)button).busy = busy != 0;
     }
     button.accessibilityValueDescription = busy ? @"Busy" : nil;
 }
 
-/* gkCocoaBadgeView returns a pill-shaped label for badges on other views. */
-NSTextField *gkCocoaBadgeLabel(NSString *text, NSColor *color) {
-    NSTextField *badge = [NSTextField labelWithString:text];
-    badge.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightSemibold];
-    badge.textColor = NSColor.whiteColor;
-    badge.alignment = NSTextAlignmentCenter;
-    badge.wantsLayer = YES;
-    badge.layer.backgroundColor = (color ?: NSColor.systemRedColor).CGColor;
-    badge.layer.cornerRadius = 8;
-    badge.layer.masksToBounds = YES;
-    return badge;
-}
-
 void gkCocoaButtonSetBadge(void *pointer, const char *text) {
     NSButton *button = pointer;
-    NSTextField *badge = objc_getAssociatedObject(button, &gkBadgeKey);
     NSString *value = gkString(text);
-    if (!value.length) {
-        [badge removeFromSuperview];
-        objc_setAssociatedObject(button, &gkBadgeKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        button.accessibilityValueDescription = nil;
-        return;
+    if ([button isKindOfClass:GKUIPushButton.class]) {
+        ((GKUIPushButton *)button).badge = value;
     }
-    if (!badge) {
-        badge = gkCocoaBadgeLabel(value, nil);
-        badge.autoresizingMask = NSViewMinXMargin | NSViewMaxYMargin;
-        [button addSubview:badge];
-        objc_setAssociatedObject(button, &gkBadgeKey, badge, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    badge.stringValue = value;
-    NSSize size = badge.fittingSize;
-    CGFloat width = MAX(16, size.width + 8);
-    badge.frame = NSMakeRect(NSMaxX(button.bounds) - width, 0, width, 16);
-    button.accessibilityValueDescription = value;
+    button.accessibilityValueDescription = value.length ? value : nil;
 }
 
 /* ---- Text field and text area ---- */
@@ -830,6 +790,13 @@ int gkCocoaScrollToView(void *scrollPointer, void *viewPointer, int animated) {
 
 /* ---- Section ---- */
 
+void gkCocoaSectionSetAnimated(void *pointer, int animated) {
+    GKUISectionView *section = pointer;
+    if ([section isKindOfClass:GKUISectionView.class]) {
+        section.animated = animated != 0;
+    }
+}
+
 void gkCocoaSectionConfigure(void *pointer, const char *subtitle, void *icon, const char *badge) {
     GKUISectionView *section = pointer;
     if (![section isKindOfClass:GKUISectionView.class]) {
@@ -840,7 +807,7 @@ void gkCocoaSectionConfigure(void *pointer, const char *subtitle, void *icon, co
     section.header.imagePosition = icon ? NSImageLeading : NSNoImage;
     NSString *badgeText = gkString(badge);
     if (badgeText.length && !section.badgeLabel) {
-        section.badgeLabel = gkCocoaBadgeLabel(badgeText, NSColor.systemGrayColor);
+        section.badgeLabel = gkUIBadgeLabel(badgeText, NSColor.systemGrayColor);
         [section addSubview:section.badgeLabel];
     }
     section.badgeLabel.stringValue = badgeText;

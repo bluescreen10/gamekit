@@ -373,6 +373,8 @@ func (w *widgetBase) SetStyle(style ui.WidgetStyle) error {
 	w.mu.Lock()
 	w.contract.style = style
 	w.mu.Unlock()
+	// A font or a fill changes the preferred size.
+	w.relayoutParent()
 	return nil
 }
 

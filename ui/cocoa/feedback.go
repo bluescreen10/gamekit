@@ -97,7 +97,6 @@ func (i *infoBar) cocoaEvent(event cocoaEvent) {
 		})
 	case C.GK_EVENT_CLOSE:
 		i.SetVisible(false)
-		i.relayoutParent()
 		each(&i.closes, func(handler ui.FocusHandler) {
 			handler()
 		})

@@ -371,6 +371,217 @@ int gkCocoaMacKey(unsigned short code);    /* window_darwin.c */
 }
 @end
 
+@implementation GKUICenteredTextFieldCell
+- (NSRect)drawingRectForBounds:(NSRect)rect {
+    NSRect result = [super drawingRectForBounds:rect];
+    CGFloat height = ceil([self.attributedStringValue boundingRectWithSize:NSMakeSize(result.size.width, CGFLOAT_MAX)
+                                                                    options:NSStringDrawingUsesLineFragmentOrigin]
+                              .size.height);
+    if (height > 0 && height < result.size.height) {
+        result.origin.y += floor((result.size.height - height) / 2);
+        result.size.height = height;
+    }
+    return result;
+}
+@end
+
+@interface GKUIBadgeField : NSTextField
+@end
+
+@implementation GKUIBadgeField
++ (Class)cellClass {
+    return GKUICenteredTextFieldCell.class;
+}
+@end
+
+static const CGFloat gkUIBadgeHeight = 16;
+
+NSTextField *gkUIBadgeLabel(NSString *text, NSColor *color) {
+    GKUIBadgeField *badge = [[[GKUIBadgeField alloc] initWithFrame:NSZeroRect] autorelease];
+    badge.editable = NO;
+    badge.selectable = NO;
+    badge.bezeled = NO;
+    badge.bordered = NO;
+    badge.drawsBackground = NO;
+    badge.stringValue = text ?: @"";
+    badge.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightSemibold];
+    badge.textColor = NSColor.whiteColor;
+    badge.alignment = NSTextAlignmentCenter;
+    badge.wantsLayer = YES;
+    badge.layer.backgroundColor = (color ?: NSColor.systemRedColor).CGColor;
+    badge.layer.cornerRadius = gkUIBadgeHeight / 2;
+    badge.layer.masksToBounds = YES;
+    return badge;
+}
+
+/* GKUIPushButtonCell leaves out the title and the image while the button is
+   busy, so that the spinner does not draw over them. The button keeps its
+   size. */
+@interface GKUIPushButtonCell : NSButtonCell
+@property BOOL busy;
+@end
+
+@implementation GKUIPushButtonCell
+- (NSRect)drawTitle:(NSAttributedString *)title withFrame:(NSRect)frame inView:(NSView *)view {
+    if (self.busy) {
+        return frame;
+    }
+    return [super drawTitle:title withFrame:frame inView:view];
+}
+- (void)drawImage:(NSImage *)image withFrame:(NSRect)frame inView:(NSView *)view {
+    if (self.busy) {
+        return;
+    }
+    [super drawImage:image withFrame:frame inView:view];
+}
+@end
+
+@interface GKUIPushButton ()
+@property(retain) NSProgressIndicator *spinner;
+@property(retain) NSTextField *badgeLabel;
+@end
+
+@implementation GKUIPushButton
++ (Class)cellClass {
+    return GKUIPushButtonCell.class;
+}
+- (void)dealloc {
+    [_badge release];
+    [_spinner release];
+    [_badgeLabel release];
+    [super dealloc];
+}
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+/* managesBezel reports whether the button uses one of the two bezels that it
+   changes between: the rounded bezel of one line, and the bezel that can
+   grow. */
+- (BOOL)managesBezel {
+    return self.bordered && (self.bezelStyle == NSBezelStyleRounded || self.bezelStyle == NSBezelStyleRegularSquare);
+}
+/* roundedSize returns the fitting size with the rounded bezel. */
+- (NSSize)roundedSize {
+    NSBezelStyle style = self.bezelStyle;
+    if (style == NSBezelStyleRounded) {
+        return [super fittingSize];
+    }
+    self.bezelStyle = NSBezelStyleRounded;
+    NSSize size = [super fittingSize];
+    self.bezelStyle = style;
+    return size;
+}
+- (void)updateBezel {
+    if (![self managesBezel]) {
+        return;
+    }
+    BOOL grows = self.stackedContent || self.frame.size.height > [self roundedSize].height + 1;
+    NSBezelStyle style = grows ? NSBezelStyleRegularSquare : NSBezelStyleRounded;
+    if (self.bezelStyle != style) {
+        self.bezelStyle = style;
+    }
+}
+#pragma clang diagnostic pop
+- (NSSize)fittingSize {
+    if (!self.bordered) {
+        NSSize size = [super fittingSize];
+        return NSMakeSize(ceil(size.width + 24), MAX(ceil(size.height + 10), 28));
+    }
+    if ([self managesBezel] && !self.stackedContent) {
+        return [self roundedSize];
+    }
+    NSSize size = [super fittingSize];
+    if (self.stackedContent) {
+        size.width += 16;
+        size.height += 12;
+    }
+    return size;
+}
+- (void)setStackedContent:(BOOL)stackedContent {
+    _stackedContent = stackedContent;
+    [self updateBezel];
+}
+- (void)setFrameSize:(NSSize)size {
+    [super setFrameSize:size];
+    [self updateBezel];
+    [self placeAccessories];
+}
+- (void)layout {
+    [super layout];
+    [self placeAccessories];
+}
+/* placeAccessories centers the spinner, and centers the badge near the top
+   trailing corner, so that the badge extends past the edges of the button. */
+- (void)placeAccessories {
+    NSRect bounds = self.bounds;
+    if (self.spinner) {
+        self.spinner.frame = NSMakeRect(round(NSMidX(bounds) - 8), round(NSMidY(bounds) - 8), 16, 16);
+    }
+    if (self.badgeLabel) {
+        CGFloat width = MAX(gkUIBadgeHeight, ceil(self.badgeLabel.attributedStringValue.size.width) + 10);
+        CGFloat x = NSMaxX(bounds) - width / 2 - 4;
+        if (self.userInterfaceLayoutDirection == NSUserInterfaceLayoutDirectionRightToLeft) {
+            x = NSMinX(bounds) - width / 2 + 4;
+        }
+        CGFloat top = -gkUIBadgeHeight / 2 + 2;
+        CGFloat y = self.isFlipped ? top : NSMaxY(bounds) - top - gkUIBadgeHeight;
+        self.badgeLabel.frame = NSMakeRect(round(x), round(y), width, gkUIBadgeHeight);
+    }
+}
+- (void)setBusy:(BOOL)busy {
+    _busy = busy;
+    if ([self.cell isKindOfClass:GKUIPushButtonCell.class]) {
+        ((GKUIPushButtonCell *)self.cell).busy = busy;
+    }
+    if (busy && !self.spinner) {
+        NSProgressIndicator *spinner = [[[NSProgressIndicator alloc] initWithFrame:NSMakeRect(0, 0, 16, 16)] autorelease];
+        spinner.style = NSProgressIndicatorStyleSpinning;
+        spinner.controlSize = NSControlSizeSmall;
+        spinner.indeterminate = YES;
+        [self addSubview:spinner positioned:NSWindowBelow relativeTo:self.badgeLabel];
+        [spinner startAnimation:nil];
+        self.spinner = spinner;
+    } else if (!busy && self.spinner) {
+        [self.spinner stopAnimation:nil];
+        [self.spinner removeFromSuperview];
+        self.spinner = nil;
+    }
+    [self placeAccessories];
+    self.needsDisplay = YES;
+}
+- (void)setBadge:(NSString *)badge {
+    [_badge release];
+    _badge = [badge copy];
+    if (!badge.length) {
+        [self.badgeLabel removeFromSuperview];
+        self.badgeLabel = nil;
+        return;
+    }
+    if (!self.badgeLabel) {
+        self.badgeLabel = gkUIBadgeLabel(badge, nil);
+        [self addSubview:self.badgeLabel];
+    }
+    self.badgeLabel.stringValue = badge;
+    [self placeAccessories];
+}
+/* A style can remove the bezel and fill the button with a color. AppKit draws
+   no pressed state for it, so the button lightens the fill while the mouse is
+   down. */
+- (void)mouseDown:(NSEvent *)event {
+    CGColorRef fill = self.bordered ? NULL : self.layer.backgroundColor;
+    if (!fill) {
+        [super mouseDown:event];
+        return;
+    }
+    CGColorRetain(fill);
+    NSColor *pressed = [[NSColor colorWithCGColor:fill] highlightWithLevel:0.3];
+    self.layer.backgroundColor = pressed.CGColor;
+    /* NSButton tracks the mouse until it goes up. */
+    [super mouseDown:event];
+    self.layer.backgroundColor = fill;
+    CGColorRelease(fill);
+}
+@end
+
 @implementation GKUILinkButton
 - (void)dealloc {
     [_linkURL release];
@@ -385,6 +596,13 @@ int gkCocoaMacKey(unsigned short code);    /* window_darwin.c */
 - (void)dealloc {
     [_image release];
     [super dealloc];
+}
+- (void)setImage:(NSImage *)image {
+    if (image != _image) {
+        [_image release];
+        _image = [image retain];
+    }
+    [self setNeedsDisplay:YES];
 }
 - (BOOL)isFlipped {
     return YES;
@@ -534,10 +752,35 @@ int gkCocoaMacKey(unsigned short code);    /* window_darwin.c */
                                                                 attributes:secondary] autorelease]];
     self.header.attributedTitle = value;
 }
+/* setSectionExpanded shows or hides the content. With animation, the content
+   fades in or out. The parent layout changes the size of the section
+   immediately. */
 - (void)setSectionExpanded:(BOOL)expanded {
     _expanded = expanded;
-    self.bodyView.hidden = !expanded;
     [self updateHeader];
+    NSView *body = self.bodyView;
+    if (!self.animated || !self.window) {
+        body.hidden = !expanded;
+        body.alphaValue = 1;
+        return;
+    }
+    if (expanded) {
+        body.alphaValue = body.hidden ? 0 : body.alphaValue;
+        body.hidden = NO;
+    }
+    [NSAnimationContext
+        runAnimationGroup:^(NSAnimationContext *context) {
+          context.duration = 0.2;
+          body.animator.alphaValue = expanded ? 1 : 0;
+        }
+        completionHandler:^{
+          /* A later change can open the section again before the animation
+             ends; its own animation then shows the content. */
+          if (!self.expanded) {
+              body.hidden = YES;
+              body.alphaValue = 1;
+          }
+        }];
 }
 - (void)toggle:(id)sender {
     (void)sender;
@@ -633,7 +876,10 @@ void *gkUICreateLabel(uintptr_t window, const char *text) {
 
 void *gkUICreateButton(uintptr_t window, const char *text, uintptr_t handle) {
     NSString *value = text ? [NSString stringWithUTF8String:text] : @"";
-    NSButton *button = [[NSButton buttonWithTitle:value target:nil action:nil] retain];
+    GKUIPushButton *button = [[GKUIPushButton buttonWithTitle:value target:nil action:nil] retain];
+    if (@available(macOS 14, *)) {
+        button.clipsToBounds = NO;
+    }
     gkUIInstallAction(button, handle, GK_UI_EVENT_CLICK);
     gkUIAddToWindow(window, button);
     return button;

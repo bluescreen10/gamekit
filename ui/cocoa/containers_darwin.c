@@ -106,6 +106,20 @@ void gkCocoaGroupBoxBody(void *pointer, int *width, int *height, int *top) {
     *top = (int)ceil(subtitle);
 }
 
+/* gkCocoaGroupBoxSubtitleHeight returns the space that the subtitle takes
+   above the content when the content area is width points wide. */
+int gkCocoaGroupBoxSubtitleHeight(void *pointer, int width) {
+    GKCocoaGroupBox *box = pointer;
+    if (box.subtitleLabel.hidden) {
+        return 0;
+    }
+    CGFloat previous = box.subtitleLabel.preferredMaxLayoutWidth;
+    box.subtitleLabel.preferredMaxLayoutWidth = MAX(0, width - 8);
+    NSSize text = box.subtitleLabel.fittingSize;
+    box.subtitleLabel.preferredMaxLayoutWidth = previous;
+    return (int)ceil(text.height + 6);
+}
+
 /* gkCocoaGroupBoxChrome reports the space the frame and title take. */
 void gkCocoaGroupBoxChrome(void *pointer, int *width, int *height) {
     GKCocoaGroupBox *box = pointer;
@@ -168,6 +182,10 @@ void *gkCocoaSplitViewCreate(uintptr_t window, int vertical, int panes) {
     for (int i = 0; i < panes; i++) {
         GKCocoaClipView *pane = [[[GKCocoaClipView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)] autorelease];
         [split addArrangedSubview:pane];
+        /* The last pane takes the change when the split view resizes, as in
+           GTK. The other panes keep their size. */
+        [split setHoldingPriority:i == panes - 1 ? NSLayoutPriorityDefaultLow : NSLayoutPriorityDefaultLow + 10
+                forSubviewAtIndex:i];
         [split.minimums addObject:@0];
         [split.collapsible addObject:@NO];
     }

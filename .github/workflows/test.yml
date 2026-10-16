@@ -71,8 +71,20 @@ jobs:
       # xvfb supplies the X display the window and input code needs; without it every
       # X11 path fails at XOpenDisplay rather than being tested. No -v: only failures
       # print, so a red run shows why without scrolling past every passing test.
+      # -coverpkg=./... credits every package that a test runs, so the conformance
+      # suite in ui counts toward ui/gtk and the other backends.
       - name: Test
-        run: xvfb-run -a go test ./... -count=1
+        run: xvfb-run -a go test ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage-linux.out
+
+      # Codecov merges the reports of the three platforms; the flag shows the coverage
+      # of each platform on its own. A failed test run still uploads its report.
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage-linux.out
+          flags: linux
 
   macos:
     name: macOS
@@ -111,7 +123,17 @@ jobs:
       # Cocoa needs a WindowServer connection to create a window at all, which the
       # hosted macOS runners have.
       - name: Test
-        run: go test ./... -count=1
+        run: go test ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage-macos.out
+
+      # Codecov merges the reports of the three platforms; the flag shows the coverage
+      # of each platform on its own. A failed test run still uploads its report.
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage-macos.out
+          flags: macos
 
   windows:
     name: Windows
@@ -185,5 +207,16 @@ jobs:
       # The SDK supplies headers and an import library, not a driver, so no backend
       # registers and the gpu tests skip themselves. What this job covers is compilation
       # of the Win32 window, input and Vulkan-surface code, which no other job compiles.
+      # PowerShell splits an unquoted argument such as -coverprofile=a.out at the dot.
       - name: Test
-        run: go test ./... -count=1
+        run: go test ./... -count=1 "-covermode=atomic" "-coverpkg=./..." "-coverprofile=coverage-windows.out"
+
+      # Codecov merges the reports of the three platforms; the flag shows the coverage
+      # of each platform on its own. A failed test run still uploads its report.
+      - name: Upload coverage to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage-windows.out
+          flags: windows

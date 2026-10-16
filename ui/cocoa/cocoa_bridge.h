@@ -192,6 +192,7 @@ double gkCocoaScrollZoom(void *scroll);
 void gkCocoaScrollViewport(void *scroll, int *width, int *height);
 int gkCocoaScrollToView(void *scroll, void *view, int animated);
 void gkCocoaSectionConfigure(void *section, const char *subtitle, void *icon, const char *badge);
+void gkCocoaSectionSetAnimated(void *section, int animated);
 
 /* Dialogs. */
 void *gkCocoaAlertCreate(int severity, const char *title, const char *message, const char *details, const char *buttons,
@@ -302,6 +303,7 @@ void *gkCocoaClipViewCreate(uintptr_t window);
 void *gkCocoaGroupBoxCreate(uintptr_t window, const char *title, const char *subtitle);
 void gkCocoaGroupBoxSet(void *box, const char *title, const char *subtitle);
 void gkCocoaGroupBoxBody(void *box, int *width, int *height, int *top);
+int gkCocoaGroupBoxSubtitleHeight(void *box, int width);
 void gkCocoaGroupBoxChrome(void *box, int *width, int *height);
 void *gkCocoaSplitViewCreate(uintptr_t window, int vertical, int panes);
 void *gkCocoaSplitViewPane(void *split, int index);

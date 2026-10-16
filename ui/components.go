@@ -889,7 +889,9 @@ func (options SplitViewOptions) Validate() error {
 	return nil
 }
 
-// SplitView arranges panes with user-resizable dividers.
+// SplitView arranges panes with user-resizable dividers. When the split view
+// changes size, the last pane gets the difference and the other panes keep
+// their size.
 type SplitView interface {
 	Widget
 

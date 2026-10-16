@@ -129,11 +129,6 @@ func checkExpectedPlatformServices(r *recorder, window ui.Window) {
 			}),
 			window.OnDeactivated(func() {
 			}),
-			window.OnReopen(func() {
-			}),
-			window.OnQuitRequest(func() bool {
-				return false
-			}),
 			window.Clipboard().OnChange(func() {
 			}),
 			window.Notifications().OnActivate(func(ui.NotificationActivation) {
@@ -145,6 +140,33 @@ func checkExpectedPlatformServices(r *recorder, window ui.Window) {
 			}
 			unsubscribe()
 		}
+		return nil
+	})
+
+	r.check("services/reopen_subscription", func() error {
+		if err := skipOnLinux("Linux desktops start a new process instead of reopening the running one"); err != nil {
+			return err
+		}
+		unsubscribe := window.OnReopen(func() {
+		})
+		if unsubscribe == nil {
+			return errors.New("OnReopen returned nil")
+		}
+		unsubscribe()
+		return nil
+	})
+
+	r.check("services/quit_request_subscription", func() error {
+		if err := skipOnLinux("a process without GtkApplication gets no quit requests"); err != nil {
+			return err
+		}
+		unsubscribe := window.OnQuitRequest(func() bool {
+			return false
+		})
+		if unsubscribe == nil {
+			return errors.New("OnQuitRequest returned nil")
+		}
+		unsubscribe()
 		return nil
 	})
 

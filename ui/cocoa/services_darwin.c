@@ -83,12 +83,50 @@ static NSAlertStyle gkAlertStyle(int severity) {
     }
 }
 
+/* gkAlertIcon returns a colored symbol for the severity. An alert otherwise
+   shows the application icon, and a program without a bundle has none. */
+static NSImage *gkAlertIcon(int severity) {
+    NSString *name = @"info.circle.fill";
+    NSColor *color = NSColor.systemBlueColor;
+    switch (severity) {
+    case 1:
+        name = @"checkmark.circle.fill";
+        color = NSColor.systemGreenColor;
+        break;
+    case 2:
+        name = @"exclamationmark.triangle.fill";
+        color = NSColor.systemOrangeColor;
+        break;
+    case 3:
+        name = @"xmark.octagon.fill";
+        color = NSColor.systemRedColor;
+        break;
+    }
+    NSImage *symbol = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
+    if (!symbol) {
+        return nil;
+    }
+    NSImageSymbolConfiguration *configuration =
+        [NSImageSymbolConfiguration configurationWithPointSize:48 weight:NSFontWeightRegular];
+    configuration = [configuration
+        configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[ NSColor.whiteColor, color ]]];
+    return [symbol imageWithSymbolConfiguration:configuration];
+}
+
 void *gkCocoaAlertCreate(int severity, const char *title, const char *message, const char *details, const char *buttons,
                          size_t buttonsSize, int cancelIndex, int destructiveMask, int prompt, int secure,
                          const char *text, const char *placeholder) {
     @autoreleasepool {
         NSAlert *alert = [[NSAlert alloc] init];
         alert.alertStyle = gkAlertStyle(severity);
+        NSImage *icon = gkAlertIcon(severity);
+        if (icon) {
+            alert.icon = icon;
+            /* The critical style draws a caution triangle and shows the icon
+               only as a small badge on it. The error icon shows the
+               severity. */
+            alert.alertStyle = NSAlertStyleWarning;
+        }
         NSString *heading = gkString(title);
         NSString *body = gkString(message);
         NSString *detail = gkString(details);

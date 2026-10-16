@@ -82,10 +82,11 @@ func orphan(child nativeWidget) {
 // frameContainer is a container whose children Go positions with frames.
 type frameContainer struct {
 	*widgetBase
-	mu        sync.RWMutex
-	children  []nativeWidget
-	arrange   func(size ui.Size)
-	preferred func() ui.Size
+	mu          sync.RWMutex
+	children    []nativeWidget
+	arrange     func(size ui.Size)
+	preferred   func() ui.Size
+	arrangement arrangement
 }
 
 func (w *Window) newFrameContainer(role ui.AccessibilityRole, owner cocoaReceiver) (*frameContainer, error) {
@@ -157,16 +158,27 @@ func (f *frameContainer) Close() {
 	f.widgetBase.Close()
 }
 
+// SetBounds places the container and arranges its children. It does not
+// reapply the parent layout, because the parent layout calls it.
 func (f *frameContainer) SetBounds(bounds ui.Rect) {
 	f.widgetBase.SetBounds(bounds)
-	f.relayout()
+	f.arrangeChildren()
 }
 
+// relayout arranges the children after the content changes, and reapplies
+// the parent layout because the preferred size can change with the content.
 func (f *frameContainer) relayout() {
-	if f.arrange != nil {
-		f.arrange(f.Bounds().Size)
-	}
+	f.arrangeChildren()
 	f.relayoutParent()
+}
+
+func (f *frameContainer) arrangeChildren() {
+	if f.arrange == nil {
+		return
+	}
+	f.arrangement.run(func() {
+		f.arrange(f.Bounds().Size)
+	})
 }
 
 func (f *frameContainer) PreferredSize() ui.Size {
@@ -311,6 +323,7 @@ type groupBox struct {
 	*widgetBase
 	title, subtitle string
 	content         nativeWidget
+	contentTop      int
 }
 
 // CreateGroupBox implements ui.Window.CreateGroupBox.
@@ -366,8 +379,14 @@ func (g *groupBox) apply() {
 	}
 }
 func (g *groupBox) SetBounds(bounds ui.Rect) {
+	previousTop := g.contentTop
 	g.widgetBase.SetBounds(bounds)
 	g.relayout()
+	if g.contentTop != previousTop {
+		// The subtitle wraps differently at the new width, which changes the
+		// preferred height.
+		g.relayoutParent()
+	}
 }
 func (g *groupBox) relayout() {
 	native := g.nativePointer()
@@ -376,6 +395,7 @@ func (g *groupBox) relayout() {
 	}
 	var width, height, top C.int
 	C.gkCocoaGroupBoxBody(native, &width, &height, &top)
+	g.contentTop = int(top)
 	g.content.SetBounds(ui.Rect{
 		Position: ui.Point{Y: int(top)},
 		Size:     ui.Size{Width: int(width), Height: max(0, int(height-top))},
@@ -390,6 +410,10 @@ func (g *groupBox) PreferredSize() ui.Size {
 	C.gkCocoaGroupBoxChrome(native, &chromeWidth, &chromeHeight)
 	C.gkCocoaGroupBoxBody(native, &width, &height, &top)
 	content := preferredOf(g.content)
+	// Before the first layout the box has no width, and a subtitle measured
+	// at that width wraps after every word. Measure it at the width that the
+	// content asks for instead.
+	top = C.gkCocoaGroupBoxSubtitleHeight(native, C.int(max(int(width), content.Width)))
 	return ui.Size{Width: content.Width + int(chromeWidth), Height: content.Height + int(chromeHeight) + int(top)}
 }
 func (g *groupBox) Close() {

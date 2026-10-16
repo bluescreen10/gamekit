@@ -36,6 +36,24 @@
 - (void)addItem:(NSString *)title;
 @end
 
+/* GKUIPushButton is the push button. It draws a spinner in place of its
+   content while it is busy, keeps a badge on its top trailing corner, and
+   uses a bezel that can grow when its frame is taller than one line. */
+@interface GKUIPushButton : NSButton
+@property(nonatomic) BOOL busy;
+@property(nonatomic, copy) NSString *badge;
+@property(nonatomic) BOOL stackedContent;
+- (void)updateBezel;
+@end
+
+/* gkUIBadgeLabel returns a pill-shaped label that centers text vertically. */
+NSTextField *gkUIBadgeLabel(NSString *text, NSColor *color);
+
+/* GKUICenteredTextFieldCell draws its text in the vertical center of the
+   cell. */
+@interface GKUICenteredTextFieldCell : NSTextFieldCell
+@end
+
 @interface GKUILinkButton : NSButton
 @property(copy) NSString *linkURL;
 @property BOOL visited;
@@ -46,7 +64,7 @@
 @end
 
 @interface GKUIImageView : NSView
-@property(retain) NSImage *image;
+@property(nonatomic, retain) NSImage *image;
 @property NSInteger scaling;
 @property NSInteger alignment;
 @property NSImageInterpolation interpolation;
@@ -66,6 +84,7 @@
 @property(copy) NSString *subtitle;
 @property(retain) NSTextField *badgeLabel;
 @property BOOL expanded;
+@property BOOL animated;
 @property(copy) NSString *sectionTitle;
 @property(retain) NSButton *header;
 @property(retain) GKUILayoutView *bodyView;

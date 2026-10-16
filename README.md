@@ -109,7 +109,8 @@ Linux requires the GTK 4 development package.
 | [`gpu/metal`](https://pkg.go.dev/github.com/bluescreen10/gamekit/gpu/metal) | Implements the Metal backend. |
 | [`ui`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui) | Defines the common native UI interface and layout types. |
 | [`ui/default`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/default) | Registers the default UI backend for the target platform. |
-| [`ui/window`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/window) | Implements Cocoa, Win32, and basic X11 windows. |
+| [`ui/cocoa`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/cocoa) | Implements Cocoa windows and controls on macOS. |
+| [`ui/window`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/window) | Implements Win32 and basic X11 windows. |
 | [`ui/gtk`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/gtk) | Implements GTK 4 controls on Linux. |
 | [`keyboard`](https://pkg.go.dev/github.com/bluescreen10/gamekit/keyboard) | Defines portable keys and keyboard events. |
 | [`pointer`](https://pkg.go.dev/github.com/bluescreen10/gamekit/pointer) | Defines portable pointer buttons and actions. |

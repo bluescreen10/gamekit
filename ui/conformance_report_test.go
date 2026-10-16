@@ -40,6 +40,15 @@ func skipOnDarwin(reason string) error {
 	return skipCheck("AppKit cannot do this: %s", reason)
 }
 
+// skipOnLinux returns a skip error on Linux, where the GTK backend does not
+// provide the feature. It returns nil on other platforms.
+func skipOnLinux(reason string) error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	return skipCheck("GTK does not provide this: %s", reason)
+}
+
 type conformanceResult struct {
 	Name   string
 	Status conformanceStatus
