@@ -36,12 +36,27 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # libgtk-4-dev is what ui/gtk compiles against; openbox is a window manager, without
-      # which Xvfb ignores maximize, minimize and fullscreen requests.
-      - name: Install Mesa Vulkan software renderer, GTK 4 and a window manager
+      # libgtk-4-dev is what ui/gtk compiles against. The conformance suite also
+      # exercises GTK's optional media and WebKit backends plus notifications.
+      # openbox is a window manager, without which Xvfb ignores maximize, minimize
+      # and fullscreen requests.
+      - name: Install Mesa Vulkan software renderer and GTK 4 test runtime
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends libvulkan-dev libx11-dev mesa-vulkan-drivers vulkan-tools xauth xvfb libgtk-4-dev openbox
+          sudo apt-get install --no-install-recommends \
+            dbus-daemon \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            libgtk-4-dev \
+            libvulkan-dev \
+            libwebkitgtk-6.0-4 \
+            libx11-dev \
+            mesa-vulkan-drivers \
+            notification-daemon \
+            openbox \
+            vulkan-tools \
+            xauth \
+            xvfb
 
       - name: Select lavapipe ICD
         run: |
@@ -75,13 +90,23 @@ jobs:
           go vet ./...
 
       # xvfb supplies the X display the window and input code needs; without it every
-      # X11 path fails at XOpenDisplay rather than being tested. No -v: only failures
-      # print, so a red run shows why without scrolling past every passing test.
+      # X11 path fails at XOpenDisplay rather than being tested. The private session
+      # bus lets the tray register, and notification-daemon provides the service used
+      # by the notification conformance checks. No -v: only failures print, so a red
+      # run shows why without scrolling past every passing test.
       # -coverpkg=./... credits every package that a test runs, so the conformance
       # suite in ui counts toward ui/gtk and the other backends.
       - name: Test
         run: |
-          xvfb-run -a sh -c 'openbox & sleep 1; go test ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage-linux.out'
+          dbus-run-session -- xvfb-run -a sh -c '
+            openbox &
+            window_manager=$!
+            /usr/lib/notification-daemon/notification-daemon &
+            notification_service=$!
+            trap "kill $notification_service $window_manager 2>/dev/null || true" EXIT
+            sleep 1
+            go test ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage-linux.out
+          '
 
       # Codecov merges the reports of the three platforms; the flag shows the coverage
       # of each platform on its own. A failed test run still uploads its report.
