@@ -21,6 +21,10 @@ jobs:
       LIBGL_ALWAYS_SOFTWARE: "1"
       GALLIUM_DRIVER: llvmpipe
       XDG_RUNTIME_DIR: /tmp
+      # ui/gtk runs on Xvfb, which has no GPU; GTK's default Vulkan/GL renderer then
+      # falls back to lavapipe and is flaky. Cairo renders on the CPU and is stable.
+      GDK_BACKEND: x11
+      GSK_RENDERER: cairo
 
     steps:
       - name: Check out repository
@@ -32,10 +36,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install Mesa Vulkan software renderer
+      # libgtk-4-dev is what ui/gtk compiles against; openbox is a window manager, without
+      # which Xvfb ignores maximize, minimize and fullscreen requests.
+      - name: Install Mesa Vulkan software renderer, GTK 4 and a window manager
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends libvulkan-dev libx11-dev mesa-vulkan-drivers vulkan-tools xauth xvfb
+          sudo apt-get install --no-install-recommends libvulkan-dev libx11-dev mesa-vulkan-drivers vulkan-tools xauth xvfb libgtk-4-dev openbox
 
       - name: Select lavapipe ICD
         run: |
@@ -74,7 +80,8 @@ jobs:
       # -coverpkg=./... credits every package that a test runs, so the conformance
       # suite in ui counts toward ui/gtk and the other backends.
       - name: Test
-        run: xvfb-run -a go test ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage-linux.out
+        run: |
+          xvfb-run -a sh -c 'openbox & sleep 1; go test ./... -count=1 -covermode=atomic -coverpkg=./... -coverprofile=coverage-linux.out'
 
       # Codecov merges the reports of the three platforms; the flag shows the coverage
       # of each platform on its own. A failed test run still uploads its report.
