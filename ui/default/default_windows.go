@@ -4,9 +4,9 @@ package defaultui
 
 import (
 	"github.com/bluescreen10/gamekit/ui"
-	"github.com/bluescreen10/gamekit/ui/window"
+	"github.com/bluescreen10/gamekit/ui/win32"
 )
 
 func init() {
-	ui.SetDefaultBackend(window.BackendName)
+	ui.SetDefaultBackend(win32.BackendName)
 }

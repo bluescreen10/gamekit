@@ -49,6 +49,15 @@ func skipOnLinux(reason string) error {
 	return skipCheck("GTK does not provide this: %s", reason)
 }
 
+// skipOnWindows returns a skip error on Windows, where the Win32 backend
+// does not provide the feature. It returns nil on other platforms.
+func skipOnWindows(reason string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	return skipCheck("Windows does not provide this: %s", reason)
+}
+
 type conformanceResult struct {
 	Name   string
 	Status conformanceStatus

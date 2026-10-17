@@ -1,10 +1,9 @@
-//go:build cgo && (linux || windows)
+//go:build cgo && linux
 
 package window
 
 /*
 #cgo linux LDFLAGS: -lX11
-#cgo windows LDFLAGS: -luser32 -lgdi32 -lcomctl32 -lcomdlg32 -lshell32 -lole32 -luuid -ldwmapi -luxtheme -ladvapi32
 #include "window_bridge.h"
 #include <stdlib.h>
 */

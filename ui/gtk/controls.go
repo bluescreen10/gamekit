@@ -715,7 +715,7 @@ func (w *Window) CreateDial(options ui.DialOptions) (ui.Dial, error) {
 	}
 	result := &dial{rangedControl{minimum: options.Minimum, maximum: options.Maximum, step: options.Step, wraps: options.Wrap}}
 	native := C.gkGTKDialCreate(window, C.double(options.Minimum), C.double(options.Maximum),
-		C.double(options.Value), C.double(options.Step))
+		C.double(options.Value), C.double(options.Step), boolInt(options.Wrap))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSlider, result); err != nil {
 		return nil, err
 	}

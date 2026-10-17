@@ -1,6 +1,6 @@
 //go:build windows && cgo
 
-package window
+package win32
 
 /*
 #include "widget_bridge.h"
@@ -17,7 +17,7 @@ import (
 	"github.com/bluescreen10/gamekit/ui"
 )
 
-// OpenFile displays a native open-file dialog parented to the window.
+// OpenFile displays a native open-file panel parented to the window.
 func (w *Window) OpenFile(ctx context.Context, options ui.OpenFileOptions) (string, error) {
 	paths, err := w.openPanel(ctx, options, false, false)
 	if err != nil {
@@ -26,12 +26,12 @@ func (w *Window) OpenFile(ctx context.Context, options ui.OpenFileOptions) (stri
 	return paths[0], nil
 }
 
-// OpenFiles displays a native multiple-file dialog parented to the window.
+// OpenFiles displays a native multiple-file panel parented to the window.
 func (w *Window) OpenFiles(ctx context.Context, options ui.OpenFileOptions) ([]string, error) {
 	return w.openPanel(ctx, options, true, false)
 }
 
-// SaveFile displays a native save-file dialog parented to the window.
+// SaveFile displays a native save-file panel parented to the window.
 func (w *Window) SaveFile(ctx context.Context, options ui.SaveFileOptions) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -40,19 +40,23 @@ func (w *Window) SaveFile(ctx context.Context, options ui.SaveFileOptions) (stri
 	directory := C.CString(options.Directory)
 	filename := C.CString(options.Filename)
 	extensions := C.CString(fileExtensions(options.Filters))
+	defaultExtension := C.CString(strings.TrimPrefix(options.DefaultExtension, "."))
 	defer C.free(unsafe.Pointer(title))
 	defer C.free(unsafe.Pointer(directory))
 	defer C.free(unsafe.Pointer(filename))
 	defer C.free(unsafe.Pointer(extensions))
+	defer C.free(unsafe.Pointer(defaultExtension))
 
 	var size C.size_t
 	var cancelled C.int
-	result := C.gkUISavePanel(
+	result := C.gkWin32UISavePanel(
 		w.nativeWindowHandle(),
 		title,
 		directory,
 		filename,
 		extensions,
+		boolInt(options.ShowHiddenFiles),
+		defaultExtension,
 		&size,
 		&cancelled,
 	)
@@ -63,7 +67,7 @@ func (w *Window) SaveFile(ctx context.Context, options ui.SaveFileOptions) (stri
 	return paths[0], nil
 }
 
-// SelectDirectory displays a native directory dialog parented to the window.
+// SelectDirectory displays a native directory panel parented to the window.
 func (w *Window) SelectDirectory(ctx context.Context, options ui.DirectoryDialogOptions) (string, error) {
 	paths, err := w.openPanel(ctx, ui.OpenFileOptions{
 		Title:     options.Title,
@@ -90,7 +94,7 @@ func (w *Window) openPanel(ctx context.Context, options ui.OpenFileOptions, mult
 
 	var size C.size_t
 	var cancelled C.int
-	result := C.gkUIOpenPanel(
+	result := C.gkWin32UIOpenPanel(
 		w.nativeWindowHandle(),
 		title,
 		directory,
@@ -98,6 +102,8 @@ func (w *Window) openPanel(ctx context.Context, options ui.OpenFileOptions, mult
 		extensions,
 		boolInt(multiple),
 		boolInt(directories),
+		boolInt(options.ShowHiddenFiles),
+		boolInt(options.SelectPackages),
 		&size,
 		&cancelled,
 	)

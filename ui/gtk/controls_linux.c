@@ -570,9 +570,17 @@ void *gkGTKStepperCreate(uintptr_t window, double minimum, double maximum, doubl
     return box;
 }
 
-/* The dial points up at its minimum and turns clockwise through 300
-   degrees, like a hardware knob. */
-static const double gkDialSweep = 300 * G_PI / 180;
+/* A dial is at its minimum at the lower left and turns clockwise through
+   300 degrees to the lower right, like a hardware knob. A dial that wraps
+   is at its minimum at the top and turns through a full circle, like the
+   circular slider of macOS. */
+static double gkDialSweep(GKValue *state) {
+    return state->wraps ? 2 * G_PI : 300 * G_PI / 180;
+}
+
+static double gkDialStart(GKValue *state) {
+    return state->wraps ? -G_PI / 2 : 120 * G_PI / 180;
+}
 
 static double gkDialFraction(GKValue *state) {
     double span = state->maximum - state->minimum;
@@ -586,12 +594,12 @@ static void gkDialDraw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
     gtk_widget_get_color(GTK_WIDGET(area), &color);
     double radius = MIN(width, height) / 2.0 - 3;
     double cx = width / 2.0, cy = height / 2.0;
-    double start = -G_PI / 2 - gkDialSweep / 2 + G_PI / 2 + G_PI;
+    double start = gkDialStart(state);
     cairo_set_line_width(cr, 2);
     cairo_set_source_rgba(cr, color.red, color.green, color.blue, 0.25);
     cairo_arc(cr, cx, cy, radius, 0, 2 * G_PI);
     cairo_stroke(cr);
-    double angle = start + gkDialFraction(state) * gkDialSweep;
+    double angle = start + gkDialFraction(state) * gkDialSweep(state);
     cairo_set_source_rgba(cr, color.red, color.green, color.blue, gtk_widget_is_sensitive(view->outer) ? 1 : 0.4);
     cairo_arc(cr, cx, cy, radius, start, angle);
     cairo_stroke(cr);
@@ -605,12 +613,16 @@ static void gkDialPoint(GKView *view, double x, double y) {
     GKValue *state = view->ext;
     int width = gtk_widget_get_width(state->area), height = gtk_widget_get_height(state->area);
     double angle = atan2(y - height / 2.0, x - width / 2.0);
-    double start = -G_PI / 2 - gkDialSweep / 2 + G_PI / 2 + G_PI;
-    double offset = fmod(angle - start + 4 * G_PI, 2 * G_PI);
-    if (offset > gkDialSweep) {
-        offset = offset - gkDialSweep < (2 * G_PI - gkDialSweep) / 2 ? gkDialSweep : 0;
+    double sweep = gkDialSweep(state);
+    double offset = fmod(angle - gkDialStart(state) + 4 * G_PI, 2 * G_PI);
+    if (offset > sweep) {
+        offset = offset - sweep < (2 * G_PI - sweep) / 2 ? sweep : 0;
     }
-    double value = gkSnap(state, state->minimum + offset / gkDialSweep * (state->maximum - state->minimum));
+    double value = gkSnap(state, state->minimum + offset / sweep * (state->maximum - state->minimum));
+    if (state->wraps && value >= state->maximum) {
+        /* The top of a full circle is the minimum. */
+        value = state->minimum;
+    }
     if (value != state->value) {
         state->value = value;
         gkValueChanged(view);
@@ -696,12 +708,13 @@ static GKValue *gkValueWidget(GKView *view, double minimum, double maximum, doub
     return state;
 }
 
-void *gkGTKDialCreate(uintptr_t window, double minimum, double maximum, double value, double step) {
+void *gkGTKDialCreate(uintptr_t window, double minimum, double maximum, double value, double step, int wraps) {
     GtkWidget *area = g_object_new(GTK_TYPE_DRAWING_AREA, "accessible-role", GTK_ACCESSIBLE_ROLE_SLIDER, NULL);
     gtk_drawing_area_set_content_width(GTK_DRAWING_AREA(area), 32);
     gtk_drawing_area_set_content_height(GTK_DRAWING_AREA(area), 32);
     GKView *view = gkControl(window, area, NULL, GK_KIND_DIAL);
     gkValueWidget(view, minimum, maximum, value, step, gkDialDraw);
+    ((GKValue *)view->ext)->wraps = wraps != 0;
     GtkGesture *drag = gtk_gesture_drag_new();
     g_signal_connect(drag, "drag-begin", G_CALLBACK(gkDialDragBegin), view);
     g_signal_connect(drag, "drag-update", G_CALLBACK(gkDialDragUpdate), view);

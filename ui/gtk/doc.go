@@ -19,6 +19,13 @@
 //     is a run-time dependency, not a build dependency.
 //   - Video uses the GStreamer media backend of GTK.
 //
+// Notifications and system tray items communicate over the per-user D-Bus
+// session bus. A normal graphical desktop starts this bus automatically.
+// Headless environments must provide one, for example by launching the
+// application with dbus-run-session. Notifications additionally require an
+// org.freedesktop.Notifications service; D-Bus alone does not display them.
+// Basic windows, widgets, and Vulkan rendering do not require D-Bus.
+//
 // GTK must run on one thread: the thread that creates the first window. The
 // package locks the main goroutine to the main thread when it initializes.
 package gtk

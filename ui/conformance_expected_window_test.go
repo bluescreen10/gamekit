@@ -3,6 +3,7 @@ package ui_test
 import (
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/bluescreen10/gamekit/ui"
@@ -238,8 +239,10 @@ func checkExpectedFullscreen(r *recorder, backend ui.Backend) {
 		}
 		screen := window.Screen()
 		framebuffer := window.FramebufferSize()
+		// The screen bounds are whole points, so a fractional scale factor,
+		// such as Windows' 125%, loses up to one point of the width.
 		want := int(float64(screen.Bounds.Size.Width) * screen.ScaleFactor)
-		if framebuffer.Width != want {
+		if framebuffer.Width < want || framebuffer.Width > want+int(math.Ceil(screen.ScaleFactor)) {
 			return fmt.Errorf("fullscreen framebuffer width = %d, want the screen's %d", framebuffer.Width, want)
 		}
 		return nil

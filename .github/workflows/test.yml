@@ -187,10 +187,24 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # cgo needs a C toolchain; the hosted image ships mingw-w64. Fail loudly here
-      # rather than inside an opaque cgo build error.
+      # ui/win32 is C++17 built against the Windows headers of llvm-mingw, which the
+      # backend is tested with; cgo uses its Clang for C and C++.
+      - name: Install llvm-mingw
+        shell: pwsh
+        run: |
+          $release = "20260616"
+          $name = "llvm-mingw-$release-ucrt-x86_64"
+          Invoke-WebRequest -Uri "https://github.com/mstorsjo/llvm-mingw/releases/download/$release/$name.zip" -OutFile llvm-mingw.zip
+          Expand-Archive llvm-mingw.zip -DestinationPath C:\
+          "C:\$name\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          "CC=x86_64-w64-mingw32-clang"    | Out-File -FilePath $env:GITHUB_ENV -Append
+          "CXX=x86_64-w64-mingw32-clang++" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # Fail loudly here rather than inside an opaque cgo build error.
       - name: Verify the C toolchain
-        run: gcc --version
+        run: |
+          x86_64-w64-mingw32-clang --version
+          x86_64-w64-mingw32-clang++ --version
 
       # The install is a 274 MB download, and nothing about it varies between runs of the
       # same SDK version — so cache the finished tree rather than the installer. The key
@@ -237,8 +251,9 @@ jobs:
         run: go vet ./...
 
       # The SDK supplies headers and an import library, not a driver, so no backend
-      # registers and the gpu tests skip themselves. What this job covers is compilation
-      # of the Win32 window, input and Vulkan-surface code, which no other job compiles.
+      # registers and the gpu tests skip themselves. This job compiles the Win32 backend and
+      # the Vulkan-surface code, which no other job compiles, and runs the shared
+      # ui conformance suite against Win32 in the desktop session of the runner.
       # PowerShell splits an unquoted argument such as -coverprofile=a.out at the dot.
       - name: Test
         run: go test ./... -count=1 "-covermode=atomic" "-coverpkg=./..." "-coverprofile=coverage-windows.out"

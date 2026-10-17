@@ -1,6 +1,6 @@
 //go:build windows && cgo
 
-package window
+package win32
 
 import "github.com/bluescreen10/gamekit/ui"
 

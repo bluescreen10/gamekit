@@ -147,6 +147,9 @@ func checkExpectedPlatformServices(r *recorder, window ui.Window) {
 		if err := skipOnLinux("Linux desktops start a new process instead of reopening the running one"); err != nil {
 			return err
 		}
+		if err := skipOnWindows("Windows starts a new process instead of reopening the running one"); err != nil {
+			return err
+		}
 		unsubscribe := window.OnReopen(func() {
 		})
 		if unsubscribe == nil {

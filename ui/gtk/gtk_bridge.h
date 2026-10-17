@@ -280,7 +280,7 @@ int gkGTKSegmentSelected(void *view, int index);
 int gkGTKSegmentClicked(void *view);
 void gkGTKSegmentSetSelected(void *view, int index, int selected);
 void *gkGTKStepperCreate(uintptr_t window, double minimum, double maximum, double value, double step, int wraps);
-void *gkGTKDialCreate(uintptr_t window, double minimum, double maximum, double value, double step);
+void *gkGTKDialCreate(uintptr_t window, double minimum, double maximum, double value, double step, int wraps);
 double gkGTKControlValue(void *view);
 void gkGTKControlSetValue(void *view, double value);
 void *gkGTKRangeSliderCreate(uintptr_t window, double minimum, double maximum, double lower, double upper,

@@ -1,6 +1,6 @@
-//go:build cgo && windows
+//go:build windows && cgo
 
-package window
+package win32
 
 /*
 #include "widget_bridge.h"
@@ -22,7 +22,7 @@ import (
 type canvasPointer = pointerstate.State
 
 // canvasFromHandle resolves the handle a native canvas view reports with, or nil once
-// the canvas is closed (gkUIClearAction zeroes the view's copy first).
+// the canvas is closed (gkWin32UIClearAction zeroes the view's copy first).
 func canvasFromHandle(handle C.uintptr_t) *canvas {
 	if handle == 0 {
 		return nil
@@ -31,8 +31,8 @@ func canvasFromHandle(handle C.uintptr_t) *canvas {
 	return result
 }
 
-//export gkUIGoCanvasPointerButton
-func gkUIGoCanvasPointerButton(handle C.uintptr_t, button, action, mods C.int) {
+//export gkWin32UIGoCanvasPointerButton
+func gkWin32UIGoCanvasPointerButton(handle C.uintptr_t, button, action, mods C.int) {
 	if c := canvasFromHandle(handle); c != nil {
 		c.DispatchPointerButton(ui.PointerButtonEvent{
 			Button:    pointer.Button(button),
@@ -42,8 +42,8 @@ func gkUIGoCanvasPointerButton(handle C.uintptr_t, button, action, mods C.int) {
 	}
 }
 
-//export gkUIGoCanvasScroll
-func gkUIGoCanvasScroll(handle C.uintptr_t, x, y C.double) {
+//export gkWin32UIGoCanvasScroll
+func gkWin32UIGoCanvasScroll(handle C.uintptr_t, x, y C.double) {
 	if c := canvasFromHandle(handle); c != nil {
 		c.DispatchScroll(ui.ScrollEvent{X: float64(x), Y: float64(y)})
 	}

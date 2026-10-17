@@ -12,7 +12,7 @@ It supplies native windows, input, UI controls, and a bindless GPU interface.
 
 ## Features
 
-- Create native windows and controls with Cocoa, WinUI, or GTK 4.
+- Create native windows and controls with Cocoa, Win32, or GTK 4.
 - Receive portable keyboard, pointer, text, and scroll input.
 - Use one UI interface on all supported platforms.
 - Send graphics work to Vulkan 1.3 or Metal 4.
@@ -110,7 +110,8 @@ Linux requires the GTK 4 development package.
 | [`ui`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui) | Defines the common native UI interface and layout types. |
 | [`ui/default`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/default) | Registers the default UI backend for the target platform. |
 | [`ui/cocoa`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/cocoa) | Implements Cocoa windows and controls on macOS. |
-| [`ui/window`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/window) | Implements Win32 and basic X11 windows. |
+| [`ui/win32`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/win32) | Implements Win32 windows and native controls on Windows. |
+| [`ui/window`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/window) | Implements basic X11 windows. |
 | [`ui/gtk`](https://pkg.go.dev/github.com/bluescreen10/gamekit/ui/gtk) | Implements GTK 4 controls on Linux. |
 | [`keyboard`](https://pkg.go.dev/github.com/bluescreen10/gamekit/keyboard) | Defines portable keys and keyboard events. |
 | [`pointer`](https://pkg.go.dev/github.com/bluescreen10/gamekit/pointer) | Defines portable pointer buttons and actions. |

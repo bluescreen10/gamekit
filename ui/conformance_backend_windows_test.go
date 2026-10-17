@@ -7,14 +7,14 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/bluescreen10/gamekit/ui/winui"
+	"github.com/bluescreen10/gamekit/ui/win32"
 )
 
 var backendReport conformanceReport
 
 func TestMain(m *testing.M) {
 	runtime.LockOSThread()
-	backendReport = checkBackend(&winui.Backend{})
+	backendReport = checkBackend(&win32.Backend{})
 	code := m.Run()
 	runtime.UnlockOSThread()
 	os.Exit(code)

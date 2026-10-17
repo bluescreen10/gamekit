@@ -1,9 +1,8 @@
-// Package window provides GameKit's built-in Win32 and X11 backends for ui.
+// Package window provides GameKit's built-in X11 backend for ui.
 //
-// It uses Win32 on Windows and X11 on Linux. Win32 implements the native
-// widget set; the X11 path provides windows and input only. Applications that
-// need native Linux widgets should use package gtk, and macOS applications
-// should use package cocoa. Win32 is being replaced by package winui.
-// Importing this package registers "win32" or "x11" for the target platform.
+// The backend provides windows and input on Linux only. It does not have
+// native widgets. Applications that need native widgets should use package
+// gtk on Linux, package win32 on Windows, and package cocoa on macOS.
+// Importing this package on Linux registers the backend as "x11".
 // The zero value of Backend is ready for use.
 package window

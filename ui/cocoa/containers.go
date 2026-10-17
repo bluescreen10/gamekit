@@ -651,7 +651,9 @@ func (p *popover) Show() error {
 	if C.gkCocoaPopoverShow(p.native, view, C.int(p.edge), C.int(size.Width), C.int(size.Height)) == 0 {
 		return errors.New("ui/cocoa: a popover's anchor must be in a visible window")
 	}
-	p.body.SetBounds(ui.Rect{Size: size})
+	// NSPopover places the body inside its frame, so only the content is
+	// laid out here.
+	p.content.SetBounds(ui.Rect{Size: size})
 	return nil
 }
 

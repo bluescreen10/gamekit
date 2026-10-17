@@ -1,6 +1,6 @@
 //go:build windows && cgo
 
-package window
+package win32
 
 /*
 #include "window_bridge.h"
@@ -8,11 +8,11 @@ package window
 import "C"
 
 // GetPointerPos returns the cursor in logical pixels relative to the top-left
-// corner of the window's client area.
+// corner of the window's content area.
 func (w *Window) GetPointerPos() (x, y float64) {
 	if native := w.nativePointer(); native != nil {
 		var nativeX, nativeY C.double
-		C.gkWindowCursorPosition(native, &nativeX, &nativeY)
+		C.gkWin32WindowCursorPosition(native, &nativeX, &nativeY)
 		return float64(nativeX), float64(nativeY)
 	}
 	return 0, 0

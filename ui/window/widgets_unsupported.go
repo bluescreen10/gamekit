@@ -1,5 +1,3 @@
-//go:build !windows || !cgo
-
 package window
 
 import "github.com/bluescreen10/gamekit/ui"
