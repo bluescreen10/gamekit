@@ -94,9 +94,10 @@ type Backend struct {
 	// users is how many Inits have no Destroy yet: the device lives while any do.
 	users int
 
-	device, queue, compiler id
-	residencySet            residencySet
-	event, fence            id
+	device          device
+	queue, compiler id
+	residencySet    residencySet
+	event, fence    id
 	// The command allocator, command buffer and argument table are created once and
 	// reused every frame rather than recreated each Begin. That reuse is exactly what
 	// MTL4's allocator model exists to make cheap — recreating them per frame was
@@ -269,51 +270,51 @@ func (b *Backend) init() error {
 	if b.device == 0 {
 		return fmt.Errorf("no Metal device")
 	}
-	if deviceArgumentBuffersSupport(b.device) != mtlArgumentBuffersTier2 || !deviceHasUnifiedMemory(b.device) {
+	if b.device.argumentBuffersSupport() != mtlArgumentBuffersTier2 || !b.device.hasUnifiedMemory() {
 		return fmt.Errorf("requires a unified-memory GPU with Tier 2 argument buffers")
 	}
 	// The paravirtualized GPU of a macOS virtual machine (GitHub's hosted runners)
 	// passes the checks above but has no Metal 4: newMTL4CommandQueue returns nil.
-	if !deviceSupportsFamily(b.device, mtlGPUFamilyMetal4) {
+	if !b.device.supportsFamily(mtlGPUFamilyMetal4) {
 		return fmt.Errorf("requires a Metal 4 GPU")
 	}
-	b.apple1 = deviceSupportsFamily(b.device, mtlGPUFamilyApple1)
-	b.maxBufferLength = uint64(deviceMaxBufferLength(b.device))
-	if b.queue = deviceNewMTL4CommandQueue(b.device); b.queue == 0 {
+	b.apple1 = b.device.supportsFamily(mtlGPUFamilyApple1)
+	b.maxBufferLength = uint64(b.device.maxBufferLength())
+	if b.queue = b.device.newMTL4CommandQueue(); b.queue == 0 {
 		return fmt.Errorf("cannot create command queue")
 	}
 	var err error
-	if b.compiler, err = newWithDescriptor(b.device, deviceNewCompilerWithDescriptor, "MTL4CompilerDescriptor", nil, "cannot create Metal 4 compiler"); err != nil {
+	if b.compiler, err = newWithDescriptor(b.device.newCompilerWithDescriptor, "MTL4CompilerDescriptor", nil, "cannot create Metal 4 compiler"); err != nil {
 		return err
 	}
-	if b.residencySet, err = newResidencySet(b.device); err != nil {
+	if b.residencySet, err = b.device.newResidencySet(); err != nil {
 		return err
 	}
 	commandQueueAddResidencySet(b.queue, b.residencySet)
 	b.resources = map[uint64]*resource{}
 	b.fences = map[uint64]uint64{}
 	b.feedback = make(chan feedback, 16)
-	if b.event = deviceNewSharedEvent(b.device); b.event == 0 {
+	if b.event = b.device.newSharedEvent(); b.event == 0 {
 		return fmt.Errorf("cannot create shared event")
 	}
-	if b.fence = deviceNewFence(b.device); b.fence == 0 {
+	if b.fence = b.device.newFence(); b.fence == 0 {
 		return fmt.Errorf("cannot create fence")
 	}
-	if b.allocator, err = newWithDescriptor(b.device, deviceNewCommandAllocatorWithDescriptor, "MTL4CommandAllocatorDescriptor", nil, "cannot create command allocator"); err != nil {
+	if b.allocator, err = newWithDescriptor(b.device.newCommandAllocatorWithDescriptor, "MTL4CommandAllocatorDescriptor", nil, "cannot create command allocator"); err != nil {
 		return err
 	}
-	if b.buffer = deviceNewCommandBuffer(b.device); b.buffer == 0 {
+	if b.buffer = b.device.newCommandBuffer(); b.buffer == 0 {
 		return fmt.Errorf("cannot create command buffer")
 	}
-	if b.argTable, err = newWithDescriptor(b.device, deviceNewArgumentTableWithDescriptor, "MTL4ArgumentTableDescriptor",
+	if b.argTable, err = newWithDescriptor(b.device.newArgumentTableWithDescriptor, "MTL4ArgumentTableDescriptor",
 		func(d id) {
 			argumentTableDescriptorSetMaxBufferBindCount(d, 4)
 		}, "cannot create argument table"); err != nil {
 		return err
 	}
-	b.textureTable = deviceNewBufferWithLength(b.device, textureSlots*8, mtlResourceStorageModeShared)
-	samplers := min(samplerSlots, uint64(deviceMaxArgumentBufferSamplerCount(b.device)))
-	b.samplerTable = deviceNewBufferWithLength(b.device, samplerSlots*8, mtlResourceStorageModeShared)
+	b.textureTable = b.device.newBufferWithLength(textureSlots*8, mtlResourceStorageModeShared)
+	samplers := min(samplerSlots, uint64(b.device.maxArgumentBufferSamplerCount()))
+	b.samplerTable = b.device.newBufferWithLength(samplerSlots*8, mtlResourceStorageModeShared)
 	if b.textureTable == 0 || b.samplerTable == 0 {
 		return fmt.Errorf("cannot allocate argument tables")
 	}
@@ -340,14 +341,14 @@ func (b *Backend) init() error {
 
 // newWithDescriptor creates an object from a new descriptor of class descriptor,
 // configured by configure, with a creation message that reports an NSError.
-func newWithDescriptor(device id, create func(device, descriptor id, err *id) id, descriptor string, configure func(id), failure string) (id, error) {
+func newWithDescriptor(create func(descriptor id, err *id) id, descriptor string, configure func(id), failure string) (id, error) {
 	d := newObject(descriptor)
 	defer release(d)
 	if configure != nil {
 		configure(d)
 	}
 	var nserr id
-	x := create(device, d, &nserr)
+	x := create(d, &nserr)
 	if x == 0 {
 		return 0, fmt.Errorf("%s", errorText(nserr, failure))
 	}
@@ -378,7 +379,7 @@ func (b *Backend) destroy() {
 	}
 	b.resources = nil
 	for _, o := range []id{b.textureTable, b.samplerTable, b.rootArena, id(b.residencySet), b.compiler, b.event,
-		b.fence, b.allocator, b.buffer, b.argTable, b.queue, b.device} {
+		b.fence, b.allocator, b.buffer, b.argTable, b.queue, id(b.device)} {
 		release(o)
 	}
 	*b = Backend{}
@@ -420,7 +421,7 @@ func (b *Backend) Alloc(size uint64, mem gpu.MemoryType, label string) gpu.Buffe
 		options = mtlResourceStorageModePrivate
 	}
 	r := &resource{kind: kindBuffer, size: size, private: mem == gpu.MemoryDevice}
-	r.object = deviceNewBufferWithLength(b.device, uint(size), options)
+	r.object = b.device.newBufferWithLength(uint(size), options)
 	h := b.add(r)
 	setLabel(r.object, label)
 	b.residencySet.enrol(r.object)
@@ -541,7 +542,7 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	textureDescriptorSetSampleCount(desc, uint(r.samples))
 	textureDescriptorSetStorageMode(desc, storage)
 	textureDescriptorSetUsage(desc, usage)
-	r.object = deviceNewTextureWithDescriptor(b.device, desc)
+	r.object = b.device.newTextureWithDescriptor(desc)
 	h := b.add(r)
 	setLabel(r.object, d.Label)
 	// Residency sets do not take memoryless textures, which have no memory to make
@@ -629,7 +630,7 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	samplerDescriptorSetMaxAnisotropy(desc, uint(max(d.MaxAnisotropy, 1)))
 	samplerDescriptorSetSupportArgumentBuffers(desc, true)
 	setLabel(desc, d.Label)
-	r := &resource{kind: kindSampler, object: deviceNewSamplerStateWithDescriptor(b.device, desc)}
+	r := &resource{kind: kindSampler, object: b.device.newSamplerStateWithDescriptor(desc)}
 	h := b.add(r)
 	return gpu.Sampler{H: gpu.Handle(h), Index: b.slot(r)}
 }
@@ -651,7 +652,7 @@ func (b *Backend) shaderLibrary(code []byte) id {
 	var library, nserr id
 	if bytes.HasPrefix(code, []byte("MTLB")) {
 		data := dispatchDataCreate(unsafe.Pointer(&code[0]), len(code))
-		library = deviceNewLibraryWithData(b.device, data, &nserr)
+		library = b.device.newLibraryWithData(data, &nserr)
 		release(data)
 	} else {
 		check(len(code) < 4 || binary.LittleEndian.Uint32(code) != 0x07230203,
@@ -660,7 +661,7 @@ func (b *Backend) shaderLibrary(code []byte) id {
 		check(source != 0, "shader is not UTF-8 MSL or a metallib")
 		options := newObject("MTLCompileOptions")
 		compileOptionsSetLanguageVersion(options, mtlLanguageVersion3_0)
-		library = deviceNewLibraryWithSource(b.device, source, options, &nserr)
+		library = b.device.newLibraryWithSource(source, options, &nserr)
 		release(options)
 		release(source)
 	}
@@ -850,7 +851,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	}
 	depthStencilDescriptorSetDepthCompareFunction(depth, compare)
 	depthStencilDescriptorSetDepthWriteEnabled(depth, d.DepthWrite)
-	r.depthStencil = deviceNewDepthStencilStateWithDescriptor(b.device, depth)
+	r.depthStencil = b.device.newDepthStencilStateWithDescriptor(depth)
 	release(depth)
 	r.topology = topologies[d.Topology]
 	r.cull = cullModes[d.CullMode]
@@ -1039,7 +1040,7 @@ func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 	}
 	pool := pushPool()
 	defer pool.drain()
-	heap, err := newWithDescriptor(b.device, deviceNewCounterHeapWithDescriptor, "MTL4CounterHeapDescriptor", func(d id) {
+	heap, err := newWithDescriptor(b.device.newCounterHeapWithDescriptor, "MTL4CounterHeapDescriptor", func(d id) {
 		counterHeapDescriptorSetType(d, mtl4CounterHeapTypeTimestamp)
 		counterHeapDescriptorSetCount(d, uint(n))
 	}, "")
@@ -1048,7 +1049,7 @@ func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 	}
 	r := &resource{kind: kindQuery, object: heap, count: uint64(n), written: map[uint32]bool{}, overrides: map[uint32]uint64{}}
 	var cpu, gpuStart uint64
-	deviceSampleTimestamps(b.device, &cpu, &gpuStart)
+	b.device.sampleTimestamps(&cpu, &gpuStart)
 	r.cpuStart, r.gpuStart = cpu, gpuStart
 	return gpu.QueryPool{H: gpu.Handle(b.add(r))}
 }
@@ -1071,7 +1072,7 @@ func (b *Backend) ReadTimestamps(p gpu.QueryPool, n uint32) []uint64 {
 	check(data != 0 && uint64(dataLength(data)) >= uint64(n)*8, "timestamp resolve failed")
 	values := unsafe.Slice((*uint64)(dataBytes(data)), n)
 	var cpu, gpuNow uint64
-	deviceSampleTimestamps(b.device, &cpu, &gpuNow)
+	b.device.sampleTimestamps(&cpu, &gpuNow)
 	check(gpuNow > r.gpuStart, "GPU timestamp calibration unavailable")
 	scale := hostScale()
 	period := float64(cpu-r.cpuStart) * scale / float64(gpuNow-r.gpuStart)

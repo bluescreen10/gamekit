@@ -26,7 +26,7 @@ import (
 //     its framework prefix (MTL, MTL4, CA, NS) dropped and the first letter lowered,
 //     then the selector's first part with the first letter raised. [layer
 //     setContentsScale:s] is metalLayerSetContentsScale(layer, s), and [device
-//     newBufferWithLength:n options:o] deviceNewBufferWithLength(device, n, o). When a
+//     newBufferWithLength:n options:o] is deviceNewBufferWithLength(device, n, o). When a
 //     receiver takes several messages that share a first part, each adds the part that
 //     tells it apart: computeCommandEncoderCopyFromBufferToTexture. Messages that many
 //     unrelated types take are named for object (objectRelease, objectSetLabel), class
@@ -215,8 +215,8 @@ func b2u(v bool) C.gk_u {
 
 // C functions.
 
-func mtlCreateSystemDefaultDevice() id {
-	return id(C.gk_device())
+func mtlCreateSystemDefaultDevice() device {
+	return device(C.gk_device())
 }
 
 func objcGetClass(name string) id {
@@ -326,67 +326,67 @@ func dataLength(d id) uint {
 
 // MTLDevice.
 
-func deviceArgumentBuffersSupport(d id) uint {
+func deviceArgumentBuffersSupport(d device) uint {
 	return uint(C.gk_u_(o(d), selArgumentBuffersSupport))
 }
-func deviceHasUnifiedMemory(d id) bool {
+func deviceHasUnifiedMemory(d device) bool {
 	return C.gk_b(o(d), selHasUnifiedMemory) != 0
 }
-func deviceSupportsFamily(d id, family uint) bool {
+func deviceSupportsFamily(d device, family uint) bool {
 	return C.gk_b_u(o(d), selSupportsFamily, C.gk_u(family)) != 0
 }
-func deviceMaxBufferLength(d id) uint {
+func deviceMaxBufferLength(d device) uint {
 	return uint(C.gk_u_(o(d), selMaxBufferLength))
 }
-func deviceMaxArgumentBufferSamplerCount(d id) uint {
+func deviceMaxArgumentBufferSamplerCount(d device) uint {
 	return uint(C.gk_u_(o(d), selMaxArgumentBufferSamplerCount))
 }
-func deviceNewMTL4CommandQueue(d id) id {
+func deviceNewMTL4CommandQueue(d device) id {
 	return id(C.gk_o(o(d), selNewMTL4CommandQueue))
 }
-func deviceNewSharedEvent(d id) id {
+func deviceNewSharedEvent(d device) id {
 	return id(C.gk_o(o(d), selNewSharedEvent))
 }
-func deviceNewFence(d id) id {
+func deviceNewFence(d device) id {
 	return id(C.gk_o(o(d), selNewFence))
 }
-func deviceNewCommandBuffer(d id) id {
+func deviceNewCommandBuffer(d device) id {
 	return id(C.gk_o(o(d), selNewCommandBuffer))
 }
-func deviceNewCompilerWithDescriptor(d, desc id, err *id) id {
+func deviceNewCompilerWithDescriptor(d device, desc id, err *id) id {
 	return id(C.gk_o_op(o(d), selNewCompilerWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewResidencySetWithDescriptor(d, desc id, err *id) id {
+func deviceNewResidencySetWithDescriptor(d device, desc id, err *id) id {
 	return id(C.gk_o_op(o(d), selNewResidencySetWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewCommandAllocatorWithDescriptor(d, desc id, err *id) id {
+func deviceNewCommandAllocatorWithDescriptor(d device, desc id, err *id) id {
 	return id(C.gk_o_op(o(d), selNewCommandAllocatorWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewArgumentTableWithDescriptor(d, desc id, err *id) id {
+func deviceNewArgumentTableWithDescriptor(d device, desc id, err *id) id {
 	return id(C.gk_o_op(o(d), selNewArgumentTableWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewCounterHeapWithDescriptor(d, desc id, err *id) id {
+func deviceNewCounterHeapWithDescriptor(d device, desc id, err *id) id {
 	return id(C.gk_o_op(o(d), selNewCounterHeapWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewBufferWithLength(d id, length, options uint) id {
+func deviceNewBufferWithLength(d device, length, options uint) id {
 	return id(C.gk_o_uu(o(d), selNewBufferWithLength, C.gk_u(length), C.gk_u(options)))
 }
-func deviceNewTextureWithDescriptor(d, desc id) id {
+func deviceNewTextureWithDescriptor(d device, desc id) id {
 	return id(C.gk_o_o(o(d), selNewTextureWithDescriptor, o(desc)))
 }
-func deviceNewSamplerStateWithDescriptor(d, desc id) id {
+func deviceNewSamplerStateWithDescriptor(d device, desc id) id {
 	return id(C.gk_o_o(o(d), selNewSamplerStateWithDescriptor, o(desc)))
 }
-func deviceNewDepthStencilStateWithDescriptor(d, desc id) id {
+func deviceNewDepthStencilStateWithDescriptor(d device, desc id) id {
 	return id(C.gk_o_o(o(d), selNewDepthStencilStateWithDescriptor, o(desc)))
 }
-func deviceNewLibraryWithData(d, data id, err *id) id {
+func deviceNewLibraryWithData(d device, data id, err *id) id {
 	return id(C.gk_o_op(o(d), selNewLibraryWithData, o(data), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewLibraryWithSource(d, source, options id, err *id) id {
+func deviceNewLibraryWithSource(d device, source, options id, err *id) id {
 	return id(C.gk_o_oop(o(d), selNewLibraryWithSource, o(source), o(options), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceSampleTimestamps(d id, cpu, gpu *uint64) {
+func deviceSampleTimestamps(d device, cpu, gpu *uint64) {
 	C.gk_v_pp(o(d), selSampleTimestamps, unsafe.Pointer(cpu), unsafe.Pointer(gpu))
 }
 
@@ -660,7 +660,7 @@ func depthStencilDescriptorSetDepthWriteEnabled(d id, v bool) {
 func metalLayerLayer() id {
 	return id(C.gk_o(o(objcGetClass("CAMetalLayer")), selLayer))
 }
-func metalLayerSetDevice(l, d id) {
+func metalLayerSetDevice(l id, d device) {
 	C.gk_v_o(o(l), selSetDevice, o(d))
 }
 func metalLayerSetPixelFormat(l id, v uint) {

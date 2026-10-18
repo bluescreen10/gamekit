@@ -138,7 +138,7 @@ func (c *command) rootSlot(data []byte) uint64 {
 		// Grow by doubling. Draws already recorded still read the old arena, so it stays
 		// resident and alive until the GPU is done with it.
 		size := max(2*b.rootArenaLen, need, 16384)
-		arena := deviceNewBufferWithLength(b.device, uint(size), mtlResourceStorageModeShared)
+		arena := b.device.newBufferWithLength(uint(size), mtlResourceStorageModeShared)
 		check(arena != 0, "cannot allocate root scratch buffer")
 		if b.rootArena != 0 {
 			b.retired = append(b.retired, b.rootArena)
