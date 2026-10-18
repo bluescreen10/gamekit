@@ -10,7 +10,7 @@ func (b commandBuffer) release() {
 	release(b)
 }
 
-func (b commandBuffer) beginCommandBufferWithAllocator(allocator id) {
+func (b commandBuffer) beginCommandBufferWithAllocator(allocator allocator) {
 	commandBufferBeginCommandBufferWithAllocator(b, allocator)
 }
 

@@ -96,7 +96,7 @@ type Backend struct {
 
 	device       device
 	queue        queue
-	compiler     id
+	compiler     compiler
 	residencySet residencySet
 	event, fence id
 	// The command allocator, command buffer and argument table are created once and
@@ -106,8 +106,9 @@ type Backend struct {
 	// is safe because every submission is fully synchronized: by the time the next
 	// Begin resets the allocator, the previous frame's GPU work has completed, which is
 	// the allocator's documented precondition for reset.
-	allocator, argTable id
-	buffer              commandBuffer
+	allocator allocator
+	argTable  argumentTable
+	buffer    commandBuffer
 
 	// The bindless tables: texture and sampler resource IDs, indexed by slot.
 	textureTable, samplerTable id
@@ -286,7 +287,7 @@ func (b *Backend) init() error {
 		return fmt.Errorf("cannot create command queue")
 	}
 	var err error
-	if b.compiler, err = newWithDescriptor(b.device.newCompilerWithDescriptor, newCompilerDescriptor, nil, "cannot create Metal 4 compiler"); err != nil {
+	if b.compiler, err = b.device.newCompiler(); err != nil {
 		return err
 	}
 	if b.residencySet, err = b.device.newResidencySet(); err != nil {
@@ -302,16 +303,13 @@ func (b *Backend) init() error {
 	if b.fence = b.device.newFence(); b.fence == 0 {
 		return fmt.Errorf("cannot create fence")
 	}
-	if b.allocator, err = newWithDescriptor(b.device.newCommandAllocatorWithDescriptor, newCommandAllocatorDescriptor, nil, "cannot create command allocator"); err != nil {
+	if b.allocator, err = b.device.newAllocator(); err != nil {
 		return err
 	}
 	if b.buffer = b.device.newCommandBuffer(); b.buffer == 0 {
 		return fmt.Errorf("cannot create command buffer")
 	}
-	if b.argTable, err = newWithDescriptor(b.device.newArgumentTableWithDescriptor, newArgumentTableDescriptor,
-		func(d argumentTableDescriptor) {
-			d.setMaxBufferBindCount(4)
-		}, "cannot create argument table"); err != nil {
+	if b.argTable, err = b.device.newArgumentTable(4); err != nil {
 		return err
 	}
 	b.textureTable = b.device.newBufferWithLength(textureSlots*8, mtlResourceStorageModeShared)
@@ -325,12 +323,12 @@ func (b *Backend) init() error {
 	b.textureIDs = unsafe.Slice((*uint64)(bufferContents(b.textureTable)), textureSlots)
 	b.samplerIDs = unsafe.Slice((*uint64)(bufferContents(b.samplerTable)), samplerSlots)
 	textures := bufferGPUAddress(b.textureTable)
-	argumentTableSetAddress(b.argTable, textures, 1)
-	argumentTableSetAddress(b.argTable, bufferGPUAddress(b.samplerTable), 2)
+	b.argTable.setAddress(textures, 1)
+	b.argTable.setAddress(bufferGPUAddress(b.samplerTable), 2)
 	// Storage images (Vulkan's binding 1) read the same table as sampled ones: a Metal
 	// texture handle does not care how it is accessed, so a texture's one index serves
 	// both, as it does on Vulkan.
-	argumentTableSetAddress(b.argTable, textures, 3)
+	b.argTable.setAddress(textures, 3)
 	// Slots are handed out lowest first.
 	for i := uint32(textureSlots - 1); i >= 1; i-- {
 		b.freeTextures = append(b.freeTextures, i)
@@ -343,7 +341,7 @@ func (b *Backend) init() error {
 
 // newWithDescriptor creates an object with a new, configured descriptor.
 // The creation function reports an NSError on failure.
-func newWithDescriptor[T ~uintptr](create func(descriptor T, err *id) id, descriptor func() T, configure func(T), failure string) (id, error) {
+func newWithDescriptor[T, R ~uintptr](create func(descriptor T, err *id) R, descriptor func() T, configure func(T), failure string) (R, error) {
 	d := descriptor()
 	defer release(d)
 	if configure != nil {
@@ -764,7 +762,7 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 	desc.setComputeFunctionDescriptor(specializedFunction(b.libraryFunction(code, d.Entry), constants))
 	desc.setOptions(pipelineOptions())
 	var nserr id
-	ps := compilerNewComputePipelineStateWithDescriptor(b.compiler, desc, 0, &nserr)
+	ps := b.compiler.newComputePipelineStateWithDescriptor(desc, 0, &nserr)
 	check(ps != 0, errorText(nserr, "compute pipeline creation failed"))
 	r := &resource{kind: kindCompute, object: ps}
 	r.group = [3]uint{uint(group[0]), uint(group[1]), uint(group[2])}
@@ -848,7 +846,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	// lives purely on the render pass descriptor. The descriptor's depth fields still
 	// select the depth-stencil state's compare and write behavior below.
 	var nserr id
-	ps := compilerNewRenderPipelineStateWithDescriptor(b.compiler, desc, 0, &nserr)
+	ps := b.compiler.newRenderPipelineStateWithDescriptor(desc, 0, &nserr)
 	check(ps != 0, errorText(nserr, "render pipeline creation failed"))
 	r := &resource{kind: kindGraphics, object: ps, depthWrite: d.DepthWrite}
 	// bindings() pushes the root to both stages, so the larger expectation governs.

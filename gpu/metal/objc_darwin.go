@@ -353,17 +353,17 @@ func deviceNewFence(d device) id {
 func deviceNewCommandBuffer(d device) commandBuffer {
 	return commandBuffer(C.gk_o(o(d), selNewCommandBuffer))
 }
-func deviceNewCompilerWithDescriptor(d device, desc compilerDescriptor, err *id) id {
-	return id(C.gk_o_op(o(d), selNewCompilerWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
+func deviceNewCompilerWithDescriptor(d device, desc compilerDescriptor, err *id) compiler {
+	return compiler(C.gk_o_op(o(d), selNewCompilerWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
 func deviceNewResidencySetWithDescriptor(d device, desc residencySetDescriptor, err *id) id {
 	return id(C.gk_o_op(o(d), selNewResidencySetWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewCommandAllocatorWithDescriptor(d device, desc commandAllocatorDescriptor, err *id) id {
-	return id(C.gk_o_op(o(d), selNewCommandAllocatorWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
+func deviceNewCommandAllocatorWithDescriptor(d device, desc commandAllocatorDescriptor, err *id) allocator {
+	return allocator(C.gk_o_op(o(d), selNewCommandAllocatorWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewArgumentTableWithDescriptor(d device, desc argumentTableDescriptor, err *id) id {
-	return id(C.gk_o_op(o(d), selNewArgumentTableWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
+func deviceNewArgumentTableWithDescriptor(d device, desc argumentTableDescriptor, err *id) argumentTable {
+	return argumentTable(C.gk_o_op(o(d), selNewArgumentTableWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
 func deviceNewCounterHeapWithDescriptor(d device, desc counterHeapDescriptor, err *id) id {
 	return id(C.gk_o_op(o(d), selNewCounterHeapWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
@@ -425,7 +425,7 @@ func sharedEventWaitUntilSignaledValue(e id, value uint64, timeoutMS uint) bool 
 func argumentTableDescriptorSetMaxBufferBindCount(d argumentTableDescriptor, n uint) {
 	C.gk_v_u(o(d), selSetMaxBufferBindCount, C.gk_u(n))
 }
-func argumentTableSetAddress(t id, address uint64, index uint) {
+func argumentTableSetAddress(t argumentTable, address uint64, index uint) {
 	C.gk_v_uu(o(t), selSetAddressAtIndex, C.gk_u(address), C.gk_u(index))
 }
 
@@ -612,10 +612,10 @@ func renderPipelineColorAttachmentDescriptorSetDestinationAlphaBlendFactor(a ren
 func renderPipelineColorAttachmentDescriptorSetAlphaBlendOperation(a renderPipelineColorAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetAlphaBlendOperation, C.gk_u(v))
 }
-func compilerNewComputePipelineStateWithDescriptor(c id, d computePipelineDescriptor, options id, err *id) id {
+func compilerNewComputePipelineStateWithDescriptor(c compiler, d computePipelineDescriptor, options id, err *id) id {
 	return id(C.gk_o_oop(o(c), selNewComputePipelineStateWithDescriptor, o(d), o(options), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func compilerNewRenderPipelineStateWithDescriptor(c id, d renderPipelineDescriptor, options id, err *id) id {
+func compilerNewRenderPipelineStateWithDescriptor(c compiler, d renderPipelineDescriptor, options id, err *id) id {
 	return id(C.gk_o_oop(o(c), selNewRenderPipelineStateWithDescriptor, o(d), o(options), (*C.gk_obj)(unsafe.Pointer(err))))
 }
 func computePipelineStateMaxTotalThreadsPerThreadgroup(p id) uint {
@@ -731,10 +731,10 @@ func counterHeapResolveCounterRange(h id, location, length uint) id {
 
 // Recording: MTL4CommandAllocator, MTL4CommandBuffer, the render pass descriptors.
 
-func commandAllocatorReset(a id) {
+func commandAllocatorReset(a allocator) {
 	C.gk_v(o(a), selReset)
 }
-func commandBufferBeginCommandBufferWithAllocator(b commandBuffer, a id) {
+func commandBufferBeginCommandBufferWithAllocator(b commandBuffer, a allocator) {
 	C.gk_v_o(o(b), selBeginCommandBufferWithAllocator, o(a))
 }
 func commandBufferEndCommandBuffer(b commandBuffer) {
@@ -805,7 +805,7 @@ func commandEncoderWaitForFence(e, fence id, stages uint) {
 	C.gk_v_ou(o(e), selWaitForFenceBeforeEncoderStages, o(fence), C.gk_u(stages))
 }
 
-func computeCommandEncoderSetArgumentTable(e computeCommandEncoder, t id) {
+func computeCommandEncoderSetArgumentTable(e computeCommandEncoder, t argumentTable) {
 	C.gk_v_o(o(e), selSetArgumentTable, o(t))
 }
 func computeCommandEncoderSetComputePipelineState(e computeCommandEncoder, p id) {
@@ -839,7 +839,7 @@ func computeCommandEncoderWriteTimestampWithGranularity(e computeCommandEncoder,
 	C.gk_v_uou(o(e), selWriteTimestampWithGranularityIntoHeap, C.gk_u(granularity), o(heap), C.gk_u(index))
 }
 
-func renderCommandEncoderSetArgumentTable(e renderCommandEncoder, t id, stages uint) {
+func renderCommandEncoderSetArgumentTable(e renderCommandEncoder, t argumentTable, stages uint) {
 	C.gk_v_ou(o(e), selSetArgumentTableAtStages, o(t), C.gk_u(stages))
 }
 func renderCommandEncoderSetViewport(e renderCommandEncoder, x, y, width, height, znear, zfar float64) {

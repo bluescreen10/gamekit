@@ -81,7 +81,7 @@ func (b *Backend) Begin() gpu.CommandBuffer {
 	// backing an open recording. If that changes, the fix is a small pool of
 	// allocator/buffer/table triples, one per recording in flight.
 	check(b.open == nil, "a command buffer from this device is already open")
-	commandAllocatorReset(b.allocator)
+	b.allocator.reset()
 	b.buffer.beginCommandBufferWithAllocator(b.allocator)
 	b.open = &command{backend: b}
 	return b.open
@@ -173,7 +173,7 @@ func (c *command) bindings(data []byte) {
 		panic(fmt.Sprintf("metal: draw/dispatch data is %d bytes but the shader's root argument is %d; pad it to a multiple of 16",
 			len(data), c.pipeline.rootSize))
 	}
-	argumentTableSetAddress(c.backend.argTable, c.rootSlot(data), 0)
+	c.backend.argTable.setAddress(c.rootSlot(data), 0)
 }
 
 func (c *command) draw(data []byte) {

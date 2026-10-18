@@ -22,7 +22,7 @@ func (e computeCommandEncoder) waitForFence(fence id, stages uint) {
 	commandEncoderWaitForFence(id(e), fence, stages)
 }
 
-func (e computeCommandEncoder) setArgumentTable(table id) {
+func (e computeCommandEncoder) setArgumentTable(table argumentTable) {
 	computeCommandEncoderSetArgumentTable(e, table)
 }
 

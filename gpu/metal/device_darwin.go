@@ -46,7 +46,11 @@ func (d device) newCommandBuffer() commandBuffer {
 	return deviceNewCommandBuffer(d)
 }
 
-func (d device) newCompilerWithDescriptor(descriptor compilerDescriptor, err *id) id {
+func (d device) newCompiler() (compiler, error) {
+	return newWithDescriptor(d.newCompilerWithDescriptor, newCompilerDescriptor, nil, "cannot create Metal 4 compiler")
+}
+
+func (d device) newCompilerWithDescriptor(descriptor compilerDescriptor, err *id) compiler {
 	return deviceNewCompilerWithDescriptor(d, descriptor, err)
 }
 
@@ -62,11 +66,22 @@ func (d device) newResidencySetWithDescriptor(descriptor residencySetDescriptor,
 	return deviceNewResidencySetWithDescriptor(d, descriptor, err)
 }
 
-func (d device) newCommandAllocatorWithDescriptor(descriptor commandAllocatorDescriptor, err *id) id {
+func (d device) newAllocator() (allocator, error) {
+	return newWithDescriptor(d.newCommandAllocatorWithDescriptor, newCommandAllocatorDescriptor, nil, "cannot create command allocator")
+}
+
+func (d device) newCommandAllocatorWithDescriptor(descriptor commandAllocatorDescriptor, err *id) allocator {
 	return deviceNewCommandAllocatorWithDescriptor(d, descriptor, err)
 }
 
-func (d device) newArgumentTableWithDescriptor(descriptor argumentTableDescriptor, err *id) id {
+func (d device) newArgumentTable(maxBufferBindCount uint) (argumentTable, error) {
+	return newWithDescriptor(d.newArgumentTableWithDescriptor, newArgumentTableDescriptor,
+		func(descriptor argumentTableDescriptor) {
+			descriptor.setMaxBufferBindCount(maxBufferBindCount)
+		}, "cannot create argument table")
+}
+
+func (d device) newArgumentTableWithDescriptor(descriptor argumentTableDescriptor, err *id) argumentTable {
 	return deviceNewArgumentTableWithDescriptor(d, descriptor, err)
 }
 
