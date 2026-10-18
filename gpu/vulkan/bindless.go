@@ -2,13 +2,10 @@
 
 package vulkan
 
-/*
-#include "bridge.h"
-*/
-import "C"
-
 import (
 	"fmt"
+	"runtime"
+	"unsafe"
 
 	"github.com/bluescreen10/gamekit/gpu"
 )
@@ -22,85 +19,230 @@ const (
 	wantSamplers      = 512
 )
 
-// initBindless creates the global descriptor heap + shared pipeline layout.
+// Bindless heap binding slots (set 0). One global set, shared by every pipeline.
+const (
+	bindSampled = 0 // texture2D[]  (sampled images)
+	bindStorage = 1 // image2D[]    (storage images)
+	bindSampler = 2 // sampler[]
+)
+
+// initBindless builds the one descriptor set layout (3 update-after-bind arrays), pool,
+// persistent set, and the pipeline layout every pipeline shares (that set + a
+// push-constant holding the 64-bit root pointer). Capacities are clamped to the
+// device's update-after-bind limits, and the clamped values bound the slot allocators.
 // TODO: make wantedSampledImages, wantStorageImages, and wantSamplers configurable
 func (b *Backend) initBindless() error {
-	var cs, cst, csa C.uint32_t
-	r := C.vkbCreateBindlessHeap(b.device, b.physicalDevice,
-		wantSampledImages, wantStorageImages, wantSamplers,
-		&b.setLayout, &b.descPool, &b.descSet, &b.pipelineLayout,
-		&cs, &cst, &csa)
-	if r != C.VK_SUCCESS {
+	if r := b.createBindlessHeap(); r != vkSuccess {
 		return fmt.Errorf("vulkan: bindless heap creation failed (%d)", int(r))
 	}
-	b.capSampled, b.capStorage, b.capSampler = uint32(cs), uint32(cst), uint32(csa)
-	b.samplers = map[uint64]C.VkSampler{}
+	b.samplers = map[uint64]vkSampler{}
 	return nil
+}
+
+func (b *Backend) createBindlessHeap() vkResult {
+	var pin runtime.Pinner
+	defer pin.Unpin()
+
+	p12 := pinned(&pin, &vkPhysicalDeviceVulkan12Properties{
+		sType: vkStructureTypePhysicalDeviceVulkan1_2Properties,
+	})
+	p2 := vkPhysicalDeviceProperties2{
+		sType: vkStructureTypePhysicalDeviceProperties2,
+		pNext: unsafe.Pointer(p12),
+	}
+	vkGetPhysicalDeviceProperties2(b.physicalDevice, &p2)
+	b.capSampled = min(wantSampledImages, uint32(p12.maxPerStageDescriptorUpdateAfterBindSampledImages),
+		uint32(p12.maxDescriptorSetUpdateAfterBindSampledImages))
+	b.capStorage = min(wantStorageImages, uint32(p12.maxPerStageDescriptorUpdateAfterBindStorageImages),
+		uint32(p12.maxDescriptorSetUpdateAfterBindStorageImages))
+	b.capSampler = min(wantSamplers, uint32(p12.maxPerStageDescriptorUpdateAfterBindSamplers),
+		uint32(p12.maxDescriptorSetUpdateAfterBindSamplers))
+
+	binds := pinned(&pin, &[3]vkDescriptorSetLayoutBinding{
+		{binding: bindSampled, descriptorType: vkDescriptorTypeSampledImage, descriptorCount: cUint32(b.capSampled), stageFlags: vkShaderStageAll},
+		{binding: bindStorage, descriptorType: vkDescriptorTypeStorageImage, descriptorCount: cUint32(b.capStorage), stageFlags: vkShaderStageAll},
+		{binding: bindSampler, descriptorType: vkDescriptorTypeSampler, descriptorCount: cUint32(b.capSampler), stageFlags: vkShaderStageAll},
+	})
+	const bindingFlags = vkDescriptorBindingUpdateAfterBindBit | vkDescriptorBindingPartiallyBoundBit
+	flags := pinned(&pin, &[3]vkDescriptorBindingFlags{bindingFlags, bindingFlags, bindingFlags})
+	lci := vkDescriptorSetLayoutCreateInfo{
+		sType: vkStructureTypeDescriptorSetLayoutCreateInfo,
+		pNext: unsafe.Pointer(pinned(&pin, &vkDescriptorSetLayoutBindingFlagsCreateInfo{
+			sType:         vkStructureTypeDescriptorSetLayoutBindingFlagsCreateInfo,
+			bindingCount:  3,
+			pBindingFlags: &flags[0],
+		})),
+		flags:        vkDescriptorSetLayoutCreateUpdateAfterBindPoolBit,
+		bindingCount: 3,
+		pBindings:    &binds[0],
+	}
+	var setLayout vkDescriptorSetLayout
+	if r := vkCreateDescriptorSetLayout(b.device, &lci, nil, &setLayout); r != vkSuccess {
+		return r
+	}
+	b.setLayout = setLayout
+
+	sizes := pinned(&pin, &[3]vkDescriptorPoolSize{
+		{_type: vkDescriptorTypeSampledImage, descriptorCount: cUint32(b.capSampled)},
+		{_type: vkDescriptorTypeStorageImage, descriptorCount: cUint32(b.capStorage)},
+		{_type: vkDescriptorTypeSampler, descriptorCount: cUint32(b.capSampler)},
+	})
+	pci := vkDescriptorPoolCreateInfo{
+		sType:         vkStructureTypeDescriptorPoolCreateInfo,
+		flags:         vkDescriptorPoolCreateUpdateAfterBindBit,
+		maxSets:       1,
+		poolSizeCount: 3,
+		pPoolSizes:    &sizes[0],
+	}
+	var descPool vkDescriptorPool
+	r := vkCreateDescriptorPool(b.device, &pci, nil, &descPool)
+	b.descPool = descPool
+	if r != vkSuccess {
+		vkDestroyDescriptorSetLayout(b.device, b.setLayout, nil)
+		return r
+	}
+
+	layouts := pinned(&pin, &[1]vkDescriptorSetLayout{b.setLayout})
+	sai := vkDescriptorSetAllocateInfo{
+		sType:              vkStructureTypeDescriptorSetAllocateInfo,
+		descriptorPool:     b.descPool,
+		descriptorSetCount: 1,
+		pSetLayouts:        &layouts[0],
+	}
+	var descSet vkDescriptorSet
+	r = vkAllocateDescriptorSets(b.device, &sai, &descSet)
+	b.descSet = descSet
+	if r != vkSuccess {
+		vkDestroyDescriptorPool(b.device, b.descPool, nil)
+		vkDestroyDescriptorSetLayout(b.device, b.setLayout, nil)
+		return r
+	}
+
+	// Every pipeline shares this layout, with a push constant range sized to what the
+	// device actually permits rather than a fixed guess. It was 128 bytes, which is
+	// smaller than some roots callers legitimately want to pass — and the limit is a
+	// driver policy decision, not a hardware one (the same Apple GPU reports 4096
+	// through MoltenVK and 256 through KosmicKrisp), so it has to be queried.
+	plci := vkPipelineLayoutCreateInfo{
+		sType:                  vkStructureTypePipelineLayoutCreateInfo,
+		setLayoutCount:         1,
+		pSetLayouts:            &layouts[0],
+		pushConstantRangeCount: 1,
+		pPushConstantRanges: pinned(&pin, &vkPushConstantRange{
+			stageFlags: vkShaderStageAll,
+			size:       b.properties.limits.maxPushConstantsSize,
+		}),
+	}
+	var pipelineLayout vkPipelineLayout
+	r = vkCreatePipelineLayout(b.device, &plci, nil, &pipelineLayout)
+	b.pipelineLayout = pipelineLayout
+	if r != vkSuccess {
+		vkDestroyDescriptorPool(b.device, b.descPool, nil) // frees the allocated set too
+		vkDestroyDescriptorSetLayout(b.device, b.setLayout, nil)
+		return r
+	}
+	return vkSuccess
+}
+
+// writeDescriptor writes one image or sampler descriptor into the bindless set at
+// binding's array element index.
+func (b *Backend) writeDescriptor(binding uint32, kind vkDescriptorType, index uint32, image vkDescriptorImageInfo) {
+	var pin runtime.Pinner
+	defer pin.Unpin()
+	w := vkWriteDescriptorSet{
+		sType:           vkStructureTypeWriteDescriptorSet,
+		dstSet:          b.descSet,
+		dstBinding:      cUint32(binding),
+		dstArrayElement: cUint32(index),
+		descriptorCount: 1,
+		descriptorType:  kind,
+		pImageInfo:      pinned(&pin, &image),
+	}
+	vkUpdateDescriptorSets(b.device, 1, &w, 0, nil)
+}
+
+// writeSampledImage registers a view into the bindless sampled-image array. The image
+// is in VK_IMAGE_LAYOUT_GENERAL whenever the descriptor is used, as every image is —
+// including a depth buffer bound as an attachment in the same pass.
+func (b *Backend) writeSampledImage(index uint32, view vkImageView) {
+	b.writeDescriptor(bindSampled, vkDescriptorTypeSampledImage, index,
+		vkDescriptorImageInfo{imageView: view, imageLayout: vkImageLayoutGeneral})
+}
+
+func (b *Backend) writeStorageImage(index uint32, view vkImageView) {
+	b.writeDescriptor(bindStorage, vkDescriptorTypeStorageImage, index,
+		vkDescriptorImageInfo{imageView: view, imageLayout: vkImageLayoutGeneral})
 }
 
 func (b *Backend) destroyBindless() {
 	for _, s := range b.samplers {
-		C.vkDestroySampler(b.device, s, nil)
+		vkDestroySampler(b.device, s, nil)
 	}
 	if b.pipelineLayout != nil {
-		C.vkDestroyPipelineLayout(b.device, b.pipelineLayout, nil)
+		vkDestroyPipelineLayout(b.device, b.pipelineLayout, nil)
 	}
 	if b.descPool != nil {
-		C.vkDestroyDescriptorPool(b.device, b.descPool, nil) // frees the set too
+		vkDestroyDescriptorPool(b.device, b.descPool, nil) // frees the set too
 	}
 	if b.setLayout != nil {
-		C.vkDestroyDescriptorSetLayout(b.device, b.setLayout, nil)
+		vkDestroyDescriptorSetLayout(b.device, b.setLayout, nil)
 	}
 }
 
-func filter(linear bool) C.VkFilter {
+func filter(linear bool) vkFilter {
 	if linear {
-		return C.VK_FILTER_LINEAR
+		return vkFilterLinear
 	}
-	return C.VK_FILTER_NEAREST
+	return vkFilterNearest
 }
 
-func mipmapMode(linear bool) C.VkSamplerMipmapMode {
+func mipmapMode(linear bool) vkSamplerMipmapMode {
 	if linear {
-		return C.VK_SAMPLER_MIPMAP_MODE_LINEAR
+		return vkSamplerMipmapModeLinear
 	}
-	return C.VK_SAMPLER_MIPMAP_MODE_NEAREST
+	return vkSamplerMipmapModeNearest
 }
 
-func addressMode(m gpu.AddressMode) C.VkSamplerAddressMode {
+func addressMode(m gpu.AddressMode) vkSamplerAddressMode {
 	switch m {
 	case gpu.AddressRepeat:
-		return C.VK_SAMPLER_ADDRESS_MODE_REPEAT
+		return vkSamplerAddressModeRepeat
 	case gpu.AddressMirror:
-		return C.VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT
+		return vkSamplerAddressModeMirroredRepeat
 	default:
-		return C.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+		return vkSamplerAddressModeClampToEdge
 	}
 }
 
 // CreateSampler registers a sampler into the bindless heap and returns its index.
 func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
-	compareEnable := C.int(0)
-	if d.Compare != gpu.CompareNever {
-		compareEnable = 1
-	}
 	// Clamp to what the device supports: a sampler asking for more anisotropy than
 	// maxSamplerAnisotropy is invalid, and callers shouldn't have to query first.
 	aniso := float32(d.MaxAnisotropy)
 	if aniso > b.maxAnisotropy {
 		aniso = b.maxAnisotropy
 	}
-	var s C.VkSampler
-	r := C.vkbCreateSampler(b.device,
-		filter(d.MagLinear), filter(d.MinLinear), mipmapMode(d.MipLinear),
-		addressMode(d.AddressU), addressMode(d.AddressV), addressMode(d.AddressW),
-		compareEnable, compareOp(d.Compare), C.float(aniso), &s)
-	if r != C.VK_SUCCESS {
+	ci := vkSamplerCreateInfo{
+		sType:            vkStructureTypeSamplerCreateInfo,
+		magFilter:        filter(d.MagLinear),
+		minFilter:        filter(d.MinLinear),
+		mipmapMode:       mipmapMode(d.MipLinear),
+		addressModeU:     addressMode(d.AddressU),
+		addressModeV:     addressMode(d.AddressV),
+		addressModeW:     addressMode(d.AddressW),
+		maxLod:           vkLodClampNone,
+		compareEnable:    bool32(d.Compare != gpu.CompareNever),
+		compareOp:        compareOp(d.Compare),
+		anisotropyEnable: bool32(aniso > 1),
+		maxAnisotropy:    cFloat(max(aniso, 1)),
+	}
+	var s vkSampler
+	if r := vkCreateSampler(b.device, &ci, nil, &s); r != vkSuccess {
 		panic(fmt.Sprintf("vulkan: CreateSampler failed (%d)", int(r)))
 	}
 	index := b.samplerNext
 	b.samplerNext++
-	C.vkbWriteSampler(b.device, b.descSet, C.uint32_t(index), s)
+	b.writeDescriptor(bindSampler, vkDescriptorTypeSampler, index, vkDescriptorImageInfo{sampler: s})
 
 	h := b.nextID.Add(1)
 	b.samplers[h] = s
@@ -113,29 +255,29 @@ func (b *Backend) DestroySampler(s gpu.Sampler) {
 	if !ok {
 		return
 	}
-	C.vkDestroySampler(b.device, vs, nil)
+	vkDestroySampler(b.device, vs, nil)
 	delete(b.samplers, uint64(s.H))
 }
 
 // compareOp maps an gpu compare op to Vulkan.
-func compareOp(op gpu.CompareOp) C.VkCompareOp {
+func compareOp(op gpu.CompareOp) vkCompareOp {
 	switch op {
 	case gpu.CompareLess:
-		return C.VK_COMPARE_OP_LESS
+		return vkCompareOpLess
 	case gpu.CompareEqual:
-		return C.VK_COMPARE_OP_EQUAL
+		return vkCompareOpEqual
 	case gpu.CompareLessEqual:
-		return C.VK_COMPARE_OP_LESS_OR_EQUAL
+		return vkCompareOpLessOrEqual
 	case gpu.CompareGreater:
-		return C.VK_COMPARE_OP_GREATER
+		return vkCompareOpGreater
 	case gpu.CompareNotEqual:
-		return C.VK_COMPARE_OP_NOT_EQUAL
+		return vkCompareOpNotEqual
 	case gpu.CompareGreaterEqual:
-		return C.VK_COMPARE_OP_GREATER_OR_EQUAL
+		return vkCompareOpGreaterOrEqual
 	case gpu.CompareAlways:
-		return C.VK_COMPARE_OP_ALWAYS
+		return vkCompareOpAlways
 	default:
-		return C.VK_COMPARE_OP_NEVER
+		return vkCompareOpNever
 	}
 }
 

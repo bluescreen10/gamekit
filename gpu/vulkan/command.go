@@ -2,48 +2,24 @@
 
 package vulkan
 
-/*
-#include "bridge.h"
-*/
-import "C"
-
 import (
-	"unsafe"
-
 	"fmt"
+	"math"
+	"unsafe"
 
 	"github.com/bluescreen10/gamekit/gpu"
 )
 
-var (
-	vkStageNone       = C.vkbStageNone()
-	vkStageTop        = C.vkbStageTop()
-	vkStageIndirect   = C.vkbStageIndirect()
-	vkStageVertex     = C.vkbStageVertex()
-	vkStageFragment   = C.vkbStageFragment()
-	vkStageColor      = C.vkbStageColor()
-	vkStageEarlyDepth = C.vkbStageEarlyDepth()
-	vkStageLateDepth  = C.vkbStageLateDepth()
-	vkStageCompute    = C.vkbStageCompute()
-	vkStageTransfer   = C.vkbStageTransfer()
-	vkStageAll        = C.vkbStageAll()
-
-	vkAccessNone          = C.vkbAccessNone()
-	vkAccessIndirectRead  = C.vkbAccessIndirectRead()
-	vkAccessShaderRead    = C.vkbAccessShaderRead()
-	vkAccessShaderWrite   = C.vkbAccessShaderWrite()
-	vkAccessColorRead     = C.vkbAccessColorRead()
-	vkAccessColorWrite    = C.vkbAccessColorWrite()
-	vkAccessDepthRead     = C.vkbAccessDepthRead()
-	vkAccessDepthWrite    = C.vkbAccessDepthWrite()
-	vkAccessTransferRead  = C.vkbAccessTransferRead()
-	vkAccessTransferWrite = C.vkbAccessTransferWrite()
-	vkAccessMemoryRead    = C.vkbAccessMemoryRead()
-	vkAccessMemoryWrite   = C.vkbAccessMemoryWrite()
-)
-
 func (b *Backend) initCommands() error {
-	if r := C.vkbCreateCommandPool(b.device, C.uint32_t(b.queueFamily), &b.cmdPool); r != C.VK_SUCCESS {
+	ci := vkCommandPoolCreateInfo{
+		sType:            vkStructureTypeCommandPoolCreateInfo,
+		flags:            vkCommandPoolCreateResetCommandBufferBit,
+		queueFamilyIndex: cUint32(b.queueFamily),
+	}
+	var pool vkCommandPool
+	r := vkCreateCommandPool(b.device, &ci, nil, &pool)
+	b.cmdPool = pool
+	if r != vkSuccess {
 		return fmt.Errorf("vulkan: command pool creation failed (%d)", int(r))
 	}
 	b.fences = map[uint64]fenceEntry{}
@@ -52,24 +28,24 @@ func (b *Backend) initCommands() error {
 
 func (b *Backend) destroyCommands() {
 	for _, f := range b.fences {
-		C.vkDestroyFence(b.device, f.fence, nil)
-		C.vkFreeCommandBuffers(b.device, b.cmdPool, 1, &f.cb)
+		vkDestroyFence(b.device, f.fence, nil)
+		vkFreeCommandBuffers(b.device, b.cmdPool, 1, &f.cb)
 	}
 	if b.cmdPool != nil {
-		C.vkDestroyCommandPool(b.device, b.cmdPool, nil)
+		vkDestroyCommandPool(b.device, b.cmdPool, nil)
 	}
 }
 
 type fenceEntry struct {
-	cb    C.VkCommandBuffer
-	fence C.VkFence
+	cb    vkCommandBuffer
+	fence vkFence
 }
 
 // cmdBuffer is the Vulkan CommandBuffer: a primary command buffer that has the
 // bindless heap bound and the shared pipeline layout for push constants.
 type cmdBuffer struct {
-	b  *Backend
-	cb C.VkCommandBuffer
+	backend *Backend
+	cb      vkCommandBuffer
 	// inRenderPass is set between BeginRenderPass and EndRenderPass, where no image
 	// can be initialized: a barrier inside dynamic rendering may not change layouts.
 	inRenderPass bool
@@ -78,15 +54,30 @@ type cmdBuffer struct {
 // Begin allocates a transient command buffer, begins recording, and binds the
 // global bindless descriptor set.
 func (b *Backend) Begin() gpu.CommandBuffer {
-	var cb C.VkCommandBuffer
-	if r := C.vkbAllocCmd(b.device, b.cmdPool, &cb); r != C.VK_SUCCESS {
+	c := &cmdBuffer{backend: b}
+	var cb vkCommandBuffer
+	ai := vkCommandBufferAllocateInfo{
+		sType:              vkStructureTypeCommandBufferAllocateInfo,
+		commandPool:        b.cmdPool,
+		level:              vkCommandBufferLevelPrimary,
+		commandBufferCount: 1,
+	}
+	if r := vkAllocateCommandBuffers(b.device, &ai, &cb); r != vkSuccess {
 		panic(fmt.Sprintf("vulkan: allocate command buffer failed (%d)", int(r)))
 	}
-	if r := C.vkbBeginCmd(cb); r != C.VK_SUCCESS {
+	c.cb = cb
+	bi := vkCommandBufferBeginInfo{
+		sType: vkStructureTypeCommandBufferBeginInfo,
+		flags: vkCommandBufferUsageOneTimeSubmitBit,
+	}
+	if r := vkBeginCommandBuffer(c.cb, &bi); r != vkSuccess {
 		panic(fmt.Sprintf("vulkan: begin command buffer failed (%d)", int(r)))
 	}
-	C.vkbBindHeap(cb, b.pipelineLayout, b.descSet)
-	c := &cmdBuffer{b: b, cb: cb}
+	// Bind the global bindless set at both bind points for the whole recording.
+	sets := &b.scratch.sets
+	sets[0] = b.descSet
+	vkCmdBindDescriptorSets(c.cb, vkPipelineBindPointGraphics, b.pipelineLayout, 0, 1, &sets[0], 0, nil)
+	vkCmdBindDescriptorSets(c.cb, vkPipelineBindPointCompute, b.pipelineLayout, 0, 1, &sets[0], 0, nil)
 	c.initializeImages()
 	return c
 }
@@ -94,9 +85,13 @@ func (b *Backend) Begin() gpu.CommandBuffer {
 // Submit ends recording and submits, returning a fence for the completion.
 func (b *Backend) Submit(cmd gpu.CommandBuffer) gpu.Fence {
 	c := cmd.(*cmdBuffer)
-	C.vkEndCommandBuffer(c.cb)
-	var fence C.VkFence
-	if r := C.vkbSubmit(b.device, b.queue, c.cb, &fence); r != C.VK_SUCCESS {
+	vkEndCommandBuffer(c.cb)
+	fi := vkFenceCreateInfo{sType: vkStructureTypeFenceCreateInfo}
+	var fence vkFence
+	if r := vkCreateFence(b.device, &fi, nil, &fence); r != vkSuccess {
+		panic(fmt.Sprintf("vulkan: create fence failed (%d)", int(r)))
+	}
+	if r := b.submit(c.cb, nil, nil, fence); r != vkSuccess {
 		panic(fmt.Sprintf("vulkan: submit failed (%d)", int(r)))
 	}
 	h := b.nextID.Add(1)
@@ -110,26 +105,63 @@ func (b *Backend) Wait(f gpu.Fence) {
 	if !ok {
 		return
 	}
-	C.vkWaitForFences(b.device, 1, &e.fence, C.VK_TRUE, C.UINT64_MAX)
-	C.vkDestroyFence(b.device, e.fence, nil)
-	C.vkFreeCommandBuffers(b.device, b.cmdPool, 1, &e.cb)
+	vkWaitForFences(b.device, 1, &e.fence, vkTrue, math.MaxUint64)
+	vkDestroyFence(b.device, e.fence, nil)
+	vkFreeCommandBuffers(b.device, b.cmdPool, 1, &e.cb)
 	delete(b.fences, uint64(f.H))
 }
 
+// submit submits cb to the queue, signalling fence. A non-nil acquire is waited on
+// before color output, and a non-nil renderDone signalled when cb completes.
+func (b *Backend) submit(cb vkCommandBuffer, acquire, renderDone vkSemaphore, fence vkFence) vkResult {
+	s := b.scratch
+	s.cmdInfo = vkCommandBufferSubmitInfo{sType: vkStructureTypeCommandBufferSubmitInfo, commandBuffer: cb}
+	s.submit = vkSubmitInfo2{
+		sType:                  vkStructureTypeSubmitInfo2,
+		commandBufferInfoCount: 1,
+		pCommandBufferInfos:    &s.cmdInfo,
+	}
+	if acquire != nil {
+		s.wait = vkSemaphoreSubmitInfo{
+			sType:     vkStructureTypeSemaphoreSubmitInfo,
+			semaphore: acquire,
+			stageMask: vkPipelineStage2ColorAttachmentOutputBit,
+		}
+		s.submit.waitSemaphoreInfoCount = 1
+		s.submit.pWaitSemaphoreInfos = &s.wait
+	}
+	if renderDone != nil {
+		s.signal = vkSemaphoreSubmitInfo{
+			sType:     vkStructureTypeSemaphoreSubmitInfo,
+			semaphore: renderDone,
+			stageMask: vkPipelineStage2AllCommandsBit,
+		}
+		s.submit.signalSemaphoreInfoCount = 1
+		s.submit.pSignalSemaphoreInfos = &s.signal
+	}
+	return vkQueueSubmit2(b.queue, 1, &s.submit, fence)
+}
+
 // WaitIdle blocks until the device is idle.
-func (b *Backend) WaitIdle() { C.vkDeviceWaitIdle(b.device) }
+func (b *Backend) WaitIdle() {
+	vkDeviceWaitIdle(b.device)
+}
 
 // --- CommandBuffer ---
 
-func (b *Backend) tex(t gpu.Texture) *textureEntry { return b.textures[uint64(t.H)] }
+func (b *Backend) tex(t gpu.Texture) *textureEntry {
+	return b.textures[uint64(t.H)]
+}
 
-func (b *Backend) bufRaw(buf gpu.Buffer) C.VkBuffer { return b.buffers[uint64(buf.H)].buf }
+func (b *Backend) bufRaw(buf gpu.Buffer) vkBuffer {
+	return b.buffers[uint64(buf.H)].buf
+}
 
-func aspectOf(e *textureEntry) C.VkImageAspectFlags {
+func aspectOf(e *textureEntry) vkImageAspectFlags {
 	if e.isDepthFormat {
-		return C.VK_IMAGE_ASPECT_DEPTH_BIT
+		return vkImageAspectDepthBit
 	}
-	return C.VK_IMAGE_ASPECT_COLOR_BIT
+	return vkImageAspectColorBit
 }
 
 // initializeImages moves every texture still in UNDEFINED to GENERAL, where it then
@@ -140,12 +172,46 @@ func (c *cmdBuffer) initializeImages() {
 	if c.inRenderPass {
 		return
 	}
-	for _, h := range c.b.uninitialized {
-		if e, ok := c.b.textures[h]; ok {
-			C.vkbInitializeImage(c.cb, e.img, aspectOf(e))
+	for _, h := range c.backend.uninitialized {
+		if e, ok := c.backend.textures[h]; ok {
+			c.imageBarrier(e.img, aspectOf(e), vkPipelineStage2AllCommandsBit, vkAccess2None, vkPipelineStage2AllCommandsBit, vkAccess2MemoryReadBit|vkAccess2MemoryWriteBit,
+				vkImageLayoutUndefined, vkImageLayoutGeneral)
 		}
 	}
-	c.b.uninitialized = c.b.uninitialized[:0]
+	c.backend.uninitialized = c.backend.uninitialized[:0]
+}
+
+// imageBarrier records a barrier moving img from layout old to new. initializeImages
+// uses it to move a new image, or a freshly acquired backbuffer, out of UNDEFINED into
+// GENERAL, where it stays; its contents are discarded, and the source scope is every
+// stage, so the barrier also chains with an acquire semaphore's wait. Present uses it
+// to move a backbuffer into PRESENT_SRC.
+func (c *cmdBuffer) imageBarrier(img vkImage, aspect vkImageAspectFlags,
+	srcStage vkPipelineStageFlags2, srcAccess vkAccessFlags2,
+	dstStage vkPipelineStageFlags2, dstAccess vkAccessFlags2,
+	old, new vkImageLayout) {
+	s := c.backend.scratch
+	s.image = vkImageMemoryBarrier2{
+		sType:         vkStructureTypeImageMemoryBarrier2,
+		srcStageMask:  srcStage,
+		srcAccessMask: srcAccess,
+		dstStageMask:  dstStage,
+		dstAccessMask: dstAccess,
+		oldLayout:     old,
+		newLayout:     new,
+		image:         img,
+		subresourceRange: vkImageSubresourceRange{
+			aspectMask: aspect,
+			levelCount: vkRemainingMipLevels,
+			layerCount: vkRemainingArrayLayers,
+		},
+	}
+	s.dependency = vkDependencyInfo{
+		sType:                   vkStructureTypeDependencyInfo,
+		imageMemoryBarrierCount: 1,
+		pImageMemoryBarriers:    &s.image,
+	}
+	vkCmdPipelineBarrier2(c.cb, &s.dependency)
 }
 
 // maxColorAttachments bounds a single render pass's color targets (today's largest
@@ -159,71 +225,91 @@ func (c *cmdBuffer) BeginRenderPass(rt gpu.RenderTargets) {
 		panic("vulkan: BeginRenderPass: too many color attachments")
 	}
 	c.initializeImages()
+	// Up to 4 color attachments (0 for a depth-only pass, e.g. a shadow map; up to 4 for
+	// MRT, e.g. the G-buffer fill) and an optional depth attachment. A resolve view
+	// receives its multisampled attachment's samples when the pass ends: averaged for
+	// colour, sample zero's for depth, the one depth resolve every device supports.
+	// Every attachment is in VK_IMAGE_LAYOUT_GENERAL, as every image is.
+	s := c.backend.scratch
 	var w, h uint32
-	var views [maxColorAttachments]C.VkImageView
-	var resolveViews [maxColorAttachments]C.VkImageView
-	var loads [maxColorAttachments]C.int
-	var transients [maxColorAttachments]C.int
-	var clears [maxColorAttachments * 4]C.float
 	for i, ca := range rt.Color {
-		e := c.b.tex(ca.Texture)
+		e := c.backend.tex(ca.Texture)
 		w, h = e.width, e.height
-		views[i] = e.view
+		a := &s.colors[i]
+		*a = vkRenderingAttachmentInfo{
+			sType:       vkStructureTypeRenderingAttachmentInfo,
+			imageView:   e.view,
+			imageLayout: vkImageLayoutGeneral,
+		}
 		if e.transient {
 			checkTransientAttachment(ca.Load, ca.Store)
-			transients[i] = 1
 		}
 		if ca.ResolveTexture.IsValid() {
 			if ca.Store != gpu.StoreDontCare {
 				panic("vulkan: BeginRenderPass: a resolved color attachment cannot also store its samples")
 			}
-			resolveViews[i] = c.b.tex(ca.ResolveTexture).view
+			a.resolveMode = vkResolveModeAverageBit
+			a.resolveImageView = c.backend.tex(ca.ResolveTexture).view
+			a.resolveImageLayout = vkImageLayoutGeneral
 		}
-		if ca.Load == gpu.LoadClear {
-			loads[i] = 1
-		}
-		clears[i*4+0] = C.float(ca.Clear[0])
-		clears[i*4+1] = C.float(ca.Clear[1])
-		clears[i*4+2] = C.float(ca.Clear[2])
-		clears[i*4+3] = C.float(ca.Clear[3])
+		a.loadOp, a.storeOp = attachmentOps(ca.Load == gpu.LoadClear, e.transient)
+		*(*[4]float32)(unsafe.Pointer(&a.clearValue)) = ca.Clear
 	}
-	var depthView, depthResolveView C.VkImageView
-	hasDepth := C.int(0)
-	depthClear := C.int(0)
-	depthTransient := C.int(0)
-	var dclear float32
+	s.rendering = vkRenderingInfo{
+		sType:                vkStructureTypeRenderingInfo,
+		layerCount:           1,
+		colorAttachmentCount: cUint32(len(rt.Color)),
+	}
+	if len(rt.Color) > 0 {
+		s.rendering.pColorAttachments = &s.colors[0]
+	}
 	if rt.Depth != nil {
-		e := c.b.tex(rt.Depth.Texture)
+		e := c.backend.tex(rt.Depth.Texture)
 		w, h = e.width, e.height
-		depthView = e.view
+		d := &s.depth
+		*d = vkRenderingAttachmentInfo{
+			sType:       vkStructureTypeRenderingAttachmentInfo,
+			imageView:   e.view,
+			imageLayout: vkImageLayoutGeneral,
+		}
 		if e.transient {
 			checkTransientAttachment(rt.Depth.Load, rt.Depth.Store)
-			depthTransient = 1
 		}
 		if rt.Depth.ResolveTexture.IsValid() {
 			if rt.Depth.Store != gpu.StoreDontCare {
 				panic("vulkan: BeginRenderPass: a resolved depth attachment cannot also store its samples")
 			}
-			depthResolveView = c.b.tex(rt.Depth.ResolveTexture).view
+			d.resolveMode = vkResolveModeSampleZeroBit
+			d.resolveImageView = c.backend.tex(rt.Depth.ResolveTexture).view
+			d.resolveImageLayout = vkImageLayoutGeneral
 		}
-		hasDepth = 1
-		dclear = rt.Depth.Clear
-		if rt.Depth.Load == gpu.LoadClear {
-			depthClear = 1
-		}
+		d.loadOp, d.storeOp = attachmentOps(rt.Depth.Load == gpu.LoadClear, e.transient)
+		// clearValue.depthStencil.depth is the union's first float.
+		*(*float32)(unsafe.Pointer(&d.clearValue)) = rt.Depth.Clear
+		s.rendering.pDepthAttachment = d
 		// A read-only depth attachment needs nothing of its own: in GENERAL the pass may
 		// depth-test against the image while also sampling it.
 	}
-	var viewsPtr, resolveViewsPtr *C.VkImageView
-	var loadsPtr, transientsPtr *C.int
-	var clearsPtr *C.float
-	if n := len(rt.Color); n > 0 {
-		viewsPtr, resolveViewsPtr, loadsPtr, transientsPtr, clearsPtr = &views[0], &resolveViews[0], &loads[0], &transients[0], &clears[0]
-	}
-	C.vkbBeginRendering(c.cb, C.uint32_t(w), C.uint32_t(h),
-		viewsPtr, resolveViewsPtr, loadsPtr, transientsPtr, clearsPtr, C.uint32_t(len(rt.Color)),
-		hasDepth, depthView, depthResolveView, depthClear, depthTransient, C.float(dclear))
+	s.rendering.renderArea.extent = vkExtent2D{width: cUint32(w), height: cUint32(h)}
+	vkCmdBeginRendering(c.cb, &s.rendering)
 	c.inRenderPass = true
+}
+
+// attachmentOps returns an attachment's load and store ops. A transient attachment is
+// never loaded or stored (gpu.TextureTransient): with lazily allocated memory, either
+// would make the device give it some.
+func attachmentOps(clear, transient bool) (vkAttachmentLoadOp, vkAttachmentStoreOp) {
+	load := vkAttachmentLoadOp(vkAttachmentLoadOpLoad)
+	switch {
+	case clear:
+		load = vkAttachmentLoadOpClear
+	case transient:
+		load = vkAttachmentLoadOpDontCare
+	}
+	if transient {
+		return load, vkAttachmentStoreOpDontCare
+	}
+	return load, vkAttachmentStoreOpStore
 }
 
 // checkTransientAttachment panics if a pass would load or store a transient attachment
@@ -235,20 +321,20 @@ func checkTransientAttachment(load gpu.LoadOp, store gpu.StoreOp) {
 }
 
 func (c *cmdBuffer) EndRenderPass() {
-	C.vkCmdEndRendering(c.cb)
+	vkCmdEndRendering(c.cb)
 	c.inRenderPass = false
 }
 
 // SetPipeline binds a pipeline to its own bind point (graphics or compute),
 // recorded when the pipeline was created.
 func (c *cmdBuffer) SetPipeline(p gpu.Pipeline) {
-	e := c.b.pipelines[uint64(p.H)]
-	C.vkCmdBindPipeline(c.cb, e.bindPoint, e.pipe)
-	if e.bindPoint == C.VK_PIPELINE_BIND_POINT_GRAPHICS {
-		// Depth bias is always a dynamic pipeline state (see bridge.c); Vulkan
+	e := c.backend.pipelines[uint64(p.H)]
+	vkCmdBindPipeline(c.cb, e.bindPoint, e.pipe)
+	if e.bindPoint == vkPipelineBindPointGraphics {
+		// Depth bias is always a dynamic pipeline state (see CreateGraphicsPipeline); Vulkan
 		// requires it be set at least once before a draw uses it, so bind a
 		// no-bias default here and let SetDepthBias override it.
-		C.vkCmdSetDepthBias(c.cb, 0, 0, 0)
+		vkCmdSetDepthBias(c.cb, 0, 0, 0)
 	}
 }
 
@@ -263,60 +349,60 @@ func (c *cmdBuffer) push(data []byte) {
 	if size == 0 {
 		return
 	}
-	C.vkbPush(c.cb, c.b.pipelineLayout, unsafe.Pointer(&data[0]), C.uint32_t(size))
+	vkCmdPushConstants(c.cb, c.backend.pipelineLayout, vkShaderStageAll, 0, cUint32(size), unsafe.Pointer(&data[0]))
 }
 
 func (c *cmdBuffer) SetViewport(x, y, width, height, minDepth, maxDepth float32) {
-	vp := C.VkViewport{x: C.float(x), y: C.float(y), width: C.float(width), height: C.float(height),
-		minDepth: C.float(minDepth), maxDepth: C.float(maxDepth)}
-	C.vkCmdSetViewport(c.cb, 0, 1, &vp)
+	vp := vkViewport{x: cFloat(x), y: cFloat(y), width: cFloat(width), height: cFloat(height),
+		minDepth: cFloat(minDepth), maxDepth: cFloat(maxDepth)}
+	vkCmdSetViewport(c.cb, 0, 1, &vp)
 }
 
 func (c *cmdBuffer) SetScissor(x, y, width, height int32) {
-	sc := C.VkRect2D{offset: C.VkOffset2D{x: C.int32_t(x), y: C.int32_t(y)},
-		extent: C.VkExtent2D{width: C.uint32_t(width), height: C.uint32_t(height)}}
-	C.vkCmdSetScissor(c.cb, 0, 1, &sc)
+	sc := vkRect2D{offset: vkOffset2D{x: cInt32(x), y: cInt32(y)},
+		extent: vkExtent2D{width: cUint32(width), height: cUint32(height)}}
+	vkCmdSetScissor(c.cb, 0, 1, &sc)
 }
 
 func (c *cmdBuffer) SetDepthBias(bias, slope, clamp float32) {
-	C.vkCmdSetDepthBias(c.cb, C.float(bias), C.float(clamp), C.float(slope))
+	vkCmdSetDepthBias(c.cb, cFloat(bias), cFloat(clamp), cFloat(slope))
 }
 
 func (c *cmdBuffer) Draw(data []byte, vertexCount, instanceCount, firstVertex, firstInstance uint32) {
 	c.push(data)
-	C.vkCmdDraw(c.cb, C.uint32_t(vertexCount), C.uint32_t(instanceCount), C.uint32_t(firstVertex), C.uint32_t(firstInstance))
+	vkCmdDraw(c.cb, cUint32(vertexCount), cUint32(instanceCount), cUint32(firstVertex), cUint32(firstInstance))
 }
 
-// vkIndexType maps the RHI's index width to Vulkan's enum.
-func vkIndexType(t gpu.IndexType) C.VkIndexType {
+// indexTypeOf maps the RHI's index width to Vulkan's enum.
+func indexTypeOf(t gpu.IndexType) vkIndexType {
 	if t == gpu.IndexUint16 {
-		return C.VK_INDEX_TYPE_UINT16
+		return vkIndexTypeUINT16
 	}
-	return C.VK_INDEX_TYPE_UINT32
+	return vkIndexTypeUINT32
 }
 
 func (c *cmdBuffer) DrawIndexed(data []byte, indexBuf gpu.Buffer, indexType gpu.IndexType, indexCount, instanceCount, firstIndex uint32, vertexOffset int32, firstInstance uint32) {
 	c.push(data)
-	C.vkCmdBindIndexBuffer(c.cb, c.b.bufRaw(indexBuf), 0, vkIndexType(indexType))
-	C.vkCmdDrawIndexed(c.cb, C.uint32_t(indexCount), C.uint32_t(instanceCount), C.uint32_t(firstIndex), C.int32_t(vertexOffset), C.uint32_t(firstInstance))
+	vkCmdBindIndexBuffer(c.cb, c.backend.bufRaw(indexBuf), 0, indexTypeOf(indexType))
+	vkCmdDrawIndexed(c.cb, cUint32(indexCount), cUint32(instanceCount), cUint32(firstIndex), cInt32(vertexOffset), cUint32(firstInstance))
 }
 
 func (c *cmdBuffer) DrawIndexedIndirect(data []byte, indexBuf gpu.Buffer, indexType gpu.IndexType, args gpu.Buffer, argsOffset uint64, drawCount, stride uint32) {
 	c.push(data)
-	C.vkCmdBindIndexBuffer(c.cb, c.b.bufRaw(indexBuf), 0, vkIndexType(indexType))
-	C.vkCmdDrawIndexedIndirect(c.cb, c.b.bufRaw(args), C.VkDeviceSize(argsOffset), C.uint32_t(drawCount), C.uint32_t(stride))
+	vkCmdBindIndexBuffer(c.cb, c.backend.bufRaw(indexBuf), 0, indexTypeOf(indexType))
+	vkCmdDrawIndexedIndirect(c.cb, c.backend.bufRaw(args), vkDeviceSize(argsOffset), cUint32(drawCount), cUint32(stride))
 }
 
 func (c *cmdBuffer) Dispatch(data []byte, x, y, z uint32) {
 	c.initializeImages()
 	c.push(data)
-	C.vkCmdDispatch(c.cb, C.uint32_t(x), C.uint32_t(y), C.uint32_t(z))
+	vkCmdDispatch(c.cb, cUint32(x), cUint32(y), cUint32(z))
 }
 
 func (c *cmdBuffer) DispatchIndirect(data []byte, args gpu.Buffer, offset uint64) {
 	c.initializeImages()
 	c.push(data)
-	C.vkCmdDispatchIndirect(c.cb, c.b.bufRaw(args), C.VkDeviceSize(offset))
+	vkCmdDispatchIndirect(c.cb, c.backend.bufRaw(args), vkDeviceSize(offset))
 }
 
 // Barrier is a global memory barrier. With every image in GENERAL it orders images as
@@ -325,36 +411,74 @@ func (c *cmdBuffer) Barrier(src, dst gpu.Stage, flags gpu.BarrierFlags) {
 	c.initializeImages()
 	ss, sa := stageAccess(src)
 	ds, da := stageAccess(dst)
-	C.vkbGlobalBarrier(c.cb, ss, sa, ds, da)
+	s := c.backend.scratch
+	s.memory = vkMemoryBarrier2{
+		sType:         vkStructureTypeMemoryBarrier2,
+		srcStageMask:  ss,
+		srcAccessMask: sa,
+		dstStageMask:  ds,
+		dstAccessMask: da,
+	}
+	s.dependency = vkDependencyInfo{
+		sType:              vkStructureTypeDependencyInfo,
+		memoryBarrierCount: 1,
+		pMemoryBarriers:    &s.memory,
+	}
+	vkCmdPipelineBarrier2(c.cb, &s.dependency)
 }
 
 func (c *cmdBuffer) CopyBuffer(dst, src gpu.Buffer, dstOffset, srcOffset, size uint64) {
-	region := C.VkBufferCopy{srcOffset: C.VkDeviceSize(srcOffset), dstOffset: C.VkDeviceSize(dstOffset), size: C.VkDeviceSize(size)}
-	C.vkCmdCopyBuffer(c.cb, c.b.bufRaw(src), c.b.bufRaw(dst), 1, &region)
+	region := vkBufferCopy{srcOffset: vkDeviceSize(srcOffset), dstOffset: vkDeviceSize(dstOffset), size: vkDeviceSize(size)}
+	vkCmdCopyBuffer(c.cb, c.backend.bufRaw(src), c.backend.bufRaw(dst), 1, &region)
 }
 
 func (c *cmdBuffer) CopyBufferToTexture(dst gpu.Texture, mip, layer uint32, src gpu.Buffer, srcOffset uint64) {
 	c.initializeImages()
-	e := c.b.tex(dst)
+	e := c.backend.tex(dst)
 	w, h, d := mipExtent(e, mip)
-	C.vkbCopyBufferToImage(c.cb, c.b.bufRaw(src), C.uint64_t(srcOffset), e.img,
-		C.uint32_t(w), C.uint32_t(h), C.uint32_t(d), C.uint32_t(mip), C.uint32_t(layer), aspectOf(e))
+	region := bufferImageCopy(srcOffset, w, h, d, mip, layer, aspectOf(e))
+	vkCmdCopyBufferToImage(c.cb, c.backend.bufRaw(src), e.img, vkImageLayoutGeneral, 1, &region)
 }
 
 func (c *cmdBuffer) CopyTextureToBuffer(dst gpu.Buffer, src gpu.Texture, mip, layer uint32) {
 	c.initializeImages()
-	e := c.b.tex(src)
+	e := c.backend.tex(src)
 	w, h, d := mipExtent(e, mip)
-	C.vkbCopyImageToBuffer(c.cb, e.img, c.b.bufRaw(dst),
-		C.uint32_t(w), C.uint32_t(h), C.uint32_t(d), C.uint32_t(mip), C.uint32_t(layer), aspectOf(e))
+	region := bufferImageCopy(0, w, h, d, mip, layer, aspectOf(e))
+	vkCmdCopyImageToBuffer(c.cb, e.img, vkImageLayoutGeneral, c.backend.bufRaw(dst), 1, &region)
 }
 
 func (c *cmdBuffer) CopyTextureToTexture(dst, src gpu.Texture, mip, layer uint32) {
 	c.initializeImages()
-	s, d := c.b.tex(src), c.b.tex(dst)
+	s, d := c.backend.tex(src), c.backend.tex(dst)
 	w, h, depth := mipExtent(s, mip)
-	C.vkbCopyImageToImage(c.cb, s.img, d.img,
-		C.uint32_t(w), C.uint32_t(h), C.uint32_t(depth), C.uint32_t(mip), C.uint32_t(layer), aspectOf(s))
+	sub := subresourceLayers(mip, layer, aspectOf(s))
+	region := vkImageCopy{
+		srcSubresource: sub,
+		dstSubresource: sub,
+		extent:         vkExtent3D{width: cUint32(w), height: cUint32(h), depth: cUint32(depth)},
+	}
+	vkCmdCopyImage(c.cb, s.img, vkImageLayoutGeneral, d.img, vkImageLayoutGeneral, 1, &region)
+}
+
+// subresourceLayers names one layer of one mip.
+func subresourceLayers(mip, layer uint32, aspect vkImageAspectFlags) vkImageSubresourceLayers {
+	return vkImageSubresourceLayers{
+		aspectMask:     aspect,
+		mipLevel:       cUint32(mip),
+		baseArrayLayer: cUint32(layer),
+		layerCount:     1,
+	}
+}
+
+// bufferImageCopy is a copy between a tightly packed buffer at offset and one layer of
+// one mip.
+func bufferImageCopy(offset uint64, w, h, d, mip, layer uint32, aspect vkImageAspectFlags) vkBufferImageCopy {
+	return vkBufferImageCopy{
+		bufferOffset:     vkDeviceSize(offset),
+		imageSubresource: subresourceLayers(mip, layer, aspect),
+		imageExtent:      vkExtent3D{width: cUint32(w), height: cUint32(h), depth: cUint32(d)},
+	}
 }
 
 // mipExtent returns a texture's extent at level: each level halves every dimension,
@@ -369,42 +493,42 @@ func mipExtent(e *textureEntry, level uint32) (width, height, depth uint32) {
 // carries both the reads and the writes it can make, so the same pair serves as a
 // barrier's source and its destination: blending reads the color attachment, a depth
 // test reads depth, and a vertex or fragment shader can write storage.
-func stageAccess(s gpu.Stage) (C.VkPipelineStageFlags2, C.VkAccessFlags2) {
-	var stage C.VkPipelineStageFlags2
-	var access C.VkAccessFlags2
+func stageAccess(s gpu.Stage) (vkPipelineStageFlags2, vkAccessFlags2) {
+	var stage vkPipelineStageFlags2
+	var access vkAccessFlags2
 	if s == gpu.StageNone {
-		return vkStageNone, vkAccessNone
+		return vkPipelineStage2None, vkAccess2None
 	}
 	if s == gpu.StageAll {
-		return vkStageAll, vkAccessMemoryRead | vkAccessMemoryWrite
+		return vkPipelineStage2AllCommandsBit, vkAccess2MemoryReadBit | vkAccess2MemoryWriteBit
 	}
 	if s&gpu.StageIndirect != 0 {
-		stage |= vkStageIndirect
-		access |= vkAccessIndirectRead
+		stage |= vkPipelineStage2DrawIndirectBit
+		access |= vkAccess2IndirectCommandReadBit
 	}
 	if s&gpu.StageVertex != 0 {
-		stage |= vkStageVertex
-		access |= vkAccessShaderRead | vkAccessShaderWrite
+		stage |= vkPipelineStage2VertexShaderBit
+		access |= vkAccess2ShaderReadBit | vkAccess2ShaderWriteBit
 	}
 	if s&gpu.StageFragment != 0 {
-		stage |= vkStageFragment
-		access |= vkAccessShaderRead | vkAccessShaderWrite
+		stage |= vkPipelineStage2FragmentShaderBit
+		access |= vkAccess2ShaderReadBit | vkAccess2ShaderWriteBit
 	}
 	if s&gpu.StageColorOutput != 0 {
-		stage |= vkStageColor
-		access |= vkAccessColorRead | vkAccessColorWrite
+		stage |= vkPipelineStage2ColorAttachmentOutputBit
+		access |= vkAccess2ColorAttachmentReadBit | vkAccess2ColorAttachmentWriteBit
 	}
 	if s&gpu.StageDepth != 0 {
-		stage |= vkStageEarlyDepth | vkStageLateDepth
-		access |= vkAccessDepthRead | vkAccessDepthWrite
+		stage |= vkPipelineStage2EarlyFragmentTestsBit | vkPipelineStage2LateFragmentTestsBit
+		access |= vkAccess2DepthStencilAttachmentReadBit | vkAccess2DepthStencilAttachmentWriteBit
 	}
 	if s&gpu.StageCompute != 0 {
-		stage |= vkStageCompute
-		access |= vkAccessShaderRead | vkAccessShaderWrite
+		stage |= vkPipelineStage2ComputeShaderBit
+		access |= vkAccess2ShaderReadBit | vkAccess2ShaderWriteBit
 	}
 	if s&gpu.StageTransfer != 0 {
-		stage |= vkStageTransfer
-		access |= vkAccessTransferRead | vkAccessTransferWrite
+		stage |= vkPipelineStage2AllTransferBit
+		access |= vkAccess2TransferReadBit | vkAccess2TransferWriteBit
 	}
 	return stage, access
 }

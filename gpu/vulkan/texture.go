@@ -2,11 +2,6 @@
 
 package vulkan
 
-/*
-#include "bridge.h"
-*/
-import "C"
-
 import (
 	"fmt"
 
@@ -19,10 +14,10 @@ import (
 // VK_IMAGE_LAYOUT_GENERAL, once it has left UNDEFINED (see Backend.uninitialized), and
 // ordering its uses is the caller's, through gpu.CommandBuffer.Barrier.
 type textureEntry struct {
-	img    C.VkImage
-	mem    C.VkDeviceMemory
-	view   C.VkImageView
-	format C.VkFormat
+	img    vkImage
+	mem    vkDeviceMemory
+	view   vkImageView
+	format vkFormat
 	// width, height and depth are the base level's extent; depth is 1 but for a 3D
 	// texture.
 	width, height, depth uint32
@@ -37,43 +32,43 @@ type textureEntry struct {
 	owned bool
 }
 
-func viewType(k gpu.TextureKind) C.VkImageViewType {
+func viewType(k gpu.TextureKind) vkImageViewType {
 	switch k {
 	case gpu.Texture2DArray:
-		return C.VK_IMAGE_VIEW_TYPE_2D_ARRAY
+		return vkImageViewType2DArray
 	case gpu.TextureCube:
-		return C.VK_IMAGE_VIEW_TYPE_CUBE
+		return vkImageViewTypeCube
 	case gpu.TextureCubeArray:
-		return C.VK_IMAGE_VIEW_TYPE_CUBE_ARRAY
+		return vkImageViewTypeCubeArray
 	case gpu.Texture3D:
-		return C.VK_IMAGE_VIEW_TYPE_3D
+		return vkImageViewType3D
 	default:
-		return C.VK_IMAGE_VIEW_TYPE_2D
+		return vkImageViewType2D
 	}
 }
 
-func imageUsage(u gpu.TextureUsage, depth bool) C.VkImageUsageFlags {
-	var f C.VkImageUsageFlags
+func imageUsage(u gpu.TextureUsage, depth bool) vkImageUsageFlags {
+	var f vkImageUsageFlags
 	if u&gpu.TextureSampled != 0 {
-		f |= C.VK_IMAGE_USAGE_SAMPLED_BIT
+		f |= vkImageUsageSampledBit
 	}
 	if u&gpu.TextureStorage != 0 {
-		f |= C.VK_IMAGE_USAGE_STORAGE_BIT
+		f |= vkImageUsageStorageBit
 	}
 	if u&gpu.TextureRenderTarget != 0 {
-		f |= C.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+		f |= vkImageUsageColorAttachmentBit
 	}
 	if u&gpu.TextureDepth != 0 || depth {
-		f |= C.VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+		f |= vkImageUsageDepthStencilAttachmentBit
 	}
 	if u&gpu.TextureTransfer != 0 {
-		f |= C.VK_IMAGE_USAGE_TRANSFER_SRC_BIT | C.VK_IMAGE_USAGE_TRANSFER_DST_BIT
+		f |= vkImageUsageTransferSrcBit | vkImageUsageTransferDstBit
 	}
 	if u&gpu.TextureTransient != 0 {
 		if u&(gpu.TextureSampled|gpu.TextureStorage|gpu.TextureTransfer) != 0 {
 			panic("vulkan: a transient texture cannot be sampled, written by shaders or copied")
 		}
-		f |= C.VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT
+		f |= vkImageUsageTransientAttachmentBit
 	}
 	return f
 }
@@ -95,25 +90,20 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 		mips = 1
 	}
 	isDepth := d.Format.IsDepth()
-	aspect := C.VkImageAspectFlags(C.VK_IMAGE_ASPECT_COLOR_BIT)
+	aspect := vkImageAspectFlags(vkImageAspectColorBit)
 	if isDepth {
-		aspect = C.VK_IMAGE_ASPECT_DEPTH_BIT
+		aspect = vkImageAspectDepthBit
 	}
 
-	var img C.VkImage
-	var mem C.VkDeviceMemory
-	var view C.VkImageView
-	r := C.vkbCreateImage(b.device, b.physicalDevice, vkFormat(d.Format),
-		C.uint32_t(d.Width), C.uint32_t(d.Height), C.uint32_t(depth), C.uint32_t(layers), C.uint32_t(mips), C.uint32_t(d.Samples),
-		imageUsage(d.Usage, isDepth), aspect, viewType(d.Kind),
-		&img, &mem, &view)
-	if r != C.VK_SUCCESS {
+	img, mem, view, r := b.createImage(formatOf(d.Format), d.Width, d.Height, depth, layers, mips, uint32(d.Samples),
+		imageUsage(d.Usage, isDepth), aspect, viewType(d.Kind))
+	if r != vkSuccess {
 		panic(fmt.Sprintf("vulkan: CreateTexture(%dx%d, %q) failed (%d)", d.Width, d.Height, d.Label, int(r)))
 	}
 
 	h := b.nextID.Add(1)
 	b.textures[h] = &textureEntry{
-		img: img, mem: mem, view: view, format: vkFormat(d.Format),
+		img: img, mem: mem, view: view, format: formatOf(d.Format),
 		width: d.Width, height: d.Height, depth: depth, isDepthFormat: isDepth,
 		writable: d.Usage&gpu.TextureStorage != 0, transient: d.Usage&gpu.TextureTransient != 0, owned: true,
 	}
@@ -126,12 +116,103 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 		tex.Index = b.nextTextureIndex(d.Usage)
 	}
 	if d.Usage&gpu.TextureSampled != 0 {
-		C.vkbWriteSampledImage(b.device, b.descSet, C.uint32_t(tex.Index), view)
+		b.writeSampledImage(tex.Index, view)
 	}
 	if d.Usage&gpu.TextureStorage != 0 {
-		C.vkbWriteStorageImage(b.device, b.descSet, C.uint32_t(tex.Index), view)
+		b.writeStorageImage(tex.Index, view)
 	}
 	return tex
+}
+
+// createImage creates an image with dedicated device-local memory and a default view.
+func (b *Backend) createImage(format vkFormat, w, h, depth, layers, mips, samples uint32,
+	usage vkImageUsageFlags, aspect vkImageAspectFlags, kind vkImageViewType,
+) (img vkImage, mem vkDeviceMemory, view vkImageView, r vkResult) {
+	ci := vkImageCreateInfo{
+		sType:         vkStructureTypeImageCreateInfo,
+		imageType:     vkImageType2D,
+		format:        format,
+		extent:        vkExtent3D{width: cUint32(w), height: cUint32(h), depth: cUint32(depth)},
+		mipLevels:     cUint32(mips),
+		arrayLayers:   cUint32(layers),
+		samples:       vkSampleCountFlagBits(max(samples, 1)),
+		tiling:        vkImageTilingOptimal,
+		usage:         usage,
+		sharingMode:   vkSharingModeExclusive,
+		initialLayout: vkImageLayoutUndefined,
+	}
+	switch kind {
+	case vkImageViewType3D:
+		ci.imageType = vkImageType3D
+	case vkImageViewTypeCube, vkImageViewTypeCubeArray:
+		ci.flags |= vkImageCreateCubeCompatibleBit
+	}
+	if r = vkCreateImage(b.device, &ci, nil, &img); r != vkSuccess {
+		return img, mem, view, r
+	}
+
+	var req vkMemoryRequirements
+	vkGetImageMemoryRequirements(b.device, img, &req)
+	// A transient attachment takes lazily allocated memory where the device has it —
+	// tile-based GPUs, which then never commit any — and device-local memory otherwise.
+	typeIndex := noMemoryType
+	if usage&vkImageUsageTransientAttachmentBit != 0 {
+		typeIndex = b.memoryType(req.memoryTypeBits, vkMemoryPropertyLazilyAllocatedBit)
+	}
+	if typeIndex == noMemoryType {
+		typeIndex = b.memoryType(req.memoryTypeBits, vkMemoryPropertyDeviceLocalBit)
+	}
+	if typeIndex == noMemoryType {
+		vkDestroyImage(b.device, img, nil)
+		return img, mem, view, vkErrorOutOfDeviceMemory
+	}
+	ai := vkMemoryAllocateInfo{
+		sType:           vkStructureTypeMemoryAllocateInfo,
+		allocationSize:  req.size,
+		memoryTypeIndex: cUint32(typeIndex),
+	}
+	if r = vkAllocateMemory(b.device, &ai, nil, &mem); r != vkSuccess {
+		vkDestroyImage(b.device, img, nil)
+		return img, mem, view, r
+	}
+	if r = vkBindImageMemory(b.device, img, mem, 0); r != vkSuccess {
+		vkFreeMemory(b.device, mem, nil)
+		vkDestroyImage(b.device, img, nil)
+		return img, mem, view, r
+	}
+	if view, r = b.createView(img, format, aspect, kind, 0, mips, 0, layers); r != vkSuccess {
+		vkFreeMemory(b.device, mem, nil)
+		vkDestroyImage(b.device, img, nil)
+	}
+	return img, mem, view, r
+}
+
+// createView makes a view over a subresource range of img.
+func (b *Backend) createView(img vkImage, format vkFormat, aspect vkImageAspectFlags, kind vkImageViewType,
+	baseMip, mipCount, baseLayer, layerCount uint32,
+) (vkImageView, vkResult) {
+	ci := vkImageViewCreateInfo{
+		sType:    vkStructureTypeImageViewCreateInfo,
+		image:    img,
+		viewType: kind,
+		format:   format,
+		subresourceRange: vkImageSubresourceRange{
+			aspectMask:     aspect,
+			baseMipLevel:   cUint32(baseMip),
+			levelCount:     cUint32(mipCount),
+			baseArrayLayer: cUint32(baseLayer),
+			layerCount:     cUint32(layerCount),
+		},
+	}
+	var view vkImageView
+	r := vkCreateImageView(b.device, &ci, nil, &view)
+	return view, r
+}
+
+func (b *Backend) destroyImage(e *textureEntry) {
+	vkDestroyImageView(b.device, e.view, nil)
+	vkFreeMemory(b.device, e.mem, nil)
+	vkDestroyImage(b.device, e.img, nil)
 }
 
 // nextTextureIndex hands out the next index in the texture arrays, panicking when it
@@ -157,9 +238,9 @@ func (b *Backend) TextureView(t gpu.Texture, kind gpu.TextureKind, baseMip, mipC
 	if !ok {
 		panic("vulkan: TextureView of unknown texture")
 	}
-	aspect := C.VkImageAspectFlags(C.VK_IMAGE_ASPECT_COLOR_BIT)
+	aspect := vkImageAspectFlags(vkImageAspectColorBit)
 	if src.isDepthFormat {
-		aspect = C.VK_IMAGE_ASPECT_DEPTH_BIT
+		aspect = vkImageAspectDepthBit
 	}
 	if mipCount == 0 {
 		mipCount = 1
@@ -167,10 +248,8 @@ func (b *Backend) TextureView(t gpu.Texture, kind gpu.TextureKind, baseMip, mipC
 	if layerCount == 0 {
 		layerCount = 1
 	}
-	var view C.VkImageView
-	r := C.vkbCreateSubView(b.device, src.img, src.format, aspect, viewType(kind),
-		C.uint32_t(baseMip), C.uint32_t(mipCount), C.uint32_t(baseLayer), C.uint32_t(layerCount), &view)
-	if r != C.VK_SUCCESS {
+	view, r := b.createView(src.img, src.format, aspect, viewType(kind), baseMip, mipCount, baseLayer, layerCount)
+	if r != vkSuccess {
 		panic(fmt.Sprintf("vulkan: TextureView failed (%d)", int(r)))
 	}
 
@@ -186,9 +265,9 @@ func (b *Backend) TextureView(t gpu.Texture, kind gpu.TextureKind, baseMip, mipC
 		usage |= gpu.TextureStorage
 	}
 	tex := gpu.Texture{H: gpu.Handle(h), Index: b.nextTextureIndex(usage)}
-	C.vkbWriteSampledImage(b.device, b.descSet, C.uint32_t(tex.Index), view)
+	b.writeSampledImage(tex.Index, view)
 	if usage&gpu.TextureStorage != 0 {
-		C.vkbWriteStorageImage(b.device, b.descSet, C.uint32_t(tex.Index), view)
+		b.writeStorageImage(tex.Index, view)
 	}
 	return tex
 }
@@ -200,9 +279,9 @@ func (b *Backend) DestroyTexture(t gpu.Texture) {
 		return
 	}
 	if e.owned {
-		C.vkbDestroyImage(b.device, e.img, e.mem, e.view)
+		b.destroyImage(e)
 	} else {
-		C.vkDestroyImageView(b.device, e.view, nil)
+		vkDestroyImageView(b.device, e.view, nil)
 	}
 	delete(b.textures, uint64(t.H))
 }
@@ -211,9 +290,9 @@ func (b *Backend) DestroyTexture(t gpu.Texture) {
 func (b *Backend) destroyAllTextures() {
 	for k, e := range b.textures {
 		if e.owned {
-			C.vkbDestroyImage(b.device, e.img, e.mem, e.view)
+			b.destroyImage(e)
 		} else {
-			C.vkDestroyImageView(b.device, e.view, nil)
+			vkDestroyImageView(b.device, e.view, nil)
 		}
 		delete(b.textures, k)
 	}

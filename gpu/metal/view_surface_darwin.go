@@ -2,11 +2,6 @@
 
 package metal
 
-/*
-#include "view_surface.h"
-*/
-import "C"
-
 import (
 	"errors"
 	"fmt"
@@ -17,13 +12,35 @@ import (
 // CocoaViewMetalLayer installs and returns a CAMetalLayer on a Cocoa view.
 // It is exported for the Vulkan backend's VK_EXT_metal_surface path.
 func CocoaViewMetalLayer(view uintptr) uintptr {
-	return uintptr(C.mbCocoaViewMetalLayer(C.uintptr_t(view)))
+	if view == 0 {
+		return 0
+	}
+	pool := pushPool()
+	defer pool.drain()
+	v := id(view)
+	layer := viewLayer(v)
+	if !objectIsKindOfClass(layer, class("CAMetalLayer")) {
+		viewSetWantsLayer(v, true)
+		layer = metalLayerLayer()
+		viewSetLayer(v, layer)
+	}
+	scale := float64(1)
+	if window := viewWindow(v); window != 0 {
+		scale = windowBackingScaleFactor(window)
+	}
+	metalLayerSetContentsScale(layer, scale)
+	_, _, width, height := viewBounds(v)
+	metalLayerSetDrawableSize(layer, width*scale, height*scale)
+	return uintptr(layer)
 }
 
 // CocoaWindowMetalLayer installs and returns a CAMetalLayer on a Cocoa window's
 // content view. It is exported for the Vulkan backend's Metal surface path.
 func CocoaWindowMetalLayer(window uintptr) uintptr {
-	return uintptr(C.mbCocoaWindowMetalLayer(C.uintptr_t(window)))
+	if window == 0 {
+		return 0
+	}
+	return CocoaViewMetalLayer(uintptr(windowContentView(id(window))))
 }
 
 // CreateSurface creates a CAMetalLayer presentation surface for a native target.

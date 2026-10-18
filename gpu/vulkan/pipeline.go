@@ -2,41 +2,49 @@
 
 package vulkan
 
-/*
-#include "bridge.h"
-*/
-import "C"
-
 import (
 	"fmt"
+	"runtime"
 	"unsafe"
 
 	"github.com/bluescreen10/gamekit/gpu"
 	"github.com/bluescreen10/gamekit/gpu/internal/specialization"
 )
 
-func topology(t gpu.Topology) C.VkPrimitiveTopology {
+func topology(t gpu.Topology) vkPrimitiveTopology {
 	switch t {
 	case gpu.TopologyTriangleStrip:
-		return C.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP
+		return vkPrimitiveTopologyTriangleStrip
 	case gpu.TopologyLines:
-		return C.VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+		return vkPrimitiveTopologyLineList
 	case gpu.TopologyPoints:
-		return C.VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+		return vkPrimitiveTopologyPointList
 	default:
-		return C.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST
+		return vkPrimitiveTopologyTriangleList
 	}
 }
 
-func cullMode(m gpu.CullMode) C.VkCullModeFlags {
+func cullMode(m gpu.CullMode) vkCullModeFlags {
 	switch m {
 	case gpu.CullBack:
-		return C.VK_CULL_MODE_BACK_BIT
+		return vkCullModeBackBit
 	case gpu.CullFront:
-		return C.VK_CULL_MODE_FRONT_BIT
+		return vkCullModeFrontBit
 	default:
-		return C.VK_CULL_MODE_NONE
+		return vkCullModeNone
 	}
+}
+
+// shaderModule wraps SPIR-V code in a module, to be destroyed once its pipeline exists.
+func (b *Backend) shaderModule(pin *runtime.Pinner, code []byte) (vkShaderModule, vkResult) {
+	ci := vkShaderModuleCreateInfo{
+		sType:    vkStructureTypeShaderModuleCreateInfo,
+		codeSize: cSize(len(code)),
+		pCode:    (*cUint32)(unsafe.Pointer(pinned(pin, &code[0]))),
+	}
+	var m vkShaderModule
+	r := vkCreateShaderModule(b.device, &ci, nil, &m)
+	return m, r
 }
 
 // ComputePipeline compiles a compute pipeline from SPIR-V, sharing the global
@@ -45,104 +53,189 @@ func (b *Backend) CreateComputePipeline(desc gpu.ComputePipelineDescriptor) gpu.
 	if desc.Entry == "" {
 		desc.Entry = "main"
 	}
-	cEntry := C.CString(desc.Entry)
-	defer C.free(unsafe.Pointer(cEntry))
 	constants, err := resolveConstants(desc.Constants, desc.Shader)
 	if err != nil {
 		panic(fmt.Sprintf("vulkan: CreateComputePipeline(%q): %v", desc.Label, err))
 	}
-	var p C.VkPipeline
-	r := C.vkbCreateComputePipeline(b.device, b.pipelineLayout,
-		unsafe.Pointer(&desc.Shader[0]), C.size_t(len(desc.Shader)), cEntry,
-		constants.idsPtr(), constants.bitsPtr(), C.uint32_t(len(constants.ids)), &p)
-	if r != C.VK_SUCCESS {
+	var pin runtime.Pinner
+	defer pin.Unpin()
+	module, r := b.shaderModule(&pin, desc.Shader)
+	if r != vkSuccess {
 		panic(fmt.Sprintf("vulkan: CreateComputePipeline(%q) failed (%d)", desc.Label, int(r)))
 	}
-	return b.registerPipeline(p, C.VK_PIPELINE_BIND_POINT_COMPUTE)
+	defer vkDestroyShaderModule(b.device, module, nil)
+
+	ci := vkComputePipelineCreateInfo{
+		sType:  vkStructureTypeComputePipelineCreateInfo,
+		layout: b.pipelineLayout,
+		stage: vkPipelineShaderStageCreateInfo{
+			sType:               vkStructureTypePipelineShaderStageCreateInfo,
+			stage:               vkShaderStageComputeBit,
+			module:              module,
+			pName:               pinnedCString(&pin, desc.Entry),
+			pSpecializationInfo: constants.info(&pin),
+		},
+	}
+	var p vkPipeline
+	if r := vkCreateComputePipelines(b.device, nil, 1, &ci, nil, &p); r != vkSuccess {
+		panic(fmt.Sprintf("vulkan: CreateComputePipeline(%q) failed (%d)", desc.Label, int(r)))
+	}
+	return b.registerPipeline(p, vkPipelineBindPointCompute)
 }
 
 // GraphicsPipeline compiles a graphics pipeline (dynamic rendering), sharing the
-// global bindless pipeline layout.
+// global bindless pipeline layout. It is a minimal one: empty vertex input (geometry is
+// pulled via BDA), dynamic viewport/scissor/depth bias, dynamic rendering (formats via
+// VkPipelineRenderingCreateInfo, no render pass). Depth is enabled iff the depth
+// format is defined.
+//
+// The fragment shader may be absent, for a pipeline that writes depth and nothing else.
+// That is a real configuration rather than a shortcut: a fragment stage bound to a pass
+// with no colour attachment still runs, and one bound to a pass that HAS an attachment
+// while writing nothing to it produces undefined colour rather than no colour.
 func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline {
 	entry := d.VertexEntry
 	if entry == "" {
 		entry = "main"
 	}
-	cEntry := C.CString(entry)
-	defer C.free(unsafe.Pointer(cEntry))
-
-	colorFmts := make([]C.VkFormat, len(d.ColorFormats))
-	for i, f := range d.ColorFormats {
-		colorFmts[i] = vkFormat(f)
-	}
-	var colorPtr *C.VkFormat
-	if len(colorFmts) > 0 {
-		colorPtr = &colorFmts[0]
-	}
-	depthTest := C.int(0)
-	if d.DepthTest {
-		depthTest = 1
-	}
-	depthWrite := C.int(0)
-	if d.DepthWrite {
-		depthWrite = 1
-	}
-	samples := d.Samples
-	if samples == 0 {
-		samples = 1
-	}
-	// One blend state per colour attachment; a target the descriptor gives none is
-	// opaque. A nil pointer when there are no targets keeps cgo from indexing an empty
-	// slice.
-	blends := make([]C.VkPipelineColorBlendAttachmentState, len(d.ColorFormats))
-	for i := range blends {
-		var blend gpu.BlendState
-		if i < len(d.Blend) {
-			blend = d.Blend[i]
-		}
-		blends[i] = blendAttachment(blend)
-	}
-	var blendsPtr *C.VkPipelineColorBlendAttachmentState
-	if len(blends) > 0 {
-		blendsPtr = &blends[0]
-	}
-
-	frontFaceCW := C.int(0)
-	if d.FrontFaceCW {
-		frontFaceCW = 1
-	}
-
-	// A depth-only pipeline has no fragment stage at all; indexing an empty slice to get
-	// its address would panic before the backend ever saw it.
-	var fragPtr unsafe.Pointer
-	if len(d.FragmentShader) > 0 {
-		fragPtr = unsafe.Pointer(&d.FragmentShader[0])
-	}
-
 	constants, err := resolveConstants(d.Constants, d.VertexShader, d.FragmentShader)
 	if err != nil {
 		panic(fmt.Sprintf("vulkan: CreateGraphicsPipeline(%q): %v", d.Label, err))
 	}
-	var p C.VkPipeline
-	r := C.vkbCreateCreateGraphicsPipeline(b.device, b.pipelineLayout,
-		unsafe.Pointer(&d.VertexShader[0]), C.size_t(len(d.VertexShader)),
-		fragPtr, C.size_t(len(d.FragmentShader)), cEntry,
-		topology(d.Topology), colorPtr, C.uint32_t(len(d.ColorFormats)),
-		vkFormat(d.DepthFormat), cullMode(d.CullMode), frontFaceCW, blendsPtr,
-		depthTest, depthWrite, compareOp(d.DepthCompare), C.uint32_t(samples),
-		constants.idsPtr(), constants.bitsPtr(), C.uint32_t(len(constants.ids)), &p)
-	if r != C.VK_SUCCESS {
+
+	var pin runtime.Pinner
+	defer pin.Unpin()
+	fail := func(r vkResult) {
 		panic(fmt.Sprintf("vulkan: CreateGraphicsPipeline(%q) failed (%d)", d.Label, int(r)))
 	}
-	return b.registerPipeline(p, C.VK_PIPELINE_BIND_POINT_GRAPHICS)
+	vertex, r := b.shaderModule(&pin, d.VertexShader)
+	if r != vkSuccess {
+		fail(r)
+	}
+	defer vkDestroyShaderModule(b.device, vertex, nil)
+	// Both stages share one set of constants; a stage ignores any it does not declare.
+	name := pinnedCString(&pin, entry)
+	spec := constants.info(&pin)
+	stages := pinned(&pin, &[2]vkPipelineShaderStageCreateInfo{{
+		sType:               vkStructureTypePipelineShaderStageCreateInfo,
+		stage:               vkShaderStageVertexBit,
+		module:              vertex,
+		pName:               name,
+		pSpecializationInfo: spec,
+	}})
+	nStages := 1
+	if len(d.FragmentShader) > 0 {
+		fragment, r := b.shaderModule(&pin, d.FragmentShader)
+		if r != vkSuccess {
+			fail(r)
+		}
+		defer vkDestroyShaderModule(b.device, fragment, nil)
+		stages[1] = vkPipelineShaderStageCreateInfo{
+			sType:               vkStructureTypePipelineShaderStageCreateInfo,
+			stage:               vkShaderStageFragmentBit,
+			module:              fragment,
+			pName:               name,
+			pSpecializationInfo: spec,
+		}
+		nStages = 2
+	}
+
+	samples := d.Samples
+	if samples < 2 {
+		samples = 1
+	}
+	// One blend state and format per colour attachment; a target the descriptor gives
+	// no blend state is opaque.
+	var blendsPtr *vkPipelineColorBlendAttachmentState
+	var formatsPtr *vkFormat
+	if n := len(d.ColorFormats); n > 0 {
+		blends := make([]vkPipelineColorBlendAttachmentState, n)
+		formats := make([]vkFormat, n)
+		for i, f := range d.ColorFormats {
+			var blend gpu.BlendState
+			if i < len(d.Blend) {
+				blend = d.Blend[i]
+			}
+			blends[i] = blendAttachment(blend)
+			formats[i] = formatOf(f)
+		}
+		blendsPtr = pinned(&pin, &blends[0])
+		formatsPtr = pinned(&pin, &formats[0])
+	}
+	frontFace := vkFrontFace(vkFrontFaceCounterClockwise)
+	if d.FrontFaceCW {
+		frontFace = vkFrontFaceClockwise
+	}
+	dynamic := pinned(&pin, &[3]vkDynamicState{vkDynamicStateViewport, vkDynamicStateScissor, vkDynamicStateDepthBias})
+
+	ci := vkGraphicsPipelineCreateInfo{
+		sType: vkStructureTypeGraphicsPipelineCreateInfo,
+		pNext: unsafe.Pointer(pinned(&pin, &vkPipelineRenderingCreateInfo{ // dynamic rendering
+			sType:                   vkStructureTypePipelineRenderingCreateInfo,
+			colorAttachmentCount:    cUint32(len(d.ColorFormats)),
+			pColorAttachmentFormats: formatsPtr,
+			depthAttachmentFormat:   formatOf(d.DepthFormat),
+		})),
+		stageCount: cUint32(nStages),
+		pStages:    &stages[0],
+		pVertexInputState: pinned(&pin, &vkPipelineVertexInputStateCreateInfo{
+			sType: vkStructureTypePipelineVertexInputStateCreateInfo,
+		}),
+		pInputAssemblyState: pinned(&pin, &vkPipelineInputAssemblyStateCreateInfo{
+			sType:    vkStructureTypePipelineInputAssemblyStateCreateInfo,
+			topology: topology(d.Topology),
+		}),
+		pViewportState: pinned(&pin, &vkPipelineViewportStateCreateInfo{
+			sType:         vkStructureTypePipelineViewportStateCreateInfo,
+			viewportCount: 1, // dynamic
+			scissorCount:  1,
+		}),
+		pRasterizationState: pinned(&pin, &vkPipelineRasterizationStateCreateInfo{
+			sType:       vkStructureTypePipelineRasterizationStateCreateInfo,
+			polygonMode: vkPolygonModeFill,
+			cullMode:    cullMode(d.CullMode),
+			frontFace:   frontFace,
+			lineWidth:   1,
+			// Depth bias is always enabled and its factors are dynamic (SetDepthBias);
+			// a pipeline that never calls it just runs with the all-zero default,
+			// equivalent to bias disabled.
+			depthBiasEnable: vkTrue,
+		}),
+		pMultisampleState: pinned(&pin, &vkPipelineMultisampleStateCreateInfo{
+			sType:                vkStructureTypePipelineMultisampleStateCreateInfo,
+			rasterizationSamples: vkSampleCountFlagBits(samples),
+		}),
+		pDepthStencilState: pinned(&pin, &vkPipelineDepthStencilStateCreateInfo{
+			sType:            vkStructureTypePipelineDepthStencilStateCreateInfo,
+			depthTestEnable:  bool32(d.DepthTest),
+			depthWriteEnable: bool32(d.DepthWrite),
+			depthCompareOp:   compareOp(d.DepthCompare),
+		}),
+		pColorBlendState: pinned(&pin, &vkPipelineColorBlendStateCreateInfo{
+			sType:           vkStructureTypePipelineColorBlendStateCreateInfo,
+			attachmentCount: cUint32(len(d.ColorFormats)),
+			pAttachments:    blendsPtr,
+		}),
+		pDynamicState: pinned(&pin, &vkPipelineDynamicStateCreateInfo{
+			sType:             vkStructureTypePipelineDynamicStateCreateInfo,
+			dynamicStateCount: cUint32(len(dynamic)),
+			pDynamicStates:    &dynamic[0],
+		}),
+		layout: b.pipelineLayout,
+	}
+	var p vkPipeline
+	if r := vkCreateGraphicsPipelines(b.device, nil, 1, &ci, nil, &p); r != vkSuccess {
+		fail(r)
+	}
+	return b.registerPipeline(p, vkPipelineBindPointGraphics)
 }
 
-// specializationConstants is a pipeline's constants as the bridge takes them: ids[i]
+// specializationConstants is a pipeline's constants as Vulkan takes them: ids[i]
 // takes the 32 bits bits[i]. Vulkan reads every constant as 4 bytes whatever its type,
 // so the type is not passed on.
 type specializationConstants struct {
-	ids  []C.uint32_t
-	bits []C.uint32_t
+	ids  []cUint32
+	bits []cUint32
 }
 
 // resolveConstants resolves a descriptor's constants against what the shaders declare.
@@ -168,40 +261,42 @@ func resolveConstants(constants map[string]float64, shaders ...[]byte) (speciali
 		return resolved, err
 	}
 	for _, v := range values {
-		resolved.ids = append(resolved.ids, C.uint32_t(v.ID))
-		resolved.bits = append(resolved.bits, C.uint32_t(v.Bits))
+		resolved.ids = append(resolved.ids, cUint32(v.ID))
+		resolved.bits = append(resolved.bits, cUint32(v.Bits))
 	}
 	return resolved, nil
 }
 
-// idsPtr and bitsPtr are nil when there are no constants, which keeps cgo from
-// indexing an empty slice.
-func (s specializationConstants) idsPtr() *C.uint32_t {
+// info describes the constants to Vulkan, in memory pinned by pin: constant ids[i]
+// takes the 32 bits bits[i]. Every constant is 4 bytes, VkBool32 included.
+func (s specializationConstants) info(pin *runtime.Pinner) *vkSpecializationInfo {
+	info := pinned(pin, &vkSpecializationInfo{})
 	if len(s.ids) == 0 {
-		return nil
+		return info
 	}
-	return &s.ids[0]
-}
-
-func (s specializationConstants) bitsPtr() *C.uint32_t {
-	if len(s.bits) == 0 {
-		return nil
+	entries := make([]vkSpecializationMapEntry, len(s.ids))
+	for i, id := range s.ids {
+		entries[i] = vkSpecializationMapEntry{constantID: id, offset: cUint32(i * 4), size: 4}
 	}
-	return &s.bits[0]
+	info.mapEntryCount = cUint32(len(entries))
+	info.pMapEntries = pinned(pin, &entries[0])
+	info.dataSize = cSize(len(s.bits) * 4)
+	info.pData = unsafe.Pointer(pinned(pin, &s.bits[0]))
+	return info
 }
 
 // blendAttachment translates a target's blend state. WriteMask 0 means every channel,
 // whether or not blending is enabled.
-func blendAttachment(b gpu.BlendState) C.VkPipelineColorBlendAttachmentState {
-	mask := C.VkColorComponentFlags(b.WriteMask & 0xf)
+func blendAttachment(b gpu.BlendState) vkPipelineColorBlendAttachmentState {
+	mask := vkColorComponentFlags(b.WriteMask & 0xf)
 	if mask == 0 {
-		mask = C.VK_COLOR_COMPONENT_R_BIT | C.VK_COLOR_COMPONENT_G_BIT | C.VK_COLOR_COMPONENT_B_BIT | C.VK_COLOR_COMPONENT_A_BIT
+		mask = vkColorComponentRBit | vkColorComponentGBit | vkColorComponentBBit | vkColorComponentABit
 	}
-	state := C.VkPipelineColorBlendAttachmentState{colorWriteMask: mask}
+	state := vkPipelineColorBlendAttachmentState{colorWriteMask: mask}
 	if !b.Enable {
 		return state
 	}
-	state.blendEnable = C.VK_TRUE
+	state.blendEnable = vkTrue
 	state.srcColorBlendFactor = blendFactor(b.ColorOp.Src)
 	state.dstColorBlendFactor = blendFactor(b.ColorOp.Dst)
 	state.colorBlendOp = blendOp(b.ColorOp.Op)
@@ -211,46 +306,46 @@ func blendAttachment(b gpu.BlendState) C.VkPipelineColorBlendAttachmentState {
 	return state
 }
 
-func blendFactor(f gpu.BlendFactor) C.VkBlendFactor {
+func blendFactor(f gpu.BlendFactor) vkBlendFactor {
 	switch f {
 	case gpu.BlendOne:
-		return C.VK_BLEND_FACTOR_ONE
+		return vkBlendFactorOne
 	case gpu.BlendSrcAlpha:
-		return C.VK_BLEND_FACTOR_SRC_ALPHA
+		return vkBlendFactorSrcAlpha
 	case gpu.BlendOneMinusSrcAlpha:
-		return C.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+		return vkBlendFactorOneMinusSrcAlpha
 	case gpu.BlendDstAlpha:
-		return C.VK_BLEND_FACTOR_DST_ALPHA
+		return vkBlendFactorDstAlpha
 	case gpu.BlendOneMinusDstAlpha:
-		return C.VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA
+		return vkBlendFactorOneMinusDstAlpha
 	default:
-		return C.VK_BLEND_FACTOR_ZERO
+		return vkBlendFactorZero
 	}
 }
 
-func blendOp(op gpu.BlendOp) C.VkBlendOp {
+func blendOp(op gpu.BlendOp) vkBlendOp {
 	switch op {
 	case gpu.BlendSubtract:
-		return C.VK_BLEND_OP_SUBTRACT
+		return vkBlendOpSubtract
 	case gpu.BlendReverseSubtract:
-		return C.VK_BLEND_OP_REVERSE_SUBTRACT
+		return vkBlendOpReverseSubtract
 	case gpu.BlendMin:
-		return C.VK_BLEND_OP_MIN
+		return vkBlendOpMin
 	case gpu.BlendMax:
-		return C.VK_BLEND_OP_MAX
+		return vkBlendOpMax
 	default:
-		return C.VK_BLEND_OP_ADD
+		return vkBlendOpAdd
 	}
 }
 
 // pipelineEntry records a pipeline and the bind point it was created for, so
 // SetPipeline can bind it without the caller distinguishing compute vs graphics.
 type pipelineEntry struct {
-	pipe      C.VkPipeline
-	bindPoint C.VkPipelineBindPoint
+	pipe      vkPipeline
+	bindPoint vkPipelineBindPoint
 }
 
-func (b *Backend) registerPipeline(p C.VkPipeline, bindPoint C.VkPipelineBindPoint) gpu.Pipeline {
+func (b *Backend) registerPipeline(p vkPipeline, bindPoint vkPipelineBindPoint) gpu.Pipeline {
 	h := b.nextID.Add(1)
 	b.pipelines[h] = pipelineEntry{pipe: p, bindPoint: bindPoint}
 	return gpu.Pipeline{H: gpu.Handle(h)}
@@ -262,6 +357,6 @@ func (b *Backend) DestroyPipeline(p gpu.Pipeline) {
 	if !ok {
 		return
 	}
-	C.vkDestroyPipeline(b.device, e.pipe, nil)
+	vkDestroyPipeline(b.device, e.pipe, nil)
 	delete(b.pipelines, uint64(p.H))
 }

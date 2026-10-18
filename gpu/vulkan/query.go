@@ -2,19 +2,24 @@
 
 package vulkan
 
-/*
-#include "bridge.h"
-*/
-import "C"
+import (
+	"unsafe"
 
-import "github.com/bluescreen10/gamekit/gpu"
+	"github.com/bluescreen10/gamekit/gpu"
+)
 
 // CreateTimestampPool allocates a pool of count timestamp query slots.
 func (b *Backend) CreateTimestampPool(count uint32) gpu.QueryPool {
-	pool := C.vkbCreateTimestampPool(b.device, C.uint32_t(count))
+	ci := vkQueryPoolCreateInfo{
+		sType:      vkStructureTypeQueryPoolCreateInfo,
+		queryType:  vkQueryTypeTimestamp,
+		queryCount: cUint32(count),
+	}
+	var pool vkQueryPool
+	vkCreateQueryPool(b.device, &ci, nil, &pool)
 	h := b.nextID.Add(1)
 	if b.queryPools == nil {
-		b.queryPools = map[uint64]C.VkQueryPool{}
+		b.queryPools = map[uint64]vkQueryPool{}
 	}
 	b.queryPools[h] = pool
 	return gpu.QueryPool{H: gpu.Handle(h)}
@@ -23,7 +28,7 @@ func (b *Backend) CreateTimestampPool(count uint32) gpu.QueryPool {
 // DestroyTimestampPool releases a timestamp pool.
 func (b *Backend) DestroyTimestampPool(p gpu.QueryPool) {
 	if pool, ok := b.queryPools[uint64(p.H)]; ok {
-		C.vkDestroyQueryPool(b.device, pool, nil)
+		vkDestroyQueryPool(b.device, pool, nil)
 		delete(b.queryPools, uint64(p.H))
 	}
 }
@@ -37,7 +42,9 @@ func (b *Backend) ReadTimestamps(p gpu.QueryPool, count uint32) []uint64 {
 		return nil
 	}
 	out := make([]uint64, count)
-	if r := C.vkbGetTimestamps(b.device, pool, C.uint32_t(count), (*C.uint64_t)(&out[0])); r != C.VK_SUCCESS {
+	r := vkGetQueryPoolResults(b.device, pool, 0, cUint32(count), cSize(count*8), unsafe.Pointer(&out[0]), 8,
+		vkQueryResult64Bit|vkQueryResultWaitBit)
+	if r != vkSuccess {
 		return nil
 	}
 	return out
@@ -45,30 +52,33 @@ func (b *Backend) ReadTimestamps(p gpu.QueryPool, count uint32) []uint64 {
 
 // TimestampPeriod returns nanoseconds per timestamp tick for this device.
 func (b *Backend) TimestampPeriod() float64 {
-	return float64(C.vkbTimestampPeriod(b.physicalDevice))
+	return float64(b.properties.limits.timestampPeriod) // nanoseconds per tick
 }
 
 // TimestampValidBits returns how many bits of the graphics/compute queue's
 // timestamps are meaningful (0 = timestamps unsupported on that queue).
 func (b *Backend) TimestampValidBits() uint32 {
-	return uint32(C.vkbTimestampValidBits(b.physicalDevice, C.uint32_t(b.queueFamily)))
+	if int(b.queueFamily) >= len(b.queueFamilies) {
+		return 0
+	}
+	return uint32(b.queueFamilies[b.queueFamily].timestampValidBits)
 }
 
 func (c *cmdBuffer) ResetTimestamps(p gpu.QueryPool, count uint32) {
-	if pool, ok := c.b.queryPools[uint64(p.H)]; ok {
-		C.vkbCmdResetQueryPool(c.cb, pool, C.uint32_t(count))
+	if pool, ok := c.backend.queryPools[uint64(p.H)]; ok {
+		vkCmdResetQueryPool(c.cb, pool, 0, cUint32(count))
 	}
 }
 
 func (c *cmdBuffer) WriteTimestamp(p gpu.QueryPool, index uint32, at gpu.Stage) {
-	pool, ok := c.b.queryPools[uint64(p.H)]
+	pool, ok := c.backend.queryPools[uint64(p.H)]
 	if !ok {
 		return
 	}
 	stage, _ := stageAccess(at)
 	if stage == 0 {
 		// StageNone → the earliest point, for a frame-start timestamp.
-		stage = vkStageTop
+		stage = vkPipelineStage2TopOfPipeBit
 	}
-	C.vkbCmdWriteTimestamp(c.cb, stage, pool, C.uint32_t(index))
+	vkCmdWriteTimestamp2(c.cb, stage, pool, cUint32(index))
 }

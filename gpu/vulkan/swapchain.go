@@ -2,28 +2,24 @@
 
 package vulkan
 
-/*
-#include "bridge.h"
-*/
-import "C"
-
 import (
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/bluescreen10/gamekit/gpu"
 )
 
 type swapchainState struct {
-	surface  C.VkSurfaceKHR
-	swap     C.VkSwapchainKHR
-	format   C.VkFormat
+	surface  vkSurfaceKHR
+	swap     vkSwapchainKHR
+	format   vkFormat
 	gpuFmt   gpu.Format
 	mode     gpu.PresentMode
 	w, h     uint32
 	images   []gpu.Texture // one textureEntry per image (owned=false)
-	acquire  []C.VkSemaphore
-	rendered []C.VkSemaphore
+	acquire  []vkSemaphore
+	rendered []vkSemaphore
 	frame    uint32 // rotating sync index
 	curImage uint32 // last acquired image index
 }
@@ -31,12 +27,23 @@ type swapchainState struct {
 // SwapchainFormats lists the formats the surface presents in the sRGB colour space,
 // restricted to those the RHI can name.
 func (b *Backend) SwapchainFormats(surface gpu.Surface) []gpu.Format {
-	var native [64]C.VkFormat
-	n := C.vkbSurfaceFormats(b.physicalDevice, C.vkbSurfaceFromHandle(C.uint64_t(surface)), &native[0], C.uint32_t(len(native)))
+	vs := surfaceFromHandle(surface)
+	var n cUint32
+	vkGetPhysicalDeviceSurfaceFormatsKHR(b.physicalDevice, vs, &n, nil)
+	if n == 0 {
+		return nil
+	}
+	native := make([]vkSurfaceFormatKHR, n)
+	vkGetPhysicalDeviceSurfaceFormatsKHR(b.physicalDevice, vs, &n, &native[0])
 	var formats []gpu.Format
 	for _, f := range native[:n] {
+		// Other colour spaces (HDR10, extended linear) are left out until a swapchain
+		// can ask for one.
+		if f.colorSpace != vkColorSpaceSrgbNonlinearKHR {
+			continue
+		}
 		for _, candidate := range supportedFormats {
-			if vkFormat(candidate) == f && !slices.Contains(formats, candidate) {
+			if formatOf(candidate) == f.format && !slices.Contains(formats, candidate) {
 				formats = append(formats, candidate)
 			}
 		}
@@ -56,7 +63,7 @@ func (b *Backend) CreateSwapchain(surface gpu.Surface, desc gpu.SwapchainDescrip
 		return gpu.Swapchain{}, fmt.Errorf("vulkan: the surface does not present swapchain format %v (it offers %v)", format, available)
 	}
 
-	s := &swapchainState{surface: C.vkbSurfaceFromHandle(C.uint64_t(surface)), gpuFmt: format, format: vkFormat(format), mode: desc.PresentMode}
+	s := &swapchainState{surface: surfaceFromHandle(surface), gpuFmt: format, format: formatOf(format), mode: desc.PresentMode}
 	b.buildSwapchain(s, desc.Width, desc.Height, nil)
 
 	h := b.nextID.Add(1)
@@ -78,34 +85,107 @@ func defaultSwapchainFormat(available []gpu.Format) gpu.Format {
 	return gpu.FormatUndefined
 }
 
-func (b *Backend) buildSwapchain(s *swapchainState, width, height uint32, old C.VkSwapchainKHR) {
-	var swap C.VkSwapchainKHR
-	var w, h C.uint32_t
-	if r := C.vkbCreateSwapchain(b.physicalDevice, b.device, s.surface, C.uint32_t(width), C.uint32_t(height), s.format, vkPresentMode(s.mode), old,
-		&swap, &w, &h); r != C.VK_SUCCESS {
+// presentMode is the present mode a swapchain asking for wanted gets: wanted, if the
+// surface offers it; for IMMEDIATE, MAILBOX — which replaces the waiting frame rather
+// than tearing — if it offers that instead; and otherwise FIFO, which every surface
+// offers.
+func (b *Backend) presentMode(surface vkSurfaceKHR, wanted vkPresentModeKHR) vkPresentModeKHR {
+	if wanted == vkPresentModeFifoKHR {
+		return wanted
+	}
+	var n cUint32
+	vkGetPhysicalDeviceSurfacePresentModesKHR(b.physicalDevice, surface, &n, nil)
+	if n == 0 {
+		return vkPresentModeFifoKHR
+	}
+	modes := make([]vkPresentModeKHR, n)
+	vkGetPhysicalDeviceSurfacePresentModesKHR(b.physicalDevice, surface, &n, &modes[0])
+	switch {
+	case slices.Contains(modes[:n], wanted):
+		return wanted
+	case wanted == vkPresentModeImmediateKHR && slices.Contains(modes[:n], vkPresentModeMailboxKHR):
+		return vkPresentModeMailboxKHR
+	default:
+		return vkPresentModeFifoKHR
+	}
+}
+
+// buildSwapchain creates (or recreates from old) s's swapchain in its format, in the
+// sRGB colour space, presenting in its mode or the nearest the surface offers, with a
+// view and a pair of semaphores per image.
+func (b *Backend) buildSwapchain(s *swapchainState, width, height uint32, old vkSwapchainKHR) {
+	var caps vkSurfaceCapabilitiesKHR
+	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(b.physicalDevice, s.surface, &caps)
+	extent := caps.currentExtent
+	if extent.width == 0xFFFFFFFF {
+		extent = vkExtent2D{width: cUint32(width), height: cUint32(height)}
+	}
+	minImages := caps.minImageCount + 1
+	if caps.maxImageCount > 0 && minImages > caps.maxImageCount {
+		minImages = caps.maxImageCount
+	}
+	// TRANSFER_SRC lets the frame be copied back out (screenshots). It is optional:
+	// the spec only guarantees COLOR_ATTACHMENT, so ask for it only where the surface
+	// reports it, and a driver that refuses simply means no screenshots rather than a
+	// failed swapchain.
+	usage := vkImageUsageFlags(vkImageUsageColorAttachmentBit | vkImageUsageTransferDstBit)
+	if caps.supportedUsageFlags&vkImageUsageTransferSrcBit != 0 {
+		usage |= vkImageUsageTransferSrcBit
+	}
+	ci := vkSwapchainCreateInfoKHR{
+		sType:            vkStructureTypeSwapchainCreateInfoKHR,
+		surface:          s.surface,
+		minImageCount:    minImages,
+		imageFormat:      s.format,
+		imageColorSpace:  vkColorSpaceSrgbNonlinearKHR,
+		imageExtent:      extent,
+		imageArrayLayers: 1,
+		imageUsage:       usage,
+		imageSharingMode: vkSharingModeExclusive,
+		preTransform:     caps.currentTransform,
+		compositeAlpha:   vkCompositeAlphaOpaqueBitKHR,
+		presentMode:      b.presentMode(s.surface, presentModeOf(s.mode)),
+		clipped:          vkTrue,
+		oldSwapchain:     old,
+	}
+	var swap vkSwapchainKHR
+	if r := vkCreateSwapchainKHR(b.device, &ci, nil, &swap); r != vkSuccess {
 		panic(fmt.Sprintf("vulkan: swapchain creation failed (%d)", int(r)))
 	}
 	s.swap = swap
-	s.w, s.h = uint32(w), uint32(h)
+	s.w, s.h = uint32(extent.width), uint32(extent.height)
 
-	n := uint32(C.vkbSwapchainImageCount(b.device, swap))
-	imgs := make([]C.VkImage, n)
-	C.vkbSwapchainImages(b.device, swap, C.uint32_t(n), &imgs[0])
+	var n cUint32
+	vkGetSwapchainImagesKHR(b.device, s.swap, &n, nil)
+	imgs := make([]vkImage, n)
+	vkGetSwapchainImagesKHR(b.device, s.swap, &n, &imgs[0])
 
 	s.images = make([]gpu.Texture, n)
-	s.acquire = make([]C.VkSemaphore, n)
-	s.rendered = make([]C.VkSemaphore, n)
-	for i := uint32(0); i < n; i++ {
-		var view C.VkImageView
-		C.vkbSwapImageView(b.device, imgs[i], s.format, &view)
+	s.acquire = make([]vkSemaphore, n)
+	s.rendered = make([]vkSemaphore, n)
+	si := vkSemaphoreCreateInfo{sType: vkStructureTypeSemaphoreCreateInfo}
+	for i := range imgs[:n] {
+		vci := vkImageViewCreateInfo{
+			sType:    vkStructureTypeImageViewCreateInfo,
+			image:    imgs[i],
+			viewType: vkImageViewType2D,
+			format:   s.format,
+			subresourceRange: vkImageSubresourceRange{
+				aspectMask: vkImageAspectColorBit,
+				levelCount: 1,
+				layerCount: 1,
+			},
+		}
+		var view vkImageView
+		vkCreateImageView(b.device, &vci, nil, &view)
 		hh := b.nextID.Add(1)
 		b.textures[hh] = &textureEntry{
 			img: imgs[i], view: view, format: s.format,
 			width: s.w, height: s.h, owned: false,
 		}
 		s.images[i] = gpu.Texture{H: gpu.Handle(hh)}
-		C.vkbCreateSemaphore(b.device, &s.acquire[i])
-		C.vkbCreateSemaphore(b.device, &s.rendered[i])
+		vkCreateSemaphore(b.device, &si, nil, &s.acquire[i])
+		vkCreateSemaphore(b.device, &si, nil, &s.rendered[i])
 	}
 }
 
@@ -115,8 +195,8 @@ func (b *Backend) buildSwapchain(s *swapchainState, width, height uint32, old C.
 func (b *Backend) AcquireNext(sc gpu.Swapchain) (gpu.Texture, gpu.Fence) {
 	s := b.swapchains[uint64(sc.H)]
 	s.frame = (s.frame + 1) % uint32(len(s.acquire))
-	var idx C.uint32_t
-	C.vkbAcquire(b.device, s.swap, s.acquire[s.frame], &idx)
+	var idx cUint32
+	vkAcquireNextImageKHR(b.device, s.swap, math.MaxUint64, s.acquire[s.frame], nil, &idx)
 	s.curImage = uint32(idx)
 	b.activeSwap = s
 	// Fresh acquire: the presentation engine hands the image back in PRESENT_SRC, and
@@ -133,18 +213,36 @@ func (b *Backend) Present(sc gpu.Swapchain, cmd gpu.CommandBuffer) {
 	s := b.swapchains[uint64(sc.H)]
 	c := cmd.(*cmdBuffer)
 
-	// Transition the backbuffer to PRESENT_SRC before ending the buffer.
+	// Transition the backbuffer from GENERAL to PRESENT_SRC before ending the buffer —
+	// the one layout unified image layouts leave in place, since the presentation
+	// engine reads it. Anything may have written the backbuffer last: a draw, a copy.
 	e := b.tex(s.images[s.curImage])
-	C.vkbPresentBarrier(c.cb, e.img)
-	C.vkEndCommandBuffer(c.cb)
+	c.imageBarrier(e.img, vkImageAspectColorBit, vkPipelineStage2AllCommandsBit, vkAccess2MemoryWriteBit, vkPipelineStage2BottomOfPipeBit, vkAccess2None,
+		vkImageLayoutGeneral, vkImageLayoutPresentSrcKHR)
+	vkEndCommandBuffer(c.cb)
 
-	var noFence C.VkFence
-	C.vkbSubmitPresent(b.queue, c.cb, s.swap, C.uint32_t(s.curImage),
-		s.acquire[s.frame], s.rendered[s.frame], noFence)
+	// Submit waiting on the acquire semaphore and signalling render-done, then present
+	// once render-done signals.
+	if r := b.submit(c.cb, s.acquire[s.frame], s.rendered[s.frame], nil); r == vkSuccess {
+		sc := b.scratch
+		sc.swapchain = s.swap
+		sc.imageIndex = cUint32(s.curImage)
+		sc.renderDone = s.rendered[s.frame]
+		sc.present = vkPresentInfoKHR{
+			sType:              vkStructureTypePresentInfoKHR,
+			waitSemaphoreCount: 1,
+			pWaitSemaphores:    &sc.renderDone,
+			swapchainCount:     1,
+			pSwapchains:        &sc.swapchain,
+			pImageIndices:      &sc.imageIndex,
+		}
+		vkQueuePresentKHR(b.queue, &sc.present)
+	}
 
 	// Simple throttle (per-frame fences / frames-in-flight come later).
-	C.vkQueueWaitIdle(b.queue)
-	C.vkFreeCommandBuffers(b.device, b.cmdPool, 1, &c.cb)
+	vkQueueWaitIdle(b.queue)
+	cb := c.cb
+	vkFreeCommandBuffers(b.device, b.cmdPool, 1, &cb)
 	b.activeSwap = nil
 }
 
@@ -163,20 +261,20 @@ func (b *Backend) SwapchainSize(sc gpu.Swapchain) (width, height uint32) {
 // ResizeSwapchain recreates the swapchain at a new size.
 func (b *Backend) ResizeSwapchain(sc gpu.Swapchain, width, height uint32) {
 	s := b.swapchains[uint64(sc.H)]
-	C.vkDeviceWaitIdle(b.device)
+	vkDeviceWaitIdle(b.device)
 	b.destroySwapchainResources(s)
 	b.buildSwapchain(s, width, height, s.swap)
 }
 
-// vkPresentMode is the Vulkan present mode a swapchain presenting in mode asks for.
-func vkPresentMode(mode gpu.PresentMode) C.VkPresentModeKHR {
+// presentModeOf is the Vulkan present mode a swapchain presenting in mode asks for.
+func presentModeOf(mode gpu.PresentMode) vkPresentModeKHR {
 	switch mode {
 	case gpu.PresentImmediate:
-		return C.VK_PRESENT_MODE_IMMEDIATE_KHR
+		return vkPresentModeImmediateKHR
 	case gpu.PresentMailbox:
-		return C.VK_PRESENT_MODE_MAILBOX_KHR
+		return vkPresentModeMailboxKHR
 	default:
-		return C.VK_PRESENT_MODE_FIFO_KHR
+		return vkPresentModeFifoKHR
 	}
 }
 
@@ -186,7 +284,7 @@ func (b *Backend) SetPresentMode(sc gpu.Swapchain, mode gpu.PresentMode) {
 	if s.mode == mode {
 		return
 	}
-	C.vkDeviceWaitIdle(b.device)
+	vkDeviceWaitIdle(b.device)
 	s.mode = mode
 	b.destroySwapchainResources(s)
 	b.buildSwapchain(s, s.w, s.h, s.swap)
@@ -196,19 +294,19 @@ func (b *Backend) destroySwapchainResources(s *swapchainState) {
 	for i := range s.images {
 		e := b.tex(s.images[i])
 		if e != nil {
-			C.vkDestroyImageView(b.device, e.view, nil)
+			vkDestroyImageView(b.device, e.view, nil)
 			delete(b.textures, uint64(s.images[i].H))
 		}
-		C.vkDestroySemaphore(b.device, s.acquire[i], nil)
-		C.vkDestroySemaphore(b.device, s.rendered[i], nil)
+		vkDestroySemaphore(b.device, s.acquire[i], nil)
+		vkDestroySemaphore(b.device, s.rendered[i], nil)
 	}
-	C.vkDestroySwapchainKHR(b.device, s.swap, nil)
+	vkDestroySwapchainKHR(b.device, s.swap, nil)
 }
 
 func (b *Backend) destroyAllSwapchains() {
 	for _, s := range b.swapchains {
 		b.destroySwapchainResources(s)
-		C.vkDestroySurfaceKHR(b.instance, s.surface, nil)
+		vkDestroySurfaceKHR(b.instance, s.surface, nil)
 	}
 	b.swapchains = map[uint64]*swapchainState{}
 }

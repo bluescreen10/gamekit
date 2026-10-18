@@ -65,6 +65,16 @@ func TestMemoryAndTextureCopies(t *testing.T) {
 	if !bytes.Equal(data[4:4+7*5*4], unsafe.Slice((*byte)(dst.Ptr), 7*5*4)) {
 		t.Fatal("texture subresource copy mismatch")
 	}
+	// A view's base level is its first mip, so the view of mip 1 is 7x5, and reads back
+	// into a buffer of exactly that size.
+	exact := b.Alloc(7*5*4, gpu.MemoryHost, "view readback")
+	c = b.Begin()
+	c.CopyTextureToBuffer(exact, view, 0, 0)
+	b.Wait(b.Submit(c))
+	if !bytes.Equal(data[4:4+7*5*4], unsafe.Slice((*byte)(exact.Ptr), 7*5*4)) {
+		t.Fatal("mip view copy mismatch")
+	}
+	b.Free(exact)
 	b.DestroyTexture(view)
 	b.DestroyTexture(tex)
 	b.Free(src)
