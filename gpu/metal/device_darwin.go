@@ -89,7 +89,7 @@ func (d device) newCounterHeapWithDescriptor(descriptor counterHeapDescriptor, e
 	return deviceNewCounterHeapWithDescriptor(d, descriptor, err)
 }
 
-func (d device) newBufferWithLength(length, options uint) id {
+func (d device) newBufferWithLength(length, options uint) buffer {
 	return deviceNewBufferWithLength(d, length, options)
 }
 

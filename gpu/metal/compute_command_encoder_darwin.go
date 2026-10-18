@@ -38,17 +38,17 @@ func (e computeCommandEncoder) dispatchThreadgroupsWithIndirectBuffer(address ui
 	computeCommandEncoderDispatchThreadgroupsWithIndirectBuffer(e, address, threads)
 }
 
-func (e computeCommandEncoder) copyFromBufferToBuffer(src id, srcOffset uint, dst id, dstOffset, size uint) {
+func (e computeCommandEncoder) copyFromBufferToBuffer(src buffer, srcOffset uint, dst buffer, dstOffset, size uint) {
 	computeCommandEncoderCopyFromBufferToBuffer(e, src, srcOffset, dst, dstOffset, size)
 }
 
-func (e computeCommandEncoder) copyFromBufferToTexture(src id, srcOffset, bytesPerRow, bytesPerImage uint, size [3]uint,
+func (e computeCommandEncoder) copyFromBufferToTexture(src buffer, srcOffset, bytesPerRow, bytesPerImage uint, size [3]uint,
 	dst id, slice, level uint, origin [3]uint) {
 	computeCommandEncoderCopyFromBufferToTexture(e, src, srcOffset, bytesPerRow, bytesPerImage, size, dst, slice, level, origin)
 }
 
 func (e computeCommandEncoder) copyFromTextureToBuffer(src id, slice, level uint, origin, size [3]uint,
-	dst id, dstOffset, bytesPerRow, bytesPerImage uint) {
+	dst buffer, dstOffset, bytesPerRow, bytesPerImage uint) {
 	computeCommandEncoderCopyFromTextureToBuffer(e, src, slice, level, origin, size, dst, dstOffset, bytesPerRow, bytesPerImage)
 }
 

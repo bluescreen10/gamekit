@@ -146,9 +146,9 @@ func (c *command) rootSlot(data []byte) uint64 {
 			b.retired = append(b.retired, b.rootArena)
 		}
 		b.rootArena, b.rootArenaLen = arena, size
-		b.rootArenaPtr = bufferContents(arena)
-		b.rootArenaAddr = uint64(bufferGPUAddress(arena))
-		b.residencySet.enrol(arena)
+		b.rootArenaPtr = arena.contents()
+		b.rootArenaAddr = arena.gpuAddress()
+		b.residencySet.enrol(id(arena))
 		// The new arena starts empty: draws already recorded keep the old one's slots.
 		off = 0
 	}
@@ -516,15 +516,15 @@ func (c *command) CopyBuffer(dst, src gpu.Buffer, dstOffset, srcOffset, size uin
 	d, s := c.backend.resource(uint64(dst.H), kindBuffer), c.backend.resource(uint64(src.H), kindBuffer)
 	check(dstOffset <= d.size && size <= d.size-dstOffset && srcOffset <= s.size && size <= s.size-srcOffset,
 		"buffer copy out of bounds")
-	c.computeEncoder().copyFromBufferToBuffer(s.object, uint(srcOffset), d.object, uint(dstOffset), uint(size))
+	c.computeEncoder().copyFromBufferToBuffer(buffer(s.object), uint(srcOffset), buffer(d.object), uint(dstOffset), uint(size))
 }
 
-func (c *command) copyTexture(texture gpu.Texture, mip, layer uint32, buffer gpu.Buffer, offset uint64, upload bool) {
+func (c *command) copyTexture(texture gpu.Texture, mip, layer uint32, transferBuffer gpu.Buffer, offset uint64, upload bool) {
 	c.ready()
 	c.outside()
 	c.prepareWork()
 	t := c.backend.resource(uint64(texture.H), kindTexture)
-	buf := c.backend.resource(uint64(buffer.H), kindBuffer)
+	buf := c.backend.resource(uint64(transferBuffer.H), kindBuffer)
 	check(uint64(mip) < t.mips && t.samples == 1, "invalid copy mip or multisampled texture")
 	check(uint64(layer) < t.layers, "copy layer out of bounds")
 	var bytes uint64
@@ -552,9 +552,9 @@ func (c *command) copyTexture(texture gpu.Texture, mip, layer uint32, buffer gpu
 			at := uint(offset + z*img + y*row)
 			origin := [3]uint{0, uint(y), uint(z)}
 			if upload {
-				e.copyFromBufferToTexture(buf.object, at, uint(row), uint(row), line, t.object, uint(layer), uint(mip), origin)
+				e.copyFromBufferToTexture(buffer(buf.object), at, uint(row), uint(row), line, t.object, uint(layer), uint(mip), origin)
 			} else {
-				e.copyFromTextureToBuffer(t.object, uint(layer), uint(mip), origin, line, buf.object, at, uint(row), uint(row))
+				e.copyFromTextureToBuffer(t.object, uint(layer), uint(mip), origin, line, buffer(buf.object), at, uint(row), uint(row))
 			}
 		}
 	}
@@ -718,8 +718,8 @@ func (b *Backend) completed(value uint64) {
 			release(o)
 		}
 		for _, o := range b.retired {
-			b.residencySet.unenrol(o)
-			release(o)
+			b.residencySet.unenrol(id(o))
+			o.release()
 		}
 		b.released, b.retired = b.released[:0], b.retired[:0]
 	}

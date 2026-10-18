@@ -368,8 +368,8 @@ func deviceNewArgumentTableWithDescriptor(d device, desc argumentTableDescriptor
 func deviceNewCounterHeapWithDescriptor(d device, desc counterHeapDescriptor, err *id) id {
 	return id(C.gk_o_op(o(d), selNewCounterHeapWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewBufferWithLength(d device, length, options uint) id {
-	return id(C.gk_o_uu(o(d), selNewBufferWithLength, C.gk_u(length), C.gk_u(options)))
+func deviceNewBufferWithLength(d device, length, options uint) buffer {
+	return buffer(C.gk_o_uu(o(d), selNewBufferWithLength, C.gk_u(length), C.gk_u(options)))
 }
 func deviceNewTextureWithDescriptor(d device, desc textureDescriptor) id {
 	return id(C.gk_o_o(o(d), selNewTextureWithDescriptor, o(desc)))
@@ -431,10 +431,10 @@ func argumentTableSetAddress(t argumentTable, address uint64, index uint) {
 
 // MTLBuffer, MTLTexture, MTLSamplerState.
 
-func bufferContents(b id) unsafe.Pointer {
+func bufferContents(b buffer) unsafe.Pointer {
 	return C.gk_p(o(b), selContents)
 }
-func bufferGPUAddress(b id) uint64 {
+func bufferGPUAddress(b buffer) uint64 {
 	return uint64(C.gk_u_(o(b), selGPUAddress))
 }
 func textureGPUResourceID(t id) uint64 {
@@ -817,16 +817,16 @@ func computeCommandEncoderDispatchThreadgroups(e computeCommandEncoder, groups, 
 func computeCommandEncoderDispatchThreadgroupsWithIndirectBuffer(e computeCommandEncoder, address uint64, threads [3]uint) {
 	C.gk_v_us(o(e), selDispatchThreadgroupsWithIndirectBuffer, C.uint64_t(address), mtlSize(threads))
 }
-func computeCommandEncoderCopyFromBufferToBuffer(e computeCommandEncoder, src id, srcOffset uint, dst id, dstOffset, size uint) {
+func computeCommandEncoderCopyFromBufferToBuffer(e computeCommandEncoder, src buffer, srcOffset uint, dst buffer, dstOffset, size uint) {
 	C.gk_v_ououu(o(e), selCopyFromBufferToBuffer, o(src), C.gk_u(srcOffset), o(dst), C.gk_u(dstOffset), C.gk_u(size))
 }
-func computeCommandEncoderCopyFromBufferToTexture(e computeCommandEncoder, src id, srcOffset, bytesPerRow, bytesPerImage uint, size [3]uint,
+func computeCommandEncoderCopyFromBufferToTexture(e computeCommandEncoder, src buffer, srcOffset, bytesPerRow, bytesPerImage uint, size [3]uint,
 	dst id, slice, level uint, origin [3]uint) {
 	C.gk_v_ouuusouuz(o(e), selCopyFromBufferToTexture, o(src), C.gk_u(srcOffset), C.gk_u(bytesPerRow),
 		C.gk_u(bytesPerImage), mtlSize(size), o(dst), C.gk_u(slice), C.gk_u(level), mtlOrigin(origin))
 }
 func computeCommandEncoderCopyFromTextureToBuffer(e computeCommandEncoder, src id, slice, level uint, origin, size [3]uint,
-	dst id, dstOffset, bytesPerRow, bytesPerImage uint) {
+	dst buffer, dstOffset, bytesPerRow, bytesPerImage uint) {
 	C.gk_v_ouuzsouuu(o(e), selCopyFromTextureToBuffer, o(src), C.gk_u(slice), C.gk_u(level), mtlOrigin(origin),
 		mtlSize(size), o(dst), C.gk_u(dstOffset), C.gk_u(bytesPerRow), C.gk_u(bytesPerImage))
 }

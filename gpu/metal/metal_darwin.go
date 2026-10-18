@@ -111,13 +111,13 @@ type Backend struct {
 	buffer    commandBuffer
 
 	// The bindless tables: texture and sampler resource IDs, indexed by slot.
-	textureTable, samplerTable id
+	textureTable, samplerTable buffer
 	textureIDs                 []uint64
 	samplerIDs                 []uint64
 	freeTextures, freeSamplers []uint32
 
 	// rootArena holds draw and dispatch data (see rootSlot), reused across frames.
-	rootArena     id
+	rootArena     buffer
 	rootArenaPtr  unsafe.Pointer
 	rootArenaAddr uint64
 	rootArenaLen  uint64
@@ -137,7 +137,7 @@ type Backend struct {
 	inFlight   int
 	released   []id
 	// retired holds root arenas outgrown while recording, which the GPU may still read.
-	retired  []id
+	retired  []buffer
 	feedback chan feedback
 	// early holds feedback that arrived for a submission nobody waits on yet.
 	early map[uint64]feedback
@@ -318,13 +318,13 @@ func (b *Backend) init() error {
 	if b.textureTable == 0 || b.samplerTable == 0 {
 		return fmt.Errorf("cannot allocate argument tables")
 	}
-	b.residencySet.enrol(b.textureTable)
-	b.residencySet.enrol(b.samplerTable)
-	b.textureIDs = unsafe.Slice((*uint64)(bufferContents(b.textureTable)), textureSlots)
-	b.samplerIDs = unsafe.Slice((*uint64)(bufferContents(b.samplerTable)), samplerSlots)
-	textures := bufferGPUAddress(b.textureTable)
+	b.residencySet.enrol(id(b.textureTable))
+	b.residencySet.enrol(id(b.samplerTable))
+	b.textureIDs = unsafe.Slice((*uint64)(b.textureTable.contents()), textureSlots)
+	b.samplerIDs = unsafe.Slice((*uint64)(b.samplerTable.contents()), samplerSlots)
+	textures := b.textureTable.gpuAddress()
 	b.argTable.setAddress(textures, 1)
-	b.argTable.setAddress(bufferGPUAddress(b.samplerTable), 2)
+	b.argTable.setAddress(b.samplerTable.gpuAddress(), 2)
 	// Storage images (Vulkan's binding 1) read the same table as sampled ones: a Metal
 	// texture handle does not care how it is accessed, so a texture's one index serves
 	// both, as it does on Vulkan.
@@ -429,13 +429,14 @@ func (b *Backend) Alloc(size uint64, mem gpu.MemoryType, label string) gpu.Buffe
 		options = mtlResourceStorageModePrivate
 	}
 	r := &resource{kind: kindBuffer, size: size, private: mem == gpu.MemoryDevice}
-	r.object = b.device.newBufferWithLength(uint(size), options)
+	object := b.device.newBufferWithLength(uint(size), options)
+	r.object = id(object)
 	h := b.add(r)
 	setLabel(r.object, label)
 	b.residencySet.enrol(r.object)
-	r.addr = uint64(bufferGPUAddress(r.object))
+	r.addr = object.gpuAddress()
 	if !r.private {
-		r.ptr = bufferContents(r.object)
+		r.ptr = object.contents()
 	}
 	return gpu.Buffer{H: gpu.Handle(h), Size: size, Addr: r.addr, Ptr: r.ptr}
 }
