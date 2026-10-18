@@ -5,6 +5,10 @@ package metal
 // residencySet keeps the backend's allocations resident for its command queue.
 type residencySet id
 
+func (s residencySet) release() {
+	release(s)
+}
+
 // enrol adds an allocation and immediately commits and requests its residency.
 func (s residencySet) enrol(allocation id) {
 	residencySetAddAllocation(s, allocation)

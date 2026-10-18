@@ -51,7 +51,7 @@ type command struct {
 	render        renderCommandEncoder
 	compute       computeCommandEncoder
 	computeTable  bool
-	pass          id
+	pass          renderPassDescriptor
 	colors        []attachment
 	depth         *attachment
 	readOnlyDepth bool
@@ -107,7 +107,7 @@ func (c *command) endCompute() {
 	}
 	c.compute.updateFence(c.backend.fence, computeStages)
 	c.compute.endEncoding()
-	release(id(c.compute))
+	c.compute.release()
 	c.compute, c.computeTable, c.kernel = 0, false, nil
 }
 
@@ -285,37 +285,37 @@ func (c *command) BeginRenderPass(r gpu.RenderTargets) {
 
 	pool := pushPool()
 	defer pool.drain()
-	c.pass = newObject("MTL4RenderPassDescriptor")
-	colors := renderPassDescriptorColorAttachments(c.pass)
+	c.pass = newRenderPassDescriptor()
+	colors := c.pass.colorAttachments()
 	c.colors = c.colors[:0]
 	for i, x := range r.Color {
 		t := b.resource(uint64(x.Texture.H), kindTexture)
-		a := arrayObjectAtIndexedSubscript(colors, uint(i))
-		renderPassAttachmentDescriptorSetTexture(a, t.object)
-		renderPassAttachmentDescriptorSetLoadAction(a, loadAction(x.Load))
+		a := renderPassColorAttachmentDescriptor(arrayObjectAtIndexedSubscript(colors, uint(i)))
+		a.setTexture(t.object)
+		a.setLoadAction(loadAction(x.Load))
 		resolve := x.ResolveTexture.IsValid()
 		if resolve {
-			renderPassAttachmentDescriptorSetResolveTexture(a, b.resource(uint64(x.ResolveTexture.H), kindTexture).object)
+			a.setResolveTexture(b.resource(uint64(x.ResolveTexture.H), kindTexture).object)
 		}
 		store := storeAction(x.Store, resolve)
-		renderPassAttachmentDescriptorSetStoreAction(a, store)
-		renderPassColorAttachmentDescriptorSetClearColor(a, float64(x.Clear[0]), float64(x.Clear[1]), float64(x.Clear[2]), float64(x.Clear[3]))
+		a.setStoreAction(store)
+		a.setClearColor(float64(x.Clear[0]), float64(x.Clear[1]), float64(x.Clear[2]), float64(x.Clear[3]))
 		c.colors = append(c.colors, attachment{texture: t, store: store})
 	}
 	c.depth = nil
 	if x := r.Depth; x != nil {
 		t := b.resource(uint64(x.Texture.H), kindTexture)
-		a := renderPassDescriptorDepthAttachment(c.pass)
-		renderPassAttachmentDescriptorSetTexture(a, t.object)
-		renderPassAttachmentDescriptorSetLoadAction(a, loadAction(x.Load))
+		a := c.pass.depthAttachment()
+		a.setTexture(t.object)
+		a.setLoadAction(loadAction(x.Load))
 		resolve := x.ResolveTexture.IsValid()
 		if resolve {
-			renderPassAttachmentDescriptorSetResolveTexture(a, b.resource(uint64(x.ResolveTexture.H), kindTexture).object)
-			renderPassDepthAttachmentDescriptorSetDepthResolveFilter(a, mtlMultisampleDepthResolveFilterSample0)
+			a.setResolveTexture(b.resource(uint64(x.ResolveTexture.H), kindTexture).object)
+			a.setDepthResolveFilter(mtlMultisampleDepthResolveFilterSample0)
 		}
 		store := storeAction(x.Store, resolve)
-		renderPassAttachmentDescriptorSetStoreAction(a, store)
-		renderPassDepthAttachmentDescriptorSetClearDepth(a, float64(x.Clear))
+		a.setStoreAction(store)
+		a.setClearDepth(float64(x.Clear))
 		c.depth = &attachment{texture: t, store: store}
 		c.readOnlyDepth = x.ReadOnly
 	}
@@ -351,29 +351,29 @@ func (c *command) pauseRender() {
 	}
 	c.render.updateFence(c.backend.fence, renderStages)
 	c.render.endEncoding()
-	release(id(c.render))
+	c.render.release()
 	c.render, c.graphics = 0, nil
 }
 
 func (c *command) resumeRender(load bool) {
 	pool := pushPool()
 	defer pool.drain()
-	d := objectCopy(c.pass)
-	defer release(d)
-	colors := renderPassDescriptorColorAttachments(d)
+	d := c.pass.clone()
+	defer d.release()
+	colors := d.colorAttachments()
 	for i := range c.colors {
-		a := arrayObjectAtIndexedSubscript(colors, uint(i))
+		a := renderPassColorAttachmentDescriptor(arrayObjectAtIndexedSubscript(colors, uint(i)))
 		if load {
-			renderPassAttachmentDescriptorSetLoadAction(a, mtlLoadActionLoad)
+			a.setLoadAction(mtlLoadActionLoad)
 		}
-		renderPassAttachmentDescriptorSetStoreAction(a, mtlStoreActionUnknown)
+		a.setStoreAction(mtlStoreActionUnknown)
 	}
 	if c.depth != nil {
-		a := renderPassDescriptorDepthAttachment(d)
+		a := d.depthAttachment()
 		if load {
-			renderPassAttachmentDescriptorSetLoadAction(a, mtlLoadActionLoad)
+			a.setLoadAction(mtlLoadActionLoad)
 		}
-		renderPassAttachmentDescriptorSetStoreAction(a, mtlStoreActionUnknown)
+		a.setStoreAction(mtlStoreActionUnknown)
 	}
 	c.render = c.backend.buffer.renderCommandEncoderWithDescriptor(d)
 	retain(id(c.render))
@@ -399,8 +399,8 @@ func (c *command) EndRenderPass() {
 	}
 	c.render.updateFence(c.backend.fence, renderStages)
 	c.render.endEncoding()
-	release(id(c.render))
-	release(c.pass)
+	c.render.release()
+	c.pass.release()
 	c.render, c.pass, c.graphics = 0, 0, nil
 	c.colors, c.depth = c.colors[:0], nil
 	c.hasViewport, c.hasScissor, c.readOnlyDepth = false, false, false

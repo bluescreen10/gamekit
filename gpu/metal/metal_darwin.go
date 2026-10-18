@@ -286,7 +286,7 @@ func (b *Backend) init() error {
 		return fmt.Errorf("cannot create command queue")
 	}
 	var err error
-	if b.compiler, err = newWithDescriptor(b.device.newCompilerWithDescriptor, "MTL4CompilerDescriptor", nil, "cannot create Metal 4 compiler"); err != nil {
+	if b.compiler, err = newWithDescriptor(b.device.newCompilerWithDescriptor, newCompilerDescriptor, nil, "cannot create Metal 4 compiler"); err != nil {
 		return err
 	}
 	if b.residencySet, err = b.device.newResidencySet(); err != nil {
@@ -302,15 +302,15 @@ func (b *Backend) init() error {
 	if b.fence = b.device.newFence(); b.fence == 0 {
 		return fmt.Errorf("cannot create fence")
 	}
-	if b.allocator, err = newWithDescriptor(b.device.newCommandAllocatorWithDescriptor, "MTL4CommandAllocatorDescriptor", nil, "cannot create command allocator"); err != nil {
+	if b.allocator, err = newWithDescriptor(b.device.newCommandAllocatorWithDescriptor, newCommandAllocatorDescriptor, nil, "cannot create command allocator"); err != nil {
 		return err
 	}
 	if b.buffer = b.device.newCommandBuffer(); b.buffer == 0 {
 		return fmt.Errorf("cannot create command buffer")
 	}
-	if b.argTable, err = newWithDescriptor(b.device.newArgumentTableWithDescriptor, "MTL4ArgumentTableDescriptor",
-		func(d id) {
-			argumentTableDescriptorSetMaxBufferBindCount(d, 4)
+	if b.argTable, err = newWithDescriptor(b.device.newArgumentTableWithDescriptor, newArgumentTableDescriptor,
+		func(d argumentTableDescriptor) {
+			d.setMaxBufferBindCount(4)
 		}, "cannot create argument table"); err != nil {
 		return err
 	}
@@ -341,10 +341,10 @@ func (b *Backend) init() error {
 	return nil
 }
 
-// newWithDescriptor creates an object from a new descriptor of class descriptor,
-// configured by configure, with a creation message that reports an NSError.
-func newWithDescriptor(create func(descriptor id, err *id) id, descriptor string, configure func(id), failure string) (id, error) {
-	d := newObject(descriptor)
+// newWithDescriptor creates an object with a new, configured descriptor.
+// The creation function reports an NSError on failure.
+func newWithDescriptor[T ~uintptr](create func(descriptor T, err *id) id, descriptor func() T, configure func(T), failure string) (id, error) {
+	d := descriptor()
 	defer release(d)
 	if configure != nil {
 		configure(d)
@@ -380,10 +380,18 @@ func (b *Backend) destroy() {
 		release(r.drawable)
 	}
 	b.resources = nil
-	for _, o := range []id{b.textureTable, b.samplerTable, b.rootArena, id(b.residencySet), b.compiler, b.event,
-		b.fence, b.allocator, id(b.buffer), b.argTable, id(b.queue), id(b.device)} {
-		release(o)
-	}
+	b.textureTable.release()
+	b.samplerTable.release()
+	b.rootArena.release()
+	b.residencySet.release()
+	b.compiler.release()
+	b.event.release()
+	b.fence.release()
+	b.allocator.release()
+	b.buffer.release()
+	b.argTable.release()
+	b.queue.release()
+	b.device.release()
 	*b = Backend{}
 }
 
@@ -532,18 +540,18 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 
 	pool := pushPool()
 	defer pool.drain()
-	desc := newObject("MTLTextureDescriptor")
-	defer release(desc)
-	textureDescriptorSetTextureType(desc, uint(r.textureType))
-	textureDescriptorSetWidth(desc, uint(r.width))
-	textureDescriptorSetHeight(desc, uint(r.height))
-	textureDescriptorSetDepth(desc, uint(r.depth))
-	textureDescriptorSetArrayLength(desc, uint(arrayLength))
-	textureDescriptorSetMipmapLevelCount(desc, uint(r.mips))
-	textureDescriptorSetPixelFormat(desc, uint(r.format))
-	textureDescriptorSetSampleCount(desc, uint(r.samples))
-	textureDescriptorSetStorageMode(desc, storage)
-	textureDescriptorSetUsage(desc, usage)
+	desc := newTextureDescriptor()
+	defer desc.release()
+	desc.setTextureType(uint(r.textureType))
+	desc.setWidth(uint(r.width))
+	desc.setHeight(uint(r.height))
+	desc.setDepth(uint(r.depth))
+	desc.setArrayLength(uint(arrayLength))
+	desc.setMipmapLevelCount(uint(r.mips))
+	desc.setPixelFormat(uint(r.format))
+	desc.setSampleCount(uint(r.samples))
+	desc.setStorageMode(storage)
+	desc.setUsage(usage)
 	r.object = b.device.newTextureWithDescriptor(desc)
 	h := b.add(r)
 	setLabel(r.object, d.Label)
@@ -616,22 +624,22 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	}
 	pool := pushPool()
 	defer pool.drain()
-	desc := newObject("MTLSamplerDescriptor")
-	defer release(desc)
-	samplerDescriptorSetMinFilter(desc, filter(d.MinLinear))
-	samplerDescriptorSetMagFilter(desc, filter(d.MagLinear))
+	desc := newSamplerDescriptor()
+	defer desc.release()
+	desc.setMinFilter(filter(d.MinLinear))
+	desc.setMagFilter(filter(d.MagLinear))
 	mip := uint(mtlSamplerMipFilterNearest)
 	if d.MipLinear {
 		mip = mtlSamplerMipFilterLinear
 	}
-	samplerDescriptorSetMipFilter(desc, mip)
-	samplerDescriptorSetSAddressMode(desc, addressModes[d.AddressU])
-	samplerDescriptorSetTAddressMode(desc, addressModes[d.AddressV])
-	samplerDescriptorSetRAddressMode(desc, addressModes[d.AddressW])
-	samplerDescriptorSetCompareFunction(desc, uint(d.Compare))
-	samplerDescriptorSetMaxAnisotropy(desc, uint(max(d.MaxAnisotropy, 1)))
-	samplerDescriptorSetSupportArgumentBuffers(desc, true)
-	setLabel(desc, d.Label)
+	desc.setMipFilter(mip)
+	desc.setSAddressMode(addressModes[d.AddressU])
+	desc.setTAddressMode(addressModes[d.AddressV])
+	desc.setRAddressMode(addressModes[d.AddressW])
+	desc.setCompareFunction(uint(d.Compare))
+	desc.setMaxAnisotropy(uint(max(d.MaxAnisotropy, 1)))
+	desc.setSupportArgumentBuffers(true)
+	setLabel(id(desc), d.Label)
 	r := &resource{kind: kindSampler, object: b.device.newSamplerStateWithDescriptor(desc)}
 	h := b.add(r)
 	return gpu.Sampler{H: gpu.Handle(h), Index: b.slot(r)}
@@ -673,13 +681,13 @@ func (b *Backend) shaderLibrary(code []byte) id {
 
 // libraryFunction names an entry of a shader for MTL4's descriptor-based pipeline
 // creation. It is autoreleased.
-func (b *Backend) libraryFunction(code []byte, entryName string) id {
-	fd := newObject("MTL4LibraryFunctionDescriptor")
-	libraryFunctionDescriptorSetLibrary(fd, b.shaderLibrary(code))
+func (b *Backend) libraryFunction(code []byte, entryName string) libraryFunctionDescriptor {
+	fd := newLibraryFunctionDescriptor()
+	fd.setLibrary(b.shaderLibrary(code))
 	name := nsString(entry(entryName))
-	libraryFunctionDescriptorSetName(fd, name)
+	fd.setName(name)
 	release(name)
-	return objectAutorelease(fd)
+	return libraryFunctionDescriptor(objectAutorelease(id(fd)))
 }
 
 // constant is one resolved function constant.
@@ -699,7 +707,7 @@ var constantTypes = [...]uint{
 // no constants: Metal refuses to build a pipeline from a function that declares
 // function constants and was never specialized, however every one of them has a
 // default. It is autoreleased.
-func specializedFunction(function id, constants []constant) id {
+func specializedFunction(function libraryFunctionDescriptor, constants []constant) specializedFunctionDescriptor {
 	values := newObject("MTLFunctionConstantValues")
 	for _, c := range constants {
 		check(int(c.kind) < len(constantTypes), "invalid constant type")
@@ -712,11 +720,11 @@ func specializedFunction(function id, constants []constant) id {
 		}
 		functionConstantValuesSetConstantValue(values, unsafe.Pointer(&value[0]), constantTypes[c.kind], uint(c.index))
 	}
-	fd := newObject("MTL4SpecializedFunctionDescriptor")
-	specializedFunctionDescriptorSetFunctionDescriptor(fd, function)
-	specializedFunctionDescriptorSetConstantValues(fd, values)
+	fd := newSpecializedFunctionDescriptor()
+	fd.setFunctionDescriptor(function)
+	fd.setConstantValues(values)
 	release(values)
-	return objectAutorelease(fd)
+	return specializedFunctionDescriptor(objectAutorelease(id(fd)))
 }
 
 // pipelineOptions asks for binding reflection, which rootBytes reads. It is
@@ -750,11 +758,11 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 	}
 	pool := pushPool()
 	defer pool.drain()
-	desc := newObject("MTL4ComputePipelineDescriptor")
-	defer release(desc)
-	setLabel(desc, d.Label)
-	computePipelineDescriptorSetComputeFunctionDescriptor(desc, specializedFunction(b.libraryFunction(code, d.Entry), constants))
-	computePipelineDescriptorSetOptions(desc, pipelineOptions())
+	desc := newComputePipelineDescriptor()
+	defer desc.release()
+	setLabel(id(desc), d.Label)
+	desc.setComputeFunctionDescriptor(specializedFunction(b.libraryFunction(code, d.Entry), constants))
+	desc.setOptions(pipelineOptions())
 	var nserr id
 	ps := compilerNewComputePipelineStateWithDescriptor(b.compiler, desc, 0, &nserr)
 	check(ps != 0, errorText(nserr, "compute pipeline creation failed"))
@@ -796,21 +804,21 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 
 	pool := pushPool()
 	defer pool.drain()
-	desc := newObject("MTL4RenderPipelineDescriptor")
-	defer release(desc)
-	setLabel(desc, d.Label)
+	desc := newRenderPipelineDescriptor()
+	defer desc.release()
+	setLabel(id(desc), d.Label)
 	// Both stages share one set of constants, as on Vulkan; a stage ignores any it does
 	// not declare.
-	renderPipelineDescriptorSetVertexFunctionDescriptor(desc, specializedFunction(b.libraryFunction(vertex, d.VertexEntry), constants))
+	desc.setVertexFunctionDescriptor(specializedFunction(b.libraryFunction(vertex, d.VertexEntry), constants))
 	if len(fragment) > 0 {
-		renderPipelineDescriptorSetFragmentFunctionDescriptor(desc, specializedFunction(b.libraryFunction(fragment, d.FragmentEntry), constants))
+		desc.setFragmentFunctionDescriptor(specializedFunction(b.libraryFunction(fragment, d.FragmentEntry), constants))
 	}
-	renderPipelineDescriptorSetRasterSampleCount(desc, uint(max(d.Samples, 1)))
-	computePipelineDescriptorSetOptions(desc, pipelineOptions())
-	attachments := renderPipelineDescriptorColorAttachments(desc)
+	desc.setRasterSampleCount(uint(max(d.Samples, 1)))
+	desc.setOptions(pipelineOptions())
+	attachments := desc.colorAttachments()
 	for i, f := range d.ColorFormats {
-		t := arrayObjectAtIndexedSubscript(attachments, uint(i))
-		renderPipelineColorAttachmentDescriptorSetPixelFormat(t, uint(pixelFormat(f)))
+		t := renderPipelineColorAttachmentDescriptor(arrayObjectAtIndexedSubscript(attachments, uint(i)))
+		t.setPixelFormat(uint(pixelFormat(f)))
 		var blend gpu.BlendState
 		if i < len(d.Blend) {
 			blend = d.Blend[i]
@@ -820,21 +828,21 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 		if mask == 0 {
 			mask = 15
 		}
-		renderPipelineColorAttachmentDescriptorSetWriteMask(t, (mask&1)<<3|(mask&2)<<1|(mask&4)>>1|(mask&8)>>3)
+		t.setWriteMask((mask&1)<<3 | (mask&2)<<1 | (mask&4)>>1 | (mask&8)>>3)
 		if !blend.Enable {
-			renderPipelineColorAttachmentDescriptorSetBlendingState(t, mtl4BlendStateDisabled)
+			t.setBlendingState(mtl4BlendStateDisabled)
 			continue
 		}
 		for _, f := range []gpu.BlendFactor{blend.ColorOp.Src, blend.ColorOp.Dst, blend.AlphaOp.Src, blend.AlphaOp.Dst} {
 			check(int(f) < len(blendFactors), "invalid blend factor")
 		}
-		renderPipelineColorAttachmentDescriptorSetBlendingState(t, mtl4BlendStateEnabled)
-		renderPipelineColorAttachmentDescriptorSetSourceRGBBlendFactor(t, blendFactors[blend.ColorOp.Src])
-		renderPipelineColorAttachmentDescriptorSetDestinationRGBBlendFactor(t, blendFactors[blend.ColorOp.Dst])
-		renderPipelineColorAttachmentDescriptorSetRGBBlendOperation(t, uint(blend.ColorOp.Op))
-		renderPipelineColorAttachmentDescriptorSetSourceAlphaBlendFactor(t, blendFactors[blend.AlphaOp.Src])
-		renderPipelineColorAttachmentDescriptorSetDestinationAlphaBlendFactor(t, blendFactors[blend.AlphaOp.Dst])
-		renderPipelineColorAttachmentDescriptorSetAlphaBlendOperation(t, uint(blend.AlphaOp.Op))
+		t.setBlendingState(mtl4BlendStateEnabled)
+		t.setSourceRGBBlendFactor(blendFactors[blend.ColorOp.Src])
+		t.setDestinationRGBBlendFactor(blendFactors[blend.ColorOp.Dst])
+		t.setRGBBlendOperation(uint(blend.ColorOp.Op))
+		t.setSourceAlphaBlendFactor(blendFactors[blend.AlphaOp.Src])
+		t.setDestinationAlphaBlendFactor(blendFactors[blend.AlphaOp.Dst])
+		t.setAlphaBlendOperation(uint(blend.AlphaOp.Op))
 	}
 	// Metal 4 pipeline state is no longer tied to a depth/stencil attachment format; it
 	// lives purely on the render pass descriptor. The descriptor's depth fields still
@@ -846,15 +854,15 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	// bindings() pushes the root to both stages, so the larger expectation governs.
 	reflection := computePipelineStateReflection(ps)
 	r.rootSize = max(rootBytes(renderPipelineReflectionVertexBindings(reflection)), rootBytes(renderPipelineReflectionFragmentBindings(reflection)))
-	depth := newObject("MTLDepthStencilDescriptor")
+	depth := newDepthStencilDescriptor()
 	compare := uint(mtlCompareFunctionAlways)
 	if d.DepthTest {
 		compare = uint(d.DepthCompare)
 	}
-	depthStencilDescriptorSetDepthCompareFunction(depth, compare)
-	depthStencilDescriptorSetDepthWriteEnabled(depth, d.DepthWrite)
+	depth.setDepthCompareFunction(compare)
+	depth.setDepthWriteEnabled(d.DepthWrite)
 	r.depthStencil = b.device.newDepthStencilStateWithDescriptor(depth)
-	release(depth)
+	depth.release()
 	r.topology = topologies[d.Topology]
 	r.cull = cullModes[d.CullMode]
 	r.winding = mtlWindingCounterClockwise
@@ -1042,9 +1050,9 @@ func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 	}
 	pool := pushPool()
 	defer pool.drain()
-	heap, err := newWithDescriptor(b.device.newCounterHeapWithDescriptor, "MTL4CounterHeapDescriptor", func(d id) {
-		counterHeapDescriptorSetType(d, mtl4CounterHeapTypeTimestamp)
-		counterHeapDescriptorSetCount(d, uint(n))
+	heap, err := newWithDescriptor(b.device.newCounterHeapWithDescriptor, newCounterHeapDescriptor, func(d counterHeapDescriptor) {
+		d.setType(mtl4CounterHeapTypeTimestamp)
+		d.setCount(uint(n))
 	}, "")
 	if err != nil {
 		return gpu.QueryPool{} // unsupported device: degrade to no timestamps.

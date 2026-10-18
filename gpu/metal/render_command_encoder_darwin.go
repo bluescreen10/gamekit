@@ -6,6 +6,10 @@ package metal
 // native binding functions in objc_darwin.go.
 type renderCommandEncoder id
 
+func (e renderCommandEncoder) release() {
+	release(e)
+}
+
 func (e renderCommandEncoder) endEncoding() {
 	commandEncoderEndEncoding(id(e))
 }

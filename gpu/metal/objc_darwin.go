@@ -353,31 +353,31 @@ func deviceNewFence(d device) id {
 func deviceNewCommandBuffer(d device) commandBuffer {
 	return commandBuffer(C.gk_o(o(d), selNewCommandBuffer))
 }
-func deviceNewCompilerWithDescriptor(d device, desc id, err *id) id {
+func deviceNewCompilerWithDescriptor(d device, desc compilerDescriptor, err *id) id {
 	return id(C.gk_o_op(o(d), selNewCompilerWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewResidencySetWithDescriptor(d device, desc id, err *id) id {
+func deviceNewResidencySetWithDescriptor(d device, desc residencySetDescriptor, err *id) id {
 	return id(C.gk_o_op(o(d), selNewResidencySetWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewCommandAllocatorWithDescriptor(d device, desc id, err *id) id {
+func deviceNewCommandAllocatorWithDescriptor(d device, desc commandAllocatorDescriptor, err *id) id {
 	return id(C.gk_o_op(o(d), selNewCommandAllocatorWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewArgumentTableWithDescriptor(d device, desc id, err *id) id {
+func deviceNewArgumentTableWithDescriptor(d device, desc argumentTableDescriptor, err *id) id {
 	return id(C.gk_o_op(o(d), selNewArgumentTableWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewCounterHeapWithDescriptor(d device, desc id, err *id) id {
+func deviceNewCounterHeapWithDescriptor(d device, desc counterHeapDescriptor, err *id) id {
 	return id(C.gk_o_op(o(d), selNewCounterHeapWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
 func deviceNewBufferWithLength(d device, length, options uint) id {
 	return id(C.gk_o_uu(o(d), selNewBufferWithLength, C.gk_u(length), C.gk_u(options)))
 }
-func deviceNewTextureWithDescriptor(d device, desc id) id {
+func deviceNewTextureWithDescriptor(d device, desc textureDescriptor) id {
 	return id(C.gk_o_o(o(d), selNewTextureWithDescriptor, o(desc)))
 }
-func deviceNewSamplerStateWithDescriptor(d device, desc id) id {
+func deviceNewSamplerStateWithDescriptor(d device, desc samplerDescriptor) id {
 	return id(C.gk_o_o(o(d), selNewSamplerStateWithDescriptor, o(desc)))
 }
-func deviceNewDepthStencilStateWithDescriptor(d device, desc id) id {
+func deviceNewDepthStencilStateWithDescriptor(d device, desc depthStencilDescriptor) id {
 	return id(C.gk_o_o(o(d), selNewDepthStencilStateWithDescriptor, o(desc)))
 }
 func deviceNewLibraryWithData(d device, data id, err *id) id {
@@ -422,7 +422,7 @@ func sharedEventWaitUntilSignaledValue(e id, value uint64, timeoutMS uint) bool 
 
 // MTL4ArgumentTable and its descriptor.
 
-func argumentTableDescriptorSetMaxBufferBindCount(d id, n uint) {
+func argumentTableDescriptorSetMaxBufferBindCount(d argumentTableDescriptor, n uint) {
 	C.gk_v_u(o(d), selSetMaxBufferBindCount, C.gk_u(n))
 }
 func argumentTableSetAddress(t id, address uint64, index uint) {
@@ -460,64 +460,64 @@ func textureNewTextureViewWithPixelFormat(t id, format, textureType, firstLevel,
 
 // MTLTextureDescriptor.
 
-func textureDescriptorSetTextureType(d id, v uint) {
+func textureDescriptorSetTextureType(d textureDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetTextureType, C.gk_u(v))
 }
-func textureDescriptorSetWidth(d id, v uint) {
+func textureDescriptorSetWidth(d textureDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetWidth, C.gk_u(v))
 }
-func textureDescriptorSetHeight(d id, v uint) {
+func textureDescriptorSetHeight(d textureDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetHeight, C.gk_u(v))
 }
-func textureDescriptorSetDepth(d id, v uint) {
+func textureDescriptorSetDepth(d textureDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetDepth, C.gk_u(v))
 }
-func textureDescriptorSetArrayLength(d id, v uint) {
+func textureDescriptorSetArrayLength(d textureDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetArrayLength, C.gk_u(v))
 }
-func textureDescriptorSetMipmapLevelCount(d id, v uint) {
+func textureDescriptorSetMipmapLevelCount(d textureDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetMipmapLevelCount, C.gk_u(v))
 }
-func textureDescriptorSetPixelFormat(d id, v uint) {
+func textureDescriptorSetPixelFormat(d textureDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetPixelFormat, C.gk_u(v))
 }
-func textureDescriptorSetSampleCount(d id, v uint) {
+func textureDescriptorSetSampleCount(d textureDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetSampleCount, C.gk_u(v))
 }
-func textureDescriptorSetStorageMode(d id, v uint) {
+func textureDescriptorSetStorageMode(d textureDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetStorageMode, C.gk_u(v))
 }
-func textureDescriptorSetUsage(d id, v uint) {
+func textureDescriptorSetUsage(d textureDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetUsage, C.gk_u(v))
 }
 
 // MTLSamplerDescriptor.
 
-func samplerDescriptorSetMinFilter(d id, v uint) {
+func samplerDescriptorSetMinFilter(d samplerDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetMinFilter, C.gk_u(v))
 }
-func samplerDescriptorSetMagFilter(d id, v uint) {
+func samplerDescriptorSetMagFilter(d samplerDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetMagFilter, C.gk_u(v))
 }
-func samplerDescriptorSetMipFilter(d id, v uint) {
+func samplerDescriptorSetMipFilter(d samplerDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetMipFilter, C.gk_u(v))
 }
-func samplerDescriptorSetSAddressMode(d id, v uint) {
+func samplerDescriptorSetSAddressMode(d samplerDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetSAddressMode, C.gk_u(v))
 }
-func samplerDescriptorSetTAddressMode(d id, v uint) {
+func samplerDescriptorSetTAddressMode(d samplerDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetTAddressMode, C.gk_u(v))
 }
-func samplerDescriptorSetRAddressMode(d id, v uint) {
+func samplerDescriptorSetRAddressMode(d samplerDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetRAddressMode, C.gk_u(v))
 }
-func samplerDescriptorSetCompareFunction(d id, v uint) {
+func samplerDescriptorSetCompareFunction(d samplerDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetCompareFunction, C.gk_u(v))
 }
-func samplerDescriptorSetMaxAnisotropy(d id, v uint) {
+func samplerDescriptorSetMaxAnisotropy(d samplerDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetMaxAnisotropy, C.gk_u(v))
 }
-func samplerDescriptorSetSupportArgumentBuffers(d id, v bool) {
+func samplerDescriptorSetSupportArgumentBuffers(d samplerDescriptor, v bool) {
 	C.gk_v_u(o(d), selSetSupportArgumentBuffers, b2u(v))
 }
 
@@ -542,19 +542,19 @@ func functionConstantIndex(c id) uint {
 func functionConstantName(c id) id {
 	return id(C.gk_o(o(c), selName))
 }
-func libraryFunctionDescriptorSetLibrary(d, l id) {
+func libraryFunctionDescriptorSetLibrary(d libraryFunctionDescriptor, l id) {
 	C.gk_v_o(o(d), selSetLibrary, o(l))
 }
-func libraryFunctionDescriptorSetName(d, name id) {
+func libraryFunctionDescriptorSetName(d libraryFunctionDescriptor, name id) {
 	C.gk_v_o(o(d), selSetName, o(name))
 }
 func functionConstantValuesSetConstantValue(v id, value unsafe.Pointer, dataType, index uint) {
 	C.gk_v_puu(o(v), selSetConstantValue, value, C.gk_u(dataType), C.gk_u(index))
 }
-func specializedFunctionDescriptorSetFunctionDescriptor(d, f id) {
+func specializedFunctionDescriptorSetFunctionDescriptor(d specializedFunctionDescriptor, f libraryFunctionDescriptor) {
 	C.gk_v_o(o(d), selSetFunctionDescriptor, o(f))
 }
-func specializedFunctionDescriptorSetConstantValues(d, v id) {
+func specializedFunctionDescriptorSetConstantValues(d specializedFunctionDescriptor, v id) {
 	C.gk_v_o(o(d), selSetConstantValues, o(v))
 }
 
@@ -564,58 +564,58 @@ func specializedFunctionDescriptorSetConstantValues(d, v id) {
 func pipelineOptionsSetShaderReflection(p id, v uint) {
 	C.gk_v_u(o(p), selSetShaderReflection, C.gk_u(v))
 }
-func computePipelineDescriptorSetComputeFunctionDescriptor(d, f id) {
+func computePipelineDescriptorSetComputeFunctionDescriptor(d computePipelineDescriptor, f specializedFunctionDescriptor) {
 	C.gk_v_o(o(d), selSetComputeFunctionDescriptor, o(f))
 }
-func computePipelineDescriptorSetOptions(d, p id) {
+func computePipelineDescriptorSetOptions(d computePipelineDescriptor, p id) {
 	C.gk_v_o(o(d), selSetOptions, o(p))
 }
-func renderPipelineDescriptorSetVertexFunctionDescriptor(d, f id) {
+func renderPipelineDescriptorSetVertexFunctionDescriptor(d renderPipelineDescriptor, f specializedFunctionDescriptor) {
 	C.gk_v_o(o(d), selSetVertexFunctionDescriptor, o(f))
 }
-func renderPipelineDescriptorSetFragmentFunctionDescriptor(d, f id) {
+func renderPipelineDescriptorSetFragmentFunctionDescriptor(d renderPipelineDescriptor, f specializedFunctionDescriptor) {
 	C.gk_v_o(o(d), selSetFragmentFunctionDescriptor, o(f))
 }
-func renderPipelineDescriptorSetRasterSampleCount(d id, v uint) {
+func renderPipelineDescriptorSetRasterSampleCount(d renderPipelineDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetRasterSampleCount, C.gk_u(v))
 }
-func renderPipelineDescriptorSetOptions(d, p id) {
+func renderPipelineDescriptorSetOptions(d renderPipelineDescriptor, p id) {
 	C.gk_v_o(o(d), selSetOptions, o(p))
 }
-func renderPipelineDescriptorColorAttachments(d id) id {
+func renderPipelineDescriptorColorAttachments(d renderPipelineDescriptor) id {
 	return id(C.gk_o(o(d), selColorAttachments))
 }
-func renderPipelineColorAttachmentDescriptorSetPixelFormat(a id, v uint) {
+func renderPipelineColorAttachmentDescriptorSetPixelFormat(a renderPipelineColorAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetPixelFormat, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetWriteMask(a id, v uint) {
+func renderPipelineColorAttachmentDescriptorSetWriteMask(a renderPipelineColorAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetWriteMask, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetBlendingState(a id, v uint) {
+func renderPipelineColorAttachmentDescriptorSetBlendingState(a renderPipelineColorAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetBlendingState, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetSourceRGBBlendFactor(a id, v uint) {
+func renderPipelineColorAttachmentDescriptorSetSourceRGBBlendFactor(a renderPipelineColorAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetSourceRGBBlendFactor, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetDestinationRGBBlendFactor(a id, v uint) {
+func renderPipelineColorAttachmentDescriptorSetDestinationRGBBlendFactor(a renderPipelineColorAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetDestinationRGBBlendFactor, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetRGBBlendOperation(a id, v uint) {
+func renderPipelineColorAttachmentDescriptorSetRGBBlendOperation(a renderPipelineColorAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetRgbBlendOperation, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetSourceAlphaBlendFactor(a id, v uint) {
+func renderPipelineColorAttachmentDescriptorSetSourceAlphaBlendFactor(a renderPipelineColorAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetSourceAlphaBlendFactor, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetDestinationAlphaBlendFactor(a id, v uint) {
+func renderPipelineColorAttachmentDescriptorSetDestinationAlphaBlendFactor(a renderPipelineColorAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetDestinationAlphaBlendFactor, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetAlphaBlendOperation(a id, v uint) {
+func renderPipelineColorAttachmentDescriptorSetAlphaBlendOperation(a renderPipelineColorAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetAlphaBlendOperation, C.gk_u(v))
 }
-func compilerNewComputePipelineStateWithDescriptor(c, d, options id, err *id) id {
+func compilerNewComputePipelineStateWithDescriptor(c id, d computePipelineDescriptor, options id, err *id) id {
 	return id(C.gk_o_oop(o(c), selNewComputePipelineStateWithDescriptor, o(d), o(options), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func compilerNewRenderPipelineStateWithDescriptor(c, d, options id, err *id) id {
+func compilerNewRenderPipelineStateWithDescriptor(c id, d renderPipelineDescriptor, options id, err *id) id {
 	return id(C.gk_o_oop(o(c), selNewRenderPipelineStateWithDescriptor, o(d), o(options), (*C.gk_obj)(unsafe.Pointer(err))))
 }
 func computePipelineStateMaxTotalThreadsPerThreadgroup(p id) uint {
@@ -648,10 +648,10 @@ func bindingIsUsed(b id) bool {
 func bufferBindingBufferDataSize(b id) uint {
 	return uint(C.gk_u_(o(b), selBufferDataSize))
 }
-func depthStencilDescriptorSetDepthCompareFunction(d id, v uint) {
+func depthStencilDescriptorSetDepthCompareFunction(d depthStencilDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetDepthCompareFunction, C.gk_u(v))
 }
-func depthStencilDescriptorSetDepthWriteEnabled(d id, v bool) {
+func depthStencilDescriptorSetDepthWriteEnabled(d depthStencilDescriptor, v bool) {
 	C.gk_v_u(o(d), selSetDepthWriteEnabled, b2u(v))
 }
 
@@ -716,10 +716,10 @@ func viewBounds(v id) (x, y, width, height float64) {
 
 // Timestamps: MTL4CounterHeap and its descriptor.
 
-func counterHeapDescriptorSetType(d id, v uint) {
+func counterHeapDescriptorSetType(d counterHeapDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetType, C.gk_u(v))
 }
-func counterHeapDescriptorSetCount(d id, v uint) {
+func counterHeapDescriptorSetCount(d counterHeapDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetCount, C.gk_u(v))
 }
 func counterHeapInvalidateCounterRange(h id, location, length uint) {
@@ -743,36 +743,36 @@ func commandBufferEndCommandBuffer(b commandBuffer) {
 func commandBufferComputeCommandEncoder(b commandBuffer) computeCommandEncoder {
 	return computeCommandEncoder(C.gk_o(o(b), selComputeCommandEncoder))
 }
-func commandBufferRenderCommandEncoderWithDescriptor(b commandBuffer, d id) renderCommandEncoder {
+func commandBufferRenderCommandEncoderWithDescriptor(b commandBuffer, d renderPassDescriptor) renderCommandEncoder {
 	return renderCommandEncoder(C.gk_o_o(o(b), selRenderCommandEncoderWithDescriptor, o(d)))
 }
-func renderPassDescriptorColorAttachments(d id) id {
+func renderPassDescriptorColorAttachments(d renderPassDescriptor) id {
 	return id(C.gk_o(o(d), selColorAttachments))
 }
-func renderPassDescriptorDepthAttachment(d id) id {
-	return id(C.gk_o(o(d), selDepthAttachment))
+func renderPassDescriptorDepthAttachment(d renderPassDescriptor) renderPassDepthAttachmentDescriptor {
+	return renderPassDepthAttachmentDescriptor(C.gk_o(o(d), selDepthAttachment))
 }
-func renderPassAttachmentDescriptorSetTexture(a, t id) {
+func renderPassAttachmentDescriptorSetTexture(a renderPassAttachmentDescriptor, t id) {
 	C.gk_v_o(o(a), selSetTexture, o(t))
 }
-func renderPassAttachmentDescriptorSetResolveTexture(a, t id) {
+func renderPassAttachmentDescriptorSetResolveTexture(a renderPassAttachmentDescriptor, t id) {
 	C.gk_v_o(o(a), selSetResolveTexture, o(t))
 }
-func renderPassAttachmentDescriptorSetLoadAction(a id, v uint) {
+func renderPassAttachmentDescriptorSetLoadAction(a renderPassAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetLoadAction, C.gk_u(v))
 }
-func renderPassAttachmentDescriptorSetStoreAction(a id, v uint) {
+func renderPassAttachmentDescriptorSetStoreAction(a renderPassAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetStoreAction, C.gk_u(v))
 }
-func renderPassColorAttachmentDescriptorSetClearColor(a id, red, green, blue, alpha float64) {
+func renderPassColorAttachmentDescriptorSetClearColor(a renderPassColorAttachmentDescriptor, red, green, blue, alpha float64) {
 	C.gk_v_clear(o(a), selSetClearColor, C.MTLClearColor{
 		red: C.double(red), green: C.double(green), blue: C.double(blue), alpha: C.double(alpha),
 	})
 }
-func renderPassDepthAttachmentDescriptorSetClearDepth(a id, v float64) {
+func renderPassDepthAttachmentDescriptorSetClearDepth(a renderPassDepthAttachmentDescriptor, v float64) {
 	C.gk_v_d(o(a), selSetClearDepth, C.double(v))
 }
-func renderPassDepthAttachmentDescriptorSetDepthResolveFilter(a id, v uint) {
+func renderPassDepthAttachmentDescriptorSetDepthResolveFilter(a renderPassDepthAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetDepthResolveFilter, C.gk_u(v))
 }
 

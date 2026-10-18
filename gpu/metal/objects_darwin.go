@@ -19,10 +19,14 @@ func newObject(name string) id {
 	return objectNew(class(name))
 }
 
-func release(x id) {
+func release[T ~uintptr](x T) {
 	if x != 0 {
-		objectRelease(x)
+		objectRelease(id(x))
 	}
+}
+
+func (x id) release() {
+	release(x)
 }
 
 func retain(x id) id {

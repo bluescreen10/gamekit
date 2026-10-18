@@ -6,6 +6,10 @@ package metal
 // functions in objc_darwin.go.
 type queue id
 
+func (q queue) release() {
+	release(q)
+}
+
 func (q queue) addResidencySet(set residencySet) {
 	commandQueueAddResidencySet(q, set)
 }

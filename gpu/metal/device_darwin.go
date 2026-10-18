@@ -6,6 +6,10 @@ package metal
 // dispatch through the native binding functions in objc_darwin.go.
 type device id
 
+func (d device) release() {
+	release(d)
+}
+
 func (d device) argumentBuffersSupport() uint {
 	return deviceArgumentBuffersSupport(d)
 }
@@ -42,31 +46,31 @@ func (d device) newCommandBuffer() commandBuffer {
 	return deviceNewCommandBuffer(d)
 }
 
-func (d device) newCompilerWithDescriptor(descriptor id, err *id) id {
+func (d device) newCompilerWithDescriptor(descriptor compilerDescriptor, err *id) id {
 	return deviceNewCompilerWithDescriptor(d, descriptor, err)
 }
 
 func (d device) newResidencySet() (residencySet, error) {
-	object, err := newWithDescriptor(d.newResidencySetWithDescriptor, "MTLResidencySetDescriptor",
-		func(descriptor id) {
-			setLabel(descriptor, "gamekit.residency")
+	object, err := newWithDescriptor(d.newResidencySetWithDescriptor, newResidencySetDescriptor,
+		func(descriptor residencySetDescriptor) {
+			setLabel(id(descriptor), "gamekit.residency")
 		}, "cannot create residency set")
 	return residencySet(object), err
 }
 
-func (d device) newResidencySetWithDescriptor(descriptor id, err *id) id {
+func (d device) newResidencySetWithDescriptor(descriptor residencySetDescriptor, err *id) id {
 	return deviceNewResidencySetWithDescriptor(d, descriptor, err)
 }
 
-func (d device) newCommandAllocatorWithDescriptor(descriptor id, err *id) id {
+func (d device) newCommandAllocatorWithDescriptor(descriptor commandAllocatorDescriptor, err *id) id {
 	return deviceNewCommandAllocatorWithDescriptor(d, descriptor, err)
 }
 
-func (d device) newArgumentTableWithDescriptor(descriptor id, err *id) id {
+func (d device) newArgumentTableWithDescriptor(descriptor argumentTableDescriptor, err *id) id {
 	return deviceNewArgumentTableWithDescriptor(d, descriptor, err)
 }
 
-func (d device) newCounterHeapWithDescriptor(descriptor id, err *id) id {
+func (d device) newCounterHeapWithDescriptor(descriptor counterHeapDescriptor, err *id) id {
 	return deviceNewCounterHeapWithDescriptor(d, descriptor, err)
 }
 
@@ -74,15 +78,15 @@ func (d device) newBufferWithLength(length, options uint) id {
 	return deviceNewBufferWithLength(d, length, options)
 }
 
-func (d device) newTextureWithDescriptor(descriptor id) id {
+func (d device) newTextureWithDescriptor(descriptor textureDescriptor) id {
 	return deviceNewTextureWithDescriptor(d, descriptor)
 }
 
-func (d device) newSamplerStateWithDescriptor(descriptor id) id {
+func (d device) newSamplerStateWithDescriptor(descriptor samplerDescriptor) id {
 	return deviceNewSamplerStateWithDescriptor(d, descriptor)
 }
 
-func (d device) newDepthStencilStateWithDescriptor(descriptor id) id {
+func (d device) newDepthStencilStateWithDescriptor(descriptor depthStencilDescriptor) id {
 	return deviceNewDepthStencilStateWithDescriptor(d, descriptor)
 }
 
