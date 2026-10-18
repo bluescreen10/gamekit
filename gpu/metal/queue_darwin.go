@@ -10,7 +10,7 @@ func (q queue) addResidencySet(set residencySet) {
 	commandQueueAddResidencySet(q, set)
 }
 
-func (q queue) commit(buffers *id, count uint, options id) {
+func (q queue) commit(buffers *commandBuffer, count uint, options id) {
 	commandQueueCommit(q, buffers, count, options)
 }
 

@@ -106,7 +106,8 @@ type Backend struct {
 	// is safe because every submission is fully synchronized: by the time the next
 	// Begin resets the allocator, the previous frame's GPU work has completed, which is
 	// the allocator's documented precondition for reset.
-	allocator, buffer, argTable id
+	allocator, argTable id
+	buffer              commandBuffer
 
 	// The bindless tables: texture and sampler resource IDs, indexed by slot.
 	textureTable, samplerTable id
@@ -380,7 +381,7 @@ func (b *Backend) destroy() {
 	}
 	b.resources = nil
 	for _, o := range []id{b.textureTable, b.samplerTable, b.rootArena, id(b.residencySet), b.compiler, b.event,
-		b.fence, b.allocator, b.buffer, b.argTable, id(b.queue), id(b.device)} {
+		b.fence, b.allocator, id(b.buffer), b.argTable, id(b.queue), id(b.device)} {
 		release(o)
 	}
 	*b = Backend{}

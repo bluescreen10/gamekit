@@ -350,8 +350,8 @@ func deviceNewSharedEvent(d device) id {
 func deviceNewFence(d device) id {
 	return id(C.gk_o(o(d), selNewFence))
 }
-func deviceNewCommandBuffer(d device) id {
-	return id(C.gk_o(o(d), selNewCommandBuffer))
+func deviceNewCommandBuffer(d device) commandBuffer {
+	return commandBuffer(C.gk_o(o(d), selNewCommandBuffer))
 }
 func deviceNewCompilerWithDescriptor(d device, desc id, err *id) id {
 	return id(C.gk_o_op(o(d), selNewCompilerWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
@@ -395,7 +395,7 @@ func deviceSampleTimestamps(d device, cpu, gpu *uint64) {
 func commandQueueAddResidencySet(q queue, set residencySet) {
 	C.gk_v_o(o(q), selAddResidencySet, o(set))
 }
-func commandQueueCommit(q queue, buffers *id, count uint, options id) {
+func commandQueueCommit(q queue, buffers *commandBuffer, count uint, options id) {
 	C.gk_v_puo(o(q), selCommitCountOptions, (*C.gk_obj)(unsafe.Pointer(buffers)), C.gk_u(count), o(options))
 }
 func commandQueueSignalDrawable(q queue, drawable id) {
@@ -734,17 +734,17 @@ func counterHeapResolveCounterRange(h id, location, length uint) id {
 func commandAllocatorReset(a id) {
 	C.gk_v(o(a), selReset)
 }
-func commandBufferBeginCommandBufferWithAllocator(b, a id) {
+func commandBufferBeginCommandBufferWithAllocator(b commandBuffer, a id) {
 	C.gk_v_o(o(b), selBeginCommandBufferWithAllocator, o(a))
 }
-func commandBufferEndCommandBuffer(b id) {
+func commandBufferEndCommandBuffer(b commandBuffer) {
 	C.gk_v(o(b), selEndCommandBuffer)
 }
-func commandBufferComputeCommandEncoder(b id) id {
-	return id(C.gk_o(o(b), selComputeCommandEncoder))
+func commandBufferComputeCommandEncoder(b commandBuffer) computeCommandEncoder {
+	return computeCommandEncoder(C.gk_o(o(b), selComputeCommandEncoder))
 }
-func commandBufferRenderCommandEncoderWithDescriptor(b, d id) id {
-	return id(C.gk_o_o(o(b), selRenderCommandEncoderWithDescriptor, o(d)))
+func commandBufferRenderCommandEncoderWithDescriptor(b commandBuffer, d id) renderCommandEncoder {
+	return renderCommandEncoder(C.gk_o_o(o(b), selRenderCommandEncoderWithDescriptor, o(d)))
 }
 func renderPassDescriptorColorAttachments(d id) id {
 	return id(C.gk_o(o(d), selColorAttachments))
@@ -805,88 +805,88 @@ func commandEncoderWaitForFence(e, fence id, stages uint) {
 	C.gk_v_ou(o(e), selWaitForFenceBeforeEncoderStages, o(fence), C.gk_u(stages))
 }
 
-func computeCommandEncoderSetArgumentTable(e, t id) {
+func computeCommandEncoderSetArgumentTable(e computeCommandEncoder, t id) {
 	C.gk_v_o(o(e), selSetArgumentTable, o(t))
 }
-func computeCommandEncoderSetComputePipelineState(e, p id) {
+func computeCommandEncoderSetComputePipelineState(e computeCommandEncoder, p id) {
 	C.gk_v_o(o(e), selSetComputePipelineState, o(p))
 }
-func computeCommandEncoderDispatchThreadgroups(e id, groups, threads [3]uint) {
+func computeCommandEncoderDispatchThreadgroups(e computeCommandEncoder, groups, threads [3]uint) {
 	C.gk_v_ss(o(e), selDispatchThreadgroupsThreadsPerThreadgroup, mtlSize(groups), mtlSize(threads))
 }
-func computeCommandEncoderDispatchThreadgroupsWithIndirectBuffer(e id, address uint64, threads [3]uint) {
+func computeCommandEncoderDispatchThreadgroupsWithIndirectBuffer(e computeCommandEncoder, address uint64, threads [3]uint) {
 	C.gk_v_us(o(e), selDispatchThreadgroupsWithIndirectBuffer, C.uint64_t(address), mtlSize(threads))
 }
-func computeCommandEncoderCopyFromBufferToBuffer(e, src id, srcOffset uint, dst id, dstOffset, size uint) {
+func computeCommandEncoderCopyFromBufferToBuffer(e computeCommandEncoder, src id, srcOffset uint, dst id, dstOffset, size uint) {
 	C.gk_v_ououu(o(e), selCopyFromBufferToBuffer, o(src), C.gk_u(srcOffset), o(dst), C.gk_u(dstOffset), C.gk_u(size))
 }
-func computeCommandEncoderCopyFromBufferToTexture(e, src id, srcOffset, bytesPerRow, bytesPerImage uint, size [3]uint,
+func computeCommandEncoderCopyFromBufferToTexture(e computeCommandEncoder, src id, srcOffset, bytesPerRow, bytesPerImage uint, size [3]uint,
 	dst id, slice, level uint, origin [3]uint) {
 	C.gk_v_ouuusouuz(o(e), selCopyFromBufferToTexture, o(src), C.gk_u(srcOffset), C.gk_u(bytesPerRow),
 		C.gk_u(bytesPerImage), mtlSize(size), o(dst), C.gk_u(slice), C.gk_u(level), mtlOrigin(origin))
 }
-func computeCommandEncoderCopyFromTextureToBuffer(e, src id, slice, level uint, origin, size [3]uint,
+func computeCommandEncoderCopyFromTextureToBuffer(e computeCommandEncoder, src id, slice, level uint, origin, size [3]uint,
 	dst id, dstOffset, bytesPerRow, bytesPerImage uint) {
 	C.gk_v_ouuzsouuu(o(e), selCopyFromTextureToBuffer, o(src), C.gk_u(slice), C.gk_u(level), mtlOrigin(origin),
 		mtlSize(size), o(dst), C.gk_u(dstOffset), C.gk_u(bytesPerRow), C.gk_u(bytesPerImage))
 }
-func computeCommandEncoderCopyFromTextureToTexture(e, src id, srcSlice, srcLevel uint, srcOrigin, size [3]uint,
+func computeCommandEncoderCopyFromTextureToTexture(e computeCommandEncoder, src id, srcSlice, srcLevel uint, srcOrigin, size [3]uint,
 	dst id, dstSlice, dstLevel uint, dstOrigin [3]uint) {
 	C.gk_v_ouuzsouuz(o(e), selCopyFromTextureToTexture, o(src), C.gk_u(srcSlice), C.gk_u(srcLevel),
 		mtlOrigin(srcOrigin), mtlSize(size), o(dst), C.gk_u(dstSlice), C.gk_u(dstLevel), mtlOrigin(dstOrigin))
 }
-func computeCommandEncoderWriteTimestampWithGranularity(e id, granularity uint, heap id, index uint) {
+func computeCommandEncoderWriteTimestampWithGranularity(e computeCommandEncoder, granularity uint, heap id, index uint) {
 	C.gk_v_uou(o(e), selWriteTimestampWithGranularityIntoHeap, C.gk_u(granularity), o(heap), C.gk_u(index))
 }
 
-func renderCommandEncoderSetArgumentTable(e, t id, stages uint) {
+func renderCommandEncoderSetArgumentTable(e renderCommandEncoder, t id, stages uint) {
 	C.gk_v_ou(o(e), selSetArgumentTableAtStages, o(t), C.gk_u(stages))
 }
-func renderCommandEncoderSetViewport(e id, x, y, width, height, znear, zfar float64) {
+func renderCommandEncoderSetViewport(e renderCommandEncoder, x, y, width, height, znear, zfar float64) {
 	C.gk_v_viewport(o(e), selSetViewport, C.MTLViewport{originX: C.double(x), originY: C.double(y),
 		width: C.double(width), height: C.double(height), znear: C.double(znear), zfar: C.double(zfar)})
 }
-func renderCommandEncoderSetScissorRect(e id, x, y, width, height uint) {
+func renderCommandEncoderSetScissorRect(e renderCommandEncoder, x, y, width, height uint) {
 	C.gk_v_scissor(o(e), selSetScissorRect, C.MTLScissorRect{x: C.NSUInteger(x), y: C.NSUInteger(y),
 		width: C.NSUInteger(width), height: C.NSUInteger(height)})
 }
-func renderCommandEncoderSetColorStoreAction(e id, action, index uint) {
+func renderCommandEncoderSetColorStoreAction(e renderCommandEncoder, action, index uint) {
 	C.gk_v_uu(o(e), selSetColorStoreActionAtIndex, C.gk_u(action), C.gk_u(index))
 }
-func renderCommandEncoderSetDepthStoreAction(e id, action uint) {
+func renderCommandEncoderSetDepthStoreAction(e renderCommandEncoder, action uint) {
 	C.gk_v_u(o(e), selSetDepthStoreAction, C.gk_u(action))
 }
-func renderCommandEncoderSetRenderPipelineState(e, p id) {
+func renderCommandEncoderSetRenderPipelineState(e renderCommandEncoder, p id) {
 	C.gk_v_o(o(e), selSetRenderPipelineState, o(p))
 }
-func renderCommandEncoderSetDepthStencilState(e, s id) {
+func renderCommandEncoderSetDepthStencilState(e renderCommandEncoder, s id) {
 	C.gk_v_o(o(e), selSetDepthStencilState, o(s))
 }
-func renderCommandEncoderSetCullMode(e id, v uint) {
+func renderCommandEncoderSetCullMode(e renderCommandEncoder, v uint) {
 	C.gk_v_u(o(e), selSetCullMode, C.gk_u(v))
 }
-func renderCommandEncoderSetFrontFacingWinding(e id, v uint) {
+func renderCommandEncoderSetFrontFacingWinding(e renderCommandEncoder, v uint) {
 	C.gk_v_u(o(e), selSetFrontFacingWinding, C.gk_u(v))
 }
-func renderCommandEncoderSetDepthBias(e id, bias, slope, clamp float32) {
+func renderCommandEncoderSetDepthBias(e renderCommandEncoder, bias, slope, clamp float32) {
 	C.gk_v_fff(o(e), selSetDepthBiasSlopeScaleClamp, C.float(bias), C.float(slope), C.float(clamp))
 }
-func renderCommandEncoderDrawPrimitives(e id, primitive, vertexStart, vertexCount, instanceCount, baseInstance uint) {
+func renderCommandEncoderDrawPrimitives(e renderCommandEncoder, primitive, vertexStart, vertexCount, instanceCount, baseInstance uint) {
 	C.gk_v_uuuuu(o(e), selDrawPrimitives, C.gk_u(primitive), C.gk_u(vertexStart), C.gk_u(vertexCount),
 		C.gk_u(instanceCount), C.gk_u(baseInstance))
 }
-func renderCommandEncoderDrawIndexedPrimitivesIndexCount(e id, primitive, indexCount, indexType uint, indexBuffer uint64,
+func renderCommandEncoderDrawIndexedPrimitivesIndexCount(e renderCommandEncoder, primitive, indexCount, indexType uint, indexBuffer uint64,
 	indexBufferLength, instanceCount uint, baseVertex int, baseInstance uint) {
 	C.gk_v_uuuuuuuu(o(e), selDrawIndexedPrimitivesIndexCount, C.gk_u(primitive), C.gk_u(indexCount),
 		C.gk_u(indexType), C.gk_u(indexBuffer), C.gk_u(indexBufferLength), C.gk_u(instanceCount),
 		C.NSInteger(baseVertex), C.gk_u(baseInstance))
 }
-func renderCommandEncoderDrawIndexedPrimitivesIndirectBuffer(e id, primitive, indexType uint, indexBuffer uint64,
+func renderCommandEncoderDrawIndexedPrimitivesIndirectBuffer(e renderCommandEncoder, primitive, indexType uint, indexBuffer uint64,
 	indexBufferLength uint, indirectBuffer uint64) {
 	C.gk_v_uuuuu(o(e), selDrawIndexedPrimitivesIndirectBuffer, C.gk_u(primitive), C.gk_u(indexType),
 		C.gk_u(indexBuffer), C.gk_u(indexBufferLength), C.gk_u(indirectBuffer))
 }
-func renderCommandEncoderWriteTimestampWithGranularity(e id, granularity, stage uint, heap id, index uint) {
+func renderCommandEncoderWriteTimestampWithGranularity(e renderCommandEncoder, granularity, stage uint, heap id, index uint) {
 	C.gk_v_uuou(o(e), selWriteTimestampWithGranularityAfterStage, C.gk_u(granularity), C.gk_u(stage), o(heap),
 		C.gk_u(index))
 }

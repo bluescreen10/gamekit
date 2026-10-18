@@ -48,12 +48,13 @@ type command struct {
 	// render and compute are the open encoders, at most one of them. compute also
 	// records copies: MTL4 has no separate blit encoder. computeTable says the
 	// argument table is bound to it.
-	render, compute id
-	computeTable    bool
-	pass            id
-	colors          []attachment
-	depth           *attachment
-	readOnlyDepth   bool
+	render        renderCommandEncoder
+	compute       computeCommandEncoder
+	computeTable  bool
+	pass          id
+	colors        []attachment
+	depth         *attachment
+	readOnlyDepth bool
 
 	pipeline *resource
 	// graphics and kernel are the pipelines bound to the open encoders, so a draw or
@@ -81,7 +82,7 @@ func (b *Backend) Begin() gpu.CommandBuffer {
 	// allocator/buffer/table triples, one per recording in flight.
 	check(b.open == nil, "a command buffer from this device is already open")
 	commandAllocatorReset(b.allocator)
-	commandBufferBeginCommandBufferWithAllocator(b.buffer, b.allocator)
+	b.buffer.beginCommandBufferWithAllocator(b.allocator)
 	b.open = &command{backend: b}
 	return b.open
 }
@@ -104,9 +105,9 @@ func (c *command) endCompute() {
 	if c.compute == 0 {
 		return
 	}
-	commandEncoderUpdateFence(c.compute, c.backend.fence, computeStages)
-	commandEncoderEndEncoding(c.compute)
-	release(c.compute)
+	c.compute.updateFence(c.backend.fence, computeStages)
+	c.compute.endEncoding()
+	release(id(c.compute))
 	c.compute, c.computeTable, c.kernel = 0, false, nil
 }
 
@@ -117,13 +118,14 @@ func (c *command) outside() {
 }
 
 // computeEncoder opens a compute encoder, unless one is open.
-func (c *command) computeEncoder() id {
+func (c *command) computeEncoder() computeCommandEncoder {
 	if c.compute == 0 {
 		pool := pushPool()
-		c.compute = retain(commandBufferComputeCommandEncoder(c.backend.buffer))
+		c.compute = c.backend.buffer.computeCommandEncoder()
+		retain(id(c.compute))
 		pool.drain()
 		check(c.compute != 0, "cannot create compute encoder")
-		commandEncoderWaitForFence(c.compute, c.backend.fence, computeStages)
+		c.compute.waitForFence(c.backend.fence, computeStages)
 	}
 	return c.compute
 }
@@ -179,10 +181,10 @@ func (c *command) draw(data []byte) {
 	check(c.render != 0 && p != nil && p.kind == kindGraphics, "draw requires a graphics pipeline and render pass")
 	check(!c.readOnlyDepth || !p.depthWrite, "depth-writing pipeline in read-only depth pass")
 	if c.graphics != p {
-		renderCommandEncoderSetRenderPipelineState(c.render, p.object)
-		renderCommandEncoderSetDepthStencilState(c.render, p.depthStencil)
-		renderCommandEncoderSetCullMode(c.render, p.cull)
-		renderCommandEncoderSetFrontFacingWinding(c.render, p.winding)
+		c.render.setRenderPipelineState(p.object)
+		c.render.setDepthStencilState(p.depthStencil)
+		c.render.setCullMode(p.cull)
+		c.render.setFrontFacingWinding(p.winding)
 		c.graphics = p
 	}
 	c.bindings(data)
@@ -193,11 +195,11 @@ func (c *command) dispatch(data []byte) {
 	check(c.render == 0 && p != nil && p.kind == kindCompute, "dispatch requires a compute pipeline outside a render pass")
 	e := c.computeEncoder()
 	if !c.computeTable {
-		computeCommandEncoderSetArgumentTable(e, c.backend.argTable)
+		e.setArgumentTable(c.backend.argTable)
 		c.computeTable = true
 	}
 	if c.kernel != p {
-		computeCommandEncoderSetComputePipelineState(e, p.object)
+		e.setComputePipelineState(p.object)
 		c.kernel = p
 	}
 	c.bindings(data)
@@ -215,14 +217,14 @@ func (c *command) dispatch(data []byte) {
 func (c *command) sampleQuery(q query) {
 	switch {
 	case c.render != 0:
-		renderCommandEncoderWriteTimestampWithGranularity(c.render, mtl4TimestampGranularityPrecise, mtlRenderStageFragment, q.pool.object, uint(q.index))
+		c.render.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, mtlRenderStageFragment, q.pool.object, uint(q.index))
 	case c.compute != 0:
-		computeCommandEncoderWriteTimestampWithGranularity(c.compute, mtl4TimestampGranularityPrecise, q.pool.object, uint(q.index))
+		c.compute.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, q.pool.object, uint(q.index))
 	default:
 		// No encoder open: a throwaway compute encoder places the timestamp at this exact
 		// point in the command buffer's GPU timeline.
 		e := c.computeEncoder()
-		computeCommandEncoderWriteTimestampWithGranularity(e, mtl4TimestampGranularityPrecise, q.pool.object, uint(q.index))
+		e.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, q.pool.object, uint(q.index))
 		c.endCompute()
 	}
 }
@@ -342,14 +344,14 @@ func (c *command) pauseRender() {
 	}
 	check(c.depth == nil || !c.depth.texture.memoryless, "a barrier cannot split a render pass with a transient attachment")
 	for i := range c.colors {
-		renderCommandEncoderSetColorStoreAction(c.render, mtlStoreActionStore, uint(i))
+		c.render.setColorStoreAction(mtlStoreActionStore, uint(i))
 	}
 	if c.depth != nil {
-		renderCommandEncoderSetDepthStoreAction(c.render, mtlStoreActionStore)
+		c.render.setDepthStoreAction(mtlStoreActionStore)
 	}
-	commandEncoderUpdateFence(c.render, c.backend.fence, renderStages)
-	commandEncoderEndEncoding(c.render)
-	release(c.render)
+	c.render.updateFence(c.backend.fence, renderStages)
+	c.render.endEncoding()
+	release(id(c.render))
 	c.render, c.graphics = 0, nil
 }
 
@@ -373,15 +375,16 @@ func (c *command) resumeRender(load bool) {
 		}
 		renderPassAttachmentDescriptorSetStoreAction(a, mtlStoreActionUnknown)
 	}
-	c.render = retain(commandBufferRenderCommandEncoderWithDescriptor(c.backend.buffer, d))
+	c.render = c.backend.buffer.renderCommandEncoderWithDescriptor(d)
+	retain(id(c.render))
 	check(c.render != 0, "cannot resume render pass")
-	commandEncoderWaitForFence(c.render, c.backend.fence, renderStages)
-	renderCommandEncoderSetArgumentTable(c.render, c.backend.argTable, mtlRenderStageVertex|mtlRenderStageFragment)
+	c.render.waitForFence(c.backend.fence, renderStages)
+	c.render.setArgumentTable(c.backend.argTable, mtlRenderStageVertex|mtlRenderStageFragment)
 	if c.hasViewport {
-		renderCommandEncoderSetViewport(c.render, c.viewport[0], c.viewport[1], c.viewport[2], c.viewport[3], c.viewport[4], c.viewport[5])
+		c.render.setViewport(c.viewport[0], c.viewport[1], c.viewport[2], c.viewport[3], c.viewport[4], c.viewport[5])
 	}
 	if c.hasScissor {
-		renderCommandEncoderSetScissorRect(c.render, c.scissor[0], c.scissor[1], c.scissor[2], c.scissor[3])
+		c.render.setScissorRect(c.scissor[0], c.scissor[1], c.scissor[2], c.scissor[3])
 	}
 }
 
@@ -389,14 +392,14 @@ func (c *command) EndRenderPass() {
 	c.ready()
 	check(c.render != 0, "no active render pass")
 	for i, a := range c.colors {
-		renderCommandEncoderSetColorStoreAction(c.render, a.store, uint(i))
+		c.render.setColorStoreAction(a.store, uint(i))
 	}
 	if c.depth != nil {
-		renderCommandEncoderSetDepthStoreAction(c.render, c.depth.store)
+		c.render.setDepthStoreAction(c.depth.store)
 	}
-	commandEncoderUpdateFence(c.render, c.backend.fence, renderStages)
-	commandEncoderEndEncoding(c.render)
-	release(c.render)
+	c.render.updateFence(c.backend.fence, renderStages)
+	c.render.endEncoding()
+	release(id(c.render))
 	release(c.pass)
 	c.render, c.pass, c.graphics = 0, 0, nil
 	c.colors, c.depth = c.colors[:0], nil
@@ -414,7 +417,7 @@ func (c *command) SetViewport(x, y, w, h, min, max float32) {
 	check(c.render != 0, "viewport outside render pass")
 	c.viewport = [6]float64{float64(x), float64(y), float64(w), float64(h), float64(min), float64(max)}
 	c.hasViewport = true
-	renderCommandEncoderSetViewport(c.render, c.viewport[0], c.viewport[1], c.viewport[2], c.viewport[3], c.viewport[4], c.viewport[5])
+	c.render.setViewport(c.viewport[0], c.viewport[1], c.viewport[2], c.viewport[3], c.viewport[4], c.viewport[5])
 }
 
 func (c *command) SetScissor(x, y, w, h int32) {
@@ -425,20 +428,20 @@ func (c *command) SetScissor(x, y, w, h int32) {
 	check(c.render != 0, "scissor outside render pass")
 	c.scissor = [4]uint{uint(x), uint(y), uint(w), uint(h)}
 	c.hasScissor = true
-	renderCommandEncoderSetScissorRect(c.render, c.scissor[0], c.scissor[1], c.scissor[2], c.scissor[3])
+	c.render.setScissorRect(c.scissor[0], c.scissor[1], c.scissor[2], c.scissor[3])
 }
 
 func (c *command) SetDepthBias(bias, slope, clamp float32) {
 	c.ready()
 	check(c.render != 0, "depth bias outside render pass")
-	renderCommandEncoderSetDepthBias(c.render, float32(bias), float32(slope), float32(clamp))
+	c.render.setDepthBias(float32(bias), float32(slope), float32(clamp))
 }
 
 func (c *command) Draw(data []byte, vertexCount, instanceCount, firstVertex, firstInstance uint32) {
 	c.ready()
 	c.prepareWork()
 	c.draw(data)
-	renderCommandEncoderDrawPrimitives(c.render, c.pipeline.topology, uint(firstVertex), uint(vertexCount), uint(instanceCount), uint(firstInstance))
+	c.render.drawPrimitives(c.pipeline.topology, uint(firstVertex), uint(vertexCount), uint(instanceCount), uint(firstInstance))
 }
 
 func indexType(t gpu.IndexType) uint {
@@ -458,7 +461,7 @@ func (c *command) DrawIndexed(data []byte, buf gpu.Buffer, it gpu.IndexType, ind
 	ib := c.backend.resource(uint64(buf.H), kindBuffer)
 	off := uint64(firstIndex) * uint64(it.Size())
 	check(off <= ib.size, "index offset out of bounds")
-	renderCommandEncoderDrawIndexedPrimitivesIndexCount(c.render, c.pipeline.topology, uint(indexCount), indexType(it), ib.addr+off, uint(ib.size-off), uint(instanceCount), int(vertexOffset), uint(firstInstance))
+	c.render.drawIndexedPrimitivesIndexCount(c.pipeline.topology, uint(indexCount), indexType(it), ib.addr+off, uint(ib.size-off), uint(instanceCount), int(vertexOffset), uint(firstInstance))
 }
 
 func (c *command) DrawIndexedIndirect(data []byte, buf gpu.Buffer, it gpu.IndexType, args gpu.Buffer, offset uint64, drawCount, stride uint32) {
@@ -471,7 +474,7 @@ func (c *command) DrawIndexedIndirect(data []byte, buf gpu.Buffer, it gpu.IndexT
 	ib := c.backend.resource(uint64(buf.H), kindBuffer)
 	// Metal has no multi-draw-indirect, so one draw per command is the only option.
 	for i := range uint64(drawCount) {
-		renderCommandEncoderDrawIndexedPrimitivesIndirectBuffer(c.render, c.pipeline.topology, indexType(it), ib.addr, uint(ib.size), a.addr+offset+i*uint64(stride))
+		c.render.drawIndexedPrimitivesIndirectBuffer(c.pipeline.topology, indexType(it), ib.addr, uint(ib.size), a.addr+offset+i*uint64(stride))
 	}
 }
 
@@ -479,7 +482,7 @@ func (c *command) Dispatch(data []byte, x, y, z uint32) {
 	c.ready()
 	c.prepareWork()
 	c.dispatch(data)
-	computeCommandEncoderDispatchThreadgroups(c.compute, [3]uint{uint(x), uint(y), uint(z)}, c.pipeline.group)
+	c.compute.dispatchThreadgroups([3]uint{uint(x), uint(y), uint(z)}, c.pipeline.group)
 }
 
 func (c *command) DispatchIndirect(data []byte, buf gpu.Buffer, offset uint64) {
@@ -489,7 +492,7 @@ func (c *command) DispatchIndirect(data []byte, buf gpu.Buffer, offset uint64) {
 	check(offset%4 == 0 && offset+12 <= r.size, "indirect dispatch out of bounds")
 	c.prepareWork()
 	c.dispatch(data)
-	computeCommandEncoderDispatchThreadgroupsWithIndirectBuffer(c.compute, r.addr+offset, c.pipeline.group)
+	c.compute.dispatchThreadgroupsWithIndirectBuffer(r.addr+offset, c.pipeline.group)
 }
 
 // Barrier is a full barrier. A render encoder cannot express an all-stage,
@@ -513,7 +516,7 @@ func (c *command) CopyBuffer(dst, src gpu.Buffer, dstOffset, srcOffset, size uin
 	d, s := c.backend.resource(uint64(dst.H), kindBuffer), c.backend.resource(uint64(src.H), kindBuffer)
 	check(dstOffset <= d.size && size <= d.size-dstOffset && srcOffset <= s.size && size <= s.size-srcOffset,
 		"buffer copy out of bounds")
-	computeCommandEncoderCopyFromBufferToBuffer(c.computeEncoder(), s.object, uint(srcOffset), d.object, uint(dstOffset), uint(size))
+	c.computeEncoder().copyFromBufferToBuffer(s.object, uint(srcOffset), d.object, uint(dstOffset), uint(size))
 }
 
 func (c *command) copyTexture(texture gpu.Texture, mip, layer uint32, buffer gpu.Buffer, offset uint64, upload bool) {
@@ -549,9 +552,9 @@ func (c *command) copyTexture(texture gpu.Texture, mip, layer uint32, buffer gpu
 			at := uint(offset + z*img + y*row)
 			origin := [3]uint{0, uint(y), uint(z)}
 			if upload {
-				computeCommandEncoderCopyFromBufferToTexture(e, buf.object, at, uint(row), uint(row), line, t.object, uint(layer), uint(mip), origin)
+				e.copyFromBufferToTexture(buf.object, at, uint(row), uint(row), line, t.object, uint(layer), uint(mip), origin)
 			} else {
-				computeCommandEncoderCopyFromTextureToBuffer(e, t.object, uint(layer), uint(mip), origin, line, buf.object, at, uint(row), uint(row))
+				e.copyFromTextureToBuffer(t.object, uint(layer), uint(mip), origin, line, buf.object, at, uint(row), uint(row))
 			}
 		}
 	}
@@ -577,7 +580,7 @@ func (c *command) CopyTextureToTexture(dst, src gpu.Texture, mip, layer uint32) 
 	check(uint64(layer) < s.layers, "copy layer out of bounds")
 	size := [3]uint{uint(max(s.width>>mip, 1)), uint(max(s.height>>mip, 1)), uint(max(s.depth>>mip, 1))}
 	var origin [3]uint
-	computeCommandEncoderCopyFromTextureToTexture(c.computeEncoder(), s.object, uint(layer), uint(mip), origin, size, d.object, uint(layer), uint(mip), origin)
+	c.computeEncoder().copyFromTextureToTexture(s.object, uint(layer), uint(mip), origin, size, d.object, uint(layer), uint(mip), origin)
 }
 
 func (c *command) ResetTimestamps(p gpu.QueryPool, n uint32) {
@@ -629,7 +632,7 @@ func (b *Backend) submit(c *command, drawable id) uint64 {
 	c.outside()
 	c.ends = append(c.ends, c.pending...)
 	c.pending = nil
-	commandBufferEndCommandBuffer(b.buffer)
+	b.buffer.endCommandBuffer()
 	b.eventValue++
 	s := &submission{value: b.eventValue, starts: c.starts, ends: c.ends}
 
@@ -639,7 +642,7 @@ func (b *Backend) submit(c *command, drawable id) uint64 {
 	commitOptionsAddFeedbackHandler(options, func(fb id) {
 		b.feedback <- feedbackOf(s, fb)
 	})
-	buffers := [1]id{b.buffer}
+	buffers := [1]commandBuffer{b.buffer}
 	b.queue.commit(&buffers[0], 1, options)
 	release(options)
 	// signalDrawable MUST follow the commit it is meant to cover. The queue is an ordered

@@ -38,7 +38,7 @@ func (d device) newFence() id {
 	return deviceNewFence(d)
 }
 
-func (d device) newCommandBuffer() id {
+func (d device) newCommandBuffer() commandBuffer {
 	return deviceNewCommandBuffer(d)
 }
 

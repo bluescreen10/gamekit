@@ -1,0 +1,58 @@
+//go:build darwin && cgo
+
+package metal
+
+// computeCommandEncoder is a Metal compute encoder. Its methods dispatch through
+// the native binding functions in objc_darwin.go.
+type computeCommandEncoder id
+
+func (e computeCommandEncoder) endEncoding() {
+	commandEncoderEndEncoding(id(e))
+}
+
+func (e computeCommandEncoder) updateFence(fence id, stages uint) {
+	commandEncoderUpdateFence(id(e), fence, stages)
+}
+
+func (e computeCommandEncoder) waitForFence(fence id, stages uint) {
+	commandEncoderWaitForFence(id(e), fence, stages)
+}
+
+func (e computeCommandEncoder) setArgumentTable(table id) {
+	computeCommandEncoderSetArgumentTable(e, table)
+}
+
+func (e computeCommandEncoder) setComputePipelineState(pipeline id) {
+	computeCommandEncoderSetComputePipelineState(e, pipeline)
+}
+
+func (e computeCommandEncoder) dispatchThreadgroups(groups, threads [3]uint) {
+	computeCommandEncoderDispatchThreadgroups(e, groups, threads)
+}
+
+func (e computeCommandEncoder) dispatchThreadgroupsWithIndirectBuffer(address uint64, threads [3]uint) {
+	computeCommandEncoderDispatchThreadgroupsWithIndirectBuffer(e, address, threads)
+}
+
+func (e computeCommandEncoder) copyFromBufferToBuffer(src id, srcOffset uint, dst id, dstOffset, size uint) {
+	computeCommandEncoderCopyFromBufferToBuffer(e, src, srcOffset, dst, dstOffset, size)
+}
+
+func (e computeCommandEncoder) copyFromBufferToTexture(src id, srcOffset, bytesPerRow, bytesPerImage uint, size [3]uint,
+	dst id, slice, level uint, origin [3]uint) {
+	computeCommandEncoderCopyFromBufferToTexture(e, src, srcOffset, bytesPerRow, bytesPerImage, size, dst, slice, level, origin)
+}
+
+func (e computeCommandEncoder) copyFromTextureToBuffer(src id, slice, level uint, origin, size [3]uint,
+	dst id, dstOffset, bytesPerRow, bytesPerImage uint) {
+	computeCommandEncoderCopyFromTextureToBuffer(e, src, slice, level, origin, size, dst, dstOffset, bytesPerRow, bytesPerImage)
+}
+
+func (e computeCommandEncoder) copyFromTextureToTexture(src id, srcSlice, srcLevel uint, srcOrigin, size [3]uint,
+	dst id, dstSlice, dstLevel uint, dstOrigin [3]uint) {
+	computeCommandEncoderCopyFromTextureToTexture(e, src, srcSlice, srcLevel, srcOrigin, size, dst, dstSlice, dstLevel, dstOrigin)
+}
+
+func (e computeCommandEncoder) writeTimestampWithGranularity(granularity uint, heap id, index uint) {
+	computeCommandEncoderWriteTimestampWithGranularity(e, granularity, heap, index)
+}
