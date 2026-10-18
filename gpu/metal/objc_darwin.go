@@ -52,7 +52,7 @@ type id uintptr
 // sel is a registered selector.
 type sel = C.gk_sel
 
-func o(x id) C.gk_obj {
+func o[T ~uintptr](x T) C.gk_obj {
 	return C.gk_obj(x)
 }
 
@@ -392,7 +392,7 @@ func deviceSampleTimestamps(d id, cpu, gpu *uint64) {
 
 // MTL4CommandQueue, MTLResidencySet, MTLSharedEvent.
 
-func commandQueueAddResidencySet(q, set id) {
+func commandQueueAddResidencySet(q id, set residencySet) {
 	C.gk_v_o(o(q), selAddResidencySet, o(set))
 }
 func commandQueueCommit(q id, buffers *id, count uint, options id) {
@@ -404,16 +404,16 @@ func commandQueueSignalDrawable(q, drawable id) {
 func commandQueueSignalEvent(q, event id, value uint64) {
 	C.gk_v_ou(o(q), selSignalEventValue, o(event), C.gk_u(value))
 }
-func residencySetAddAllocation(s, allocation id) {
+func residencySetAddAllocation(s residencySet, allocation id) {
 	C.gk_v_o(o(s), selAddAllocation, o(allocation))
 }
-func residencySetRemoveAllocation(s, allocation id) {
+func residencySetRemoveAllocation(s residencySet, allocation id) {
 	C.gk_v_o(o(s), selRemoveAllocation, o(allocation))
 }
-func residencySetCommit(s id) {
+func residencySetCommit(s residencySet) {
 	C.gk_v(o(s), selCommit)
 }
-func residencySetRequestResidency(s id) {
+func residencySetRequestResidency(s residencySet) {
 	C.gk_v(o(s), selRequestResidency)
 }
 func sharedEventWaitUntilSignaledValue(e id, value uint64, timeoutMS uint) bool {

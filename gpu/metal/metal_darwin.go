@@ -94,8 +94,9 @@ type Backend struct {
 	// users is how many Inits have no Destroy yet: the device lives while any do.
 	users int
 
-	device, queue, compiler, residencySet id
-	event, fence                          id
+	device, queue, compiler id
+	residencySet            residencySet
+	event, fence            id
 	// The command allocator, command buffer and argument table are created once and
 	// reused every frame rather than recreated each Begin. That reuse is exactly what
 	// MTL4's allocator model exists to make cheap — recreating them per frame was
@@ -285,10 +286,7 @@ func (b *Backend) init() error {
 	if b.compiler, err = newWithDescriptor(b.device, deviceNewCompilerWithDescriptor, "MTL4CompilerDescriptor", nil, "cannot create Metal 4 compiler"); err != nil {
 		return err
 	}
-	if b.residencySet, err = newWithDescriptor(b.device, deviceNewResidencySetWithDescriptor, "MTLResidencySetDescriptor",
-		func(d id) {
-			setLabel(d, "gamekit.residency")
-		}, "cannot create residency set"); err != nil {
+	if b.residencySet, err = newResidencySet(b.device); err != nil {
 		return err
 	}
 	commandQueueAddResidencySet(b.queue, b.residencySet)
@@ -319,8 +317,8 @@ func (b *Backend) init() error {
 	if b.textureTable == 0 || b.samplerTable == 0 {
 		return fmt.Errorf("cannot allocate argument tables")
 	}
-	b.enrol(b.textureTable)
-	b.enrol(b.samplerTable)
+	b.residencySet.enrol(b.textureTable)
+	b.residencySet.enrol(b.samplerTable)
 	b.textureIDs = unsafe.Slice((*uint64)(bufferContents(b.textureTable)), textureSlots)
 	b.samplerIDs = unsafe.Slice((*uint64)(bufferContents(b.samplerTable)), samplerSlots)
 	textures := bufferGPUAddress(b.textureTable)
@@ -379,25 +377,11 @@ func (b *Backend) destroy() {
 		release(r.drawable)
 	}
 	b.resources = nil
-	for _, o := range []id{b.textureTable, b.samplerTable, b.rootArena, b.residencySet, b.compiler, b.event,
+	for _, o := range []id{b.textureTable, b.samplerTable, b.rootArena, id(b.residencySet), b.compiler, b.event,
 		b.fence, b.allocator, b.buffer, b.argTable, b.queue, b.device} {
 		release(o)
 	}
 	*b = Backend{}
-}
-
-// enrol adds one allocation to the residency set and commits it immediately, so the
-// allocation is resident before any command buffer can reference it. MTL4 has no
-// useResources: at all — this set is the only mechanism, not an optimization over one.
-func (b *Backend) enrol(o id) {
-	residencySetAddAllocation(b.residencySet, o)
-	residencySetCommit(b.residencySet)
-	residencySetRequestResidency(b.residencySet)
-}
-
-func (b *Backend) unenrol(o id) {
-	residencySetRemoveAllocation(b.residencySet, o)
-	residencySetCommit(b.residencySet)
 }
 
 // add registers a native object under a new handle.
@@ -439,7 +423,7 @@ func (b *Backend) Alloc(size uint64, mem gpu.MemoryType, label string) gpu.Buffe
 	r.object = deviceNewBufferWithLength(b.device, uint(size), options)
 	h := b.add(r)
 	setLabel(r.object, label)
-	b.enrol(r.object)
+	b.residencySet.enrol(r.object)
 	r.addr = uint64(bufferGPUAddress(r.object))
 	if !r.private {
 		r.ptr = bufferContents(r.object)
@@ -467,7 +451,7 @@ func (b *Backend) release(h gpu.Handle) {
 		}
 	}
 	if r.kind == kindBuffer || r.kind == kindTexture && !r.memoryless {
-		b.unenrol(r.object)
+		b.residencySet.unenrol(r.object)
 	}
 	b.releaseLater(r.object)
 	b.releaseLater(r.depthStencil)
@@ -563,7 +547,7 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	// Residency sets do not take memoryless textures, which have no memory to make
 	// resident.
 	if !r.memoryless {
-		b.enrol(r.object)
+		b.residencySet.enrol(r.object)
 	}
 	var index uint32
 	if d.Usage&(gpu.TextureSampled|gpu.TextureStorage) != 0 {
@@ -601,7 +585,7 @@ func (b *Backend) TextureView(t gpu.Texture, k gpu.TextureKind, firstMip, mipCou
 	v.object = textureNewTextureViewWithPixelFormat(src.object, src.format, v.textureType, uint(firstMip), uint(mipCount), uint(firstLayer), uint(layerCount))
 	h := b.add(&v)
 	if !v.memoryless {
-		b.enrol(v.object)
+		b.residencySet.enrol(v.object)
 	}
 	return gpu.Texture{H: gpu.Handle(h), Index: b.slot(&v)}
 }

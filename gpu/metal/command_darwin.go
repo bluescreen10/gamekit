@@ -146,7 +146,7 @@ func (c *command) rootSlot(data []byte) uint64 {
 		b.rootArena, b.rootArenaLen = arena, size
 		b.rootArenaPtr = bufferContents(arena)
 		b.rootArenaAddr = uint64(bufferGPUAddress(arena))
-		b.enrol(arena)
+		b.residencySet.enrol(arena)
 		// The new arena starts empty: draws already recorded keep the old one's slots.
 		off = 0
 	}
@@ -715,7 +715,7 @@ func (b *Backend) completed(value uint64) {
 			release(o)
 		}
 		for _, o := range b.retired {
-			b.unenrol(o)
+			b.residencySet.unenrol(o)
 			release(o)
 		}
 		b.released, b.retired = b.released[:0], b.retired[:0]
