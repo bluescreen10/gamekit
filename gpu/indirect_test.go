@@ -54,8 +54,8 @@ func TestComputeIndirect(t *testing.T) {
 	root.verts = vb.Addr
 
 	comp := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{
-		Shader: fillIndirect,
-		Label:  "fill-indirect",
+		Shader: fillIndirect, WorkgroupSize: [3]uint32{1, 1, 1},
+		Label: "fill-indirect",
 	})
 	gfx := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: triangleVert, FragmentShader: triangleFrag,

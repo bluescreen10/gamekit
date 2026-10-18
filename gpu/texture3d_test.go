@@ -126,7 +126,7 @@ func TestStorageImage3DWrittenByCompute(t *testing.T) {
 	tex := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture3D, Width: n, Height: n, Depth: n,
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureStorage | gpu.TextureTransfer, Label: "volume"})
 	readback := b.Alloc(n*n*n*4, gpu.MemoryHost, "readback")
-	comp := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: storageWrite3D, Label: "storage-write-3d"})
+	comp := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: storageWrite3D, WorkgroupSize: [3]uint32{4, 4, 4}, Label: "storage-write-3d"})
 
 	cmd := b.Begin()
 	cmd.SetPipeline(comp)

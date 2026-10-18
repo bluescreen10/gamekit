@@ -581,6 +581,14 @@ type PipelineDescriptor struct {
 type ComputePipelineDescriptor struct {
 	Shader []byte
 	Entry  string // empty => backend default (Vulkan: "main", Metal: "main0")
+	// WorkgroupSize is the number of invocations in one workgroup, in x, y and z: the
+	// local_size the shader declares (`layout(local_size_x = 64) in;` in GLSL). Every
+	// dimension must be at least 1. Dispatch counts workgroups, not invocations.
+	//
+	// The pipeline must state it because Metal does not keep it in a compiled kernel:
+	// Metal takes the size with each dispatch. Vulkan reads it from the shader, and
+	// creating the pipeline panics if the two sizes are different.
+	WorkgroupSize [3]uint32
 	// Constants sets the shader's specialization constants as the pipeline is created —
 	// `layout(constant_id = N) const` in GLSL, `[[function_constant(N)]]` in Metal — much
 	// as WebGPU's pipeline constants do. The value is fixed for the pipeline's lifetime, so
@@ -770,8 +778,17 @@ type CommandBuffer interface {
 	DrawIndexed(data []byte, indexBuf Buffer, indexType IndexType, indexCount, instanceCount, firstIndex uint32, vertexOffset int32, firstInstance uint32)
 	DrawIndexedIndirect(data []byte, indexBuf Buffer, indexType IndexType, args Buffer, argsOffset uint64, drawCount, stride uint32)
 
-	// Compute. Dimensions are workgroup counts; local sizes belong to the shader.
+	// Dispatch runs the compute pipeline set last in x by y by z workgroups. Each
+	// workgroup has the pipeline's WorkgroupSize invocations, so a dimension runs its
+	// count times its size: to cover n items with a size of 64, dispatch (n+63)/64
+	// workgroups. The last workgroup can be partly outside the n items, so the shader
+	// must check gl_GlobalInvocationID against n.
 	Dispatch(data []byte, x, y, z uint32)
+	// DispatchIndirect is Dispatch with the workgroup counts read from args at offset,
+	// when the GPU runs the command: three uint32s, x, y and z, 12 bytes in all. offset
+	// must be a multiple of 4, and the 12 bytes must be inside args. The counts are
+	// workgroups, not invocations, so a shader that writes them must divide by the
+	// WorkgroupSize of the pipeline that reads them.
 	DispatchIndirect(data []byte, args Buffer, offset uint64)
 
 	// Barrier orders producer→consumer stages on the queue (no resource lists). It

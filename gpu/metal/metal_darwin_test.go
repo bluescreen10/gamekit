@@ -4,7 +4,6 @@ package metal_test
 
 import (
 	"bytes"
-	"encoding/binary"
 	"testing"
 	"unsafe"
 
@@ -12,15 +11,6 @@ import (
 	"github.com/bluescreen10/gamekit/gpu/metal"
 	"github.com/bluescreen10/gamekit/utils"
 )
-
-func encodedShader(code []byte, group [3]uint32) []byte {
-	out := make([]byte, 20, len(code)+20)
-	copy(out, "PIXMTL01")
-	for i, n := range group {
-		binary.LittleEndian.PutUint32(out[8+i*4:], n)
-	}
-	return append(out, code...)
-}
 
 func device(t *testing.T) *metal.Backend {
 	t.Helper()
@@ -91,7 +81,7 @@ func TestDispatchIndirectAndEntries(t *testing.T) {
  using namespace metal;
  struct Root {device atomic_uint *value;}; struct Push {device Root *root;};
  kernel void increment(constant Push &p [[buffer(0)]]) {atomic_fetch_add_explicit(p.root->value,1u,memory_order_relaxed);}`)
-	p := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: encodedShader(source, [3]uint32{4, 2, 1}), Entry: "increment"})
+	p := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: source, WorkgroupSize: [3]uint32{4, 2, 1}, Entry: "increment"})
 	value := b.Alloc(4, gpu.MemoryHost, "counter")
 	*(*uint32)(value.Ptr) = 0
 	root := b.Alloc(8, gpu.MemoryHost, "root")
@@ -155,7 +145,7 @@ func TestTimestampsAroundEachDispatchMeasureIt(t *testing.T) {
   for (int k = 0; k < 20000; k++) { x = fma(x, 1.000001, 0.5); }
   p.out[i] = x;
  }`)
-	pipeline := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: encodedShader(source, [3]uint32{64, 1, 1}), Entry: "spin"})
+	pipeline := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: source, WorkgroupSize: [3]uint32{64, 1, 1}, Entry: "spin"})
 	defer b.DestroyPipeline(pipeline)
 	const groups = 1024
 	out := b.Alloc(groups*64*4, gpu.MemoryDevice, "out")

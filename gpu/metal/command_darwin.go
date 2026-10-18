@@ -484,10 +484,11 @@ func (c *command) Dispatch(data []byte, x, y, z uint32) {
 
 func (c *command) DispatchIndirect(data []byte, buf gpu.Buffer, offset uint64) {
 	c.ready()
-	c.prepareWork()
-	c.dispatch(data)
+	// The workgroup counts are three uint32s, at a multiple of 4 inside the buffer.
 	r := c.backend.resource(uint64(buf.H), kindBuffer)
 	check(offset%4 == 0 && offset+12 <= r.size, "indirect dispatch out of bounds")
+	c.prepareWork()
+	c.dispatch(data)
 	computeCommandEncoderDispatchThreadgroupsWithIndirectBuffer(c.compute, r.addr+offset, c.pipeline.group)
 }
 

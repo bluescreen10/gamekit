@@ -661,27 +661,6 @@ func entry(s string) string {
 	return s
 }
 
-// shaderCode unwraps Pix's precompiled Metal artifact format. Translation and
-// metallib compilation happen in the application at build time; the backend only
-// consumes the resulting bytes and the local threadgroup dimensions stored beside
-// them. Raw MSL and metallib bytes remain valid and default to a 1x1x1 group.
-func shaderCode(data []byte) ([]byte, [3]uint32, error) {
-	group := [3]uint32{1, 1, 1}
-	if !bytes.HasPrefix(data, []byte("PIXMTL01")) {
-		return data, group, nil
-	}
-	if len(data) < 20 {
-		return nil, group, fmt.Errorf("truncated Metal shader header")
-	}
-	for i := range group {
-		group[i] = binary.LittleEndian.Uint32(data[8+i*4:])
-		if group[i] == 0 {
-			return nil, group, fmt.Errorf("zero workgroup dimension")
-		}
-	}
-	return data[20:], group, nil
-}
-
 // shaderLibrary loads a metallib, or compiles MSL source. The library is autoreleased.
 func (b *Backend) shaderLibrary(code []byte) id {
 	check(len(code) > 0, "empty shader")
@@ -774,9 +753,9 @@ func rootBytes(bindings id) uint64 {
 }
 
 func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pipeline {
-	code, group, err := shaderCode(d.Shader)
-	if err != nil {
-		panic("metal: " + err.Error())
+	code, group := d.Shader, d.WorkgroupSize
+	if group[0] == 0 || group[1] == 0 || group[2] == 0 {
+		panic(fmt.Sprintf("metal: CreateComputePipeline(%q): every WorkgroupSize dimension must be at least 1, not %v", d.Label, group))
 	}
 	constants, err := b.resolveConstants(d.Constants, stageShader{code: code, entry: d.Entry})
 	if err != nil {
@@ -818,14 +797,7 @@ var cullModes = [...]uint{
 }
 
 func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline {
-	vertex, _, err := shaderCode(d.VertexShader)
-	if err != nil {
-		panic(err)
-	}
-	fragment, _, err := shaderCode(d.FragmentShader)
-	if err != nil {
-		panic(err)
-	}
+	vertex, fragment := d.VertexShader, d.FragmentShader
 	check(len(d.ColorFormats) <= 8, "at most 8 color targets")
 	check(int(d.Topology) < len(topologies) && int(d.CullMode) < len(cullModes), "invalid topology or cull mode")
 	constants, err := b.resolveConstants(d.Constants,

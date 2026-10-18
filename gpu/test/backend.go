@@ -193,7 +193,10 @@ func (b *Backend) DestroySampler(s gpu.Sampler) {
 // Pipelines
 // ----------------------------------------------------------------------------
 
-func (b *Backend) CreateComputePipeline(gpu.ComputePipelineDescriptor) gpu.Pipeline {
+func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pipeline {
+	if size := d.WorkgroupSize; size[0] == 0 || size[1] == 0 || size[2] == 0 {
+		panic(fmt.Sprintf("test: CreateComputePipeline(%q): every WorkgroupSize dimension must be at least 1, not %v", d.Label, size))
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	h := b.newHandleLocked()

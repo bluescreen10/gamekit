@@ -111,8 +111,8 @@ func renderInstances(b gpu.Backend, size int, offsets [][3]float32, eye vec3) (p
 		drawables: drawables.Addr, visible: visible.Addr}
 
 	cull := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{
-		Shader: instancedComp,
-		Label:  "cull",
+		Shader: instancedComp, WorkgroupSize: [3]uint32{64, 1, 1},
+		Label: "cull",
 	})
 	draw := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: instancedVert, FragmentShader: meshFrag,

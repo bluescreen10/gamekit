@@ -400,6 +400,10 @@ func (c *cmdBuffer) Dispatch(data []byte, x, y, z uint32) {
 }
 
 func (c *cmdBuffer) DispatchIndirect(data []byte, args gpu.Buffer, offset uint64) {
+	// The workgroup counts are three uint32s, at a multiple of 4 inside the buffer.
+	if size := c.backend.buffers[uint64(args.H)].size; offset%4 != 0 || offset+12 > size {
+		panic(fmt.Sprintf("vulkan: DispatchIndirect: offset %d does not hold 12 aligned bytes in a %d-byte buffer", offset, size))
+	}
 	c.initializeImages()
 	c.push(data)
 	vkCmdDispatchIndirect(c.cb, c.backend.bufRaw(args), vkDeviceSize(offset))

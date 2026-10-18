@@ -186,7 +186,7 @@ func TestPipelinesGetDistinctValidHandles(t *testing.T) {
 
 	g := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{Label: "g"})
 	defer b.DestroyPipeline(g)
-	c := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Label: "c"})
+	c := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{WorkgroupSize: [3]uint32{1, 1, 1}, Label: "c"})
 	defer b.DestroyPipeline(c)
 
 	if !g.IsValid() || !c.IsValid() {
@@ -291,4 +291,15 @@ func TestSwapchainKeepsItsPresentMode(t *testing.T) {
 			t.Errorf("PresentMode() = %v after SetPresentMode(%v), want %v", got, mode, mode)
 		}
 	}
+}
+
+// A compute pipeline without a workgroup size fails here as it does on a real device.
+func TestComputePipelineWithoutWorkgroupSizePanics(t *testing.T) {
+	b := newBackend(t)
+	defer func() {
+		if recover() == nil {
+			t.Fatal("CreateComputePipeline without a WorkgroupSize did not panic")
+		}
+	}()
+	b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Label: "no-size"})
 }

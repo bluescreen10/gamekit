@@ -40,7 +40,7 @@ func TestStorageImageWrittenThenSampled(t *testing.T) {
 	root := b.Alloc(64, gpu.MemoryHost, "root")
 	*(*texRoot)(root.Ptr) = texRoot{verts: vbuf.Addr, tex: image.Index, samp: samp.Index}
 
-	comp := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: storageWrite, Label: "storage-write"})
+	comp := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: storageWrite, WorkgroupSize: [3]uint32{8, 8, 1}, Label: "storage-write"})
 	pipe := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: texturedVert, FragmentShader: texturedFrag,
 		Topology: gpu.TopologyTriangles, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},

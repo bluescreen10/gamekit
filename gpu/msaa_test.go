@@ -227,7 +227,7 @@ func TestMultisampledTexturesReadPerSample(t *testing.T) {
 		DepthFormat: gpu.FormatDepth32F, DepthTest: true, DepthWrite: true, DepthCompare: gpu.CompareAlways,
 		Samples: msaaSamples, CullMode: gpu.CullNone, Label: "msaa-depth-triangle",
 	})
-	reader := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: readSamples, Label: "read-samples"})
+	reader := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: readSamples, WorkgroupSize: [3]uint32{8, 8, 1}, Label: "read-samples"})
 	rootAddr := whiteTriangleRoot(b)
 	const sampleBytes = 8
 	samples := b.Alloc(msaaSize*msaaSize*msaaSamples*sampleBytes, gpu.MemoryHost, "samples")

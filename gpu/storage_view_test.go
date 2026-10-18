@@ -19,7 +19,7 @@ func TestStorageViewWritesOneMip(t *testing.T) {
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureSampled | gpu.TextureStorage | gpu.TextureTransfer, Label: "mips"})
 	view := b.TextureView(tex, gpu.Texture2D, 1, 1, 0, 1)
 	readback := b.Alloc(4*4*4, gpu.MemoryHost, "readback")
-	comp := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: storageWrite, Label: "storage-write"})
+	comp := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: storageWrite, WorkgroupSize: [3]uint32{8, 8, 1}, Label: "storage-write"})
 
 	cmd := b.Begin()
 	cmd.SetPipeline(comp)

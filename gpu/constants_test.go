@@ -26,7 +26,7 @@ func readComputeConstants(t *testing.T, constants map[string]float64) shaderCons
 	out := b.Alloc(uint64(unsafe.Sizeof(shaderConstants{})), gpu.MemoryHost, "constants")
 	defer b.Free(out)
 	pipe := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{
-		Shader: constantsComp, Constants: constants, Label: "constants",
+		Shader: constantsComp, WorkgroupSize: [3]uint32{1, 1, 1}, Constants: constants, Label: "constants",
 	})
 	defer b.DestroyPipeline(pipe)
 
@@ -118,7 +118,7 @@ func TestComputeConstantsRejected(t *testing.T) {
 				}
 			}()
 			b.CreateComputePipeline(gpu.ComputePipelineDescriptor{
-				Shader: constantsComp, Constants: tc.constants, Label: "constants",
+				Shader: constantsComp, WorkgroupSize: [3]uint32{1, 1, 1}, Constants: tc.constants, Label: "constants",
 			})
 		})
 	}

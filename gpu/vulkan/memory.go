@@ -12,8 +12,9 @@ import (
 
 // bufferEntry is the backend-side record for a Buffer handle.
 type bufferEntry struct {
-	buf vkBuffer
-	mem vkDeviceMemory
+	buf  vkBuffer
+	mem  vkDeviceMemory
+	size uint64
 }
 
 // bufferUsage is every usage the bindless model needs, so a single Alloc serves as
@@ -34,6 +35,7 @@ func (b *Backend) Alloc(size uint64, mem gpu.MemoryType, label string) gpu.Buffe
 	}
 
 	h := b.nextID.Add(1)
+	e.size = size
 	b.buffers[h] = e
 	return gpu.Buffer{Addr: addr, Ptr: ptr, Size: size, H: gpu.Handle(h)}
 }

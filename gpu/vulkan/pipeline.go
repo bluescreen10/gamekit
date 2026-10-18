@@ -53,6 +53,19 @@ func (b *Backend) CreateComputePipeline(desc gpu.ComputePipelineDescriptor) gpu.
 	if desc.Entry == "" {
 		desc.Entry = "main"
 	}
+	if size := desc.WorkgroupSize; size[0] == 0 || size[1] == 0 || size[2] == 0 {
+		panic(fmt.Sprintf("vulkan: CreateComputePipeline(%q): every WorkgroupSize dimension must be at least 1, not %v", desc.Label, size))
+	}
+	// Vulkan dispatches with the size in the shader; Metal with the stated one. They
+	// must agree, or the pipeline would behave differently on each.
+	declared, fixed, err := localSize(desc.Shader, desc.Entry)
+	if err != nil {
+		panic(fmt.Sprintf("vulkan: CreateComputePipeline(%q): %v", desc.Label, err))
+	}
+	if fixed && declared != desc.WorkgroupSize {
+		panic(fmt.Sprintf("vulkan: CreateComputePipeline(%q): WorkgroupSize %v is not the shader's local size %v",
+			desc.Label, desc.WorkgroupSize, declared))
+	}
 	constants, err := resolveConstants(desc.Constants, desc.Shader)
 	if err != nil {
 		panic(fmt.Sprintf("vulkan: CreateComputePipeline(%q): %v", desc.Label, err))
