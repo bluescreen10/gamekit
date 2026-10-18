@@ -63,13 +63,17 @@ func errorText(err id, fallback string) string {
 }
 
 // setLabel names a Metal object for tools like the Metal debugger.
-func setLabel(x id, label string) {
+func setLabel[T ~uintptr](x T, label string) {
 	if label == "" {
 		return
 	}
 	s := nsString(label)
-	objectSetLabel(x, s)
+	objectSetLabel(id(x), s)
 	release(s)
+}
+
+func (x id) setLabel(label string) {
+	setLabel(x, label)
 }
 
 // unsafeBytes is n bytes of native memory at p+off.

@@ -8,6 +8,10 @@ func (d renderPipelineDescriptor) release() {
 	release(d)
 }
 
+func (d renderPipelineDescriptor) setLabel(label string) {
+	setLabel(d, label)
+}
+
 func newRenderPipelineDescriptor() renderPipelineDescriptor {
 	return renderPipelineDescriptor(newObject("MTL4RenderPipelineDescriptor"))
 }

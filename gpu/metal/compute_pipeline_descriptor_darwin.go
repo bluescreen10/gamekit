@@ -8,6 +8,10 @@ func (d computePipelineDescriptor) release() {
 	release(d)
 }
 
+func (d computePipelineDescriptor) setLabel(label string) {
+	setLabel(d, label)
+}
+
 func newComputePipelineDescriptor() computePipelineDescriptor {
 	return computePipelineDescriptor(newObject("MTL4ComputePipelineDescriptor"))
 }

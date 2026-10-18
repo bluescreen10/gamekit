@@ -8,6 +8,10 @@ func (d samplerDescriptor) release() {
 	release(d)
 }
 
+func (d samplerDescriptor) setLabel(label string) {
+	setLabel(d, label)
+}
+
 func newSamplerDescriptor() samplerDescriptor {
 	return samplerDescriptor(newObject("MTLSamplerDescriptor"))
 }

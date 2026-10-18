@@ -432,7 +432,7 @@ func (b *Backend) Alloc(size uint64, mem gpu.MemoryType, label string) gpu.Buffe
 	object := b.device.newBufferWithLength(uint(size), options)
 	r.object = id(object)
 	h := b.add(r)
-	setLabel(r.object, label)
+	object.setLabel(label)
 	b.residencySet.enrol(r.object)
 	r.addr = object.gpuAddress()
 	if !r.private {
@@ -553,7 +553,7 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	desc.setUsage(usage)
 	r.object = b.device.newTextureWithDescriptor(desc)
 	h := b.add(r)
-	setLabel(r.object, d.Label)
+	r.object.setLabel(d.Label)
 	// Residency sets do not take memoryless textures, which have no memory to make
 	// resident.
 	if !r.memoryless {
@@ -638,7 +638,7 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	desc.setCompareFunction(uint(d.Compare))
 	desc.setMaxAnisotropy(uint(max(d.MaxAnisotropy, 1)))
 	desc.setSupportArgumentBuffers(true)
-	setLabel(id(desc), d.Label)
+	desc.setLabel(d.Label)
 	r := &resource{kind: kindSampler, object: b.device.newSamplerStateWithDescriptor(desc)}
 	h := b.add(r)
 	return gpu.Sampler{H: gpu.Handle(h), Index: b.slot(r)}
@@ -759,7 +759,7 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 	defer pool.drain()
 	desc := newComputePipelineDescriptor()
 	defer desc.release()
-	setLabel(id(desc), d.Label)
+	desc.setLabel(d.Label)
 	desc.setComputeFunctionDescriptor(specializedFunction(b.libraryFunction(code, d.Entry), constants))
 	desc.setOptions(pipelineOptions())
 	var nserr id
@@ -805,7 +805,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	defer pool.drain()
 	desc := newRenderPipelineDescriptor()
 	defer desc.release()
-	setLabel(id(desc), d.Label)
+	desc.setLabel(d.Label)
 	// Both stages share one set of constants, as on Vulkan; a stage ignores any it does
 	// not declare.
 	desc.setVertexFunctionDescriptor(specializedFunction(b.libraryFunction(vertex, d.VertexEntry), constants))

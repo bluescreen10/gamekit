@@ -57,7 +57,7 @@ func (d device) newCompilerWithDescriptor(descriptor compilerDescriptor, err *id
 func (d device) newResidencySet() (residencySet, error) {
 	object, err := newWithDescriptor(d.newResidencySetWithDescriptor, newResidencySetDescriptor,
 		func(descriptor residencySetDescriptor) {
-			setLabel(id(descriptor), "gamekit.residency")
+			descriptor.setLabel("gamekit.residency")
 		}, "cannot create residency set")
 	return residencySet(object), err
 }
