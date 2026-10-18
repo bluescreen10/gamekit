@@ -26,7 +26,7 @@ func (d device) maxArgumentBufferSamplerCount() uint {
 	return deviceMaxArgumentBufferSamplerCount(d)
 }
 
-func (d device) newMTL4CommandQueue() id {
+func (d device) newMTL4CommandQueue() queue {
 	return deviceNewMTL4CommandQueue(d)
 }
 

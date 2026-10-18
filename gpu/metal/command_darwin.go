@@ -640,16 +640,16 @@ func (b *Backend) submit(c *command, drawable id) uint64 {
 		b.feedback <- feedbackOf(s, fb)
 	})
 	buffers := [1]id{b.buffer}
-	commandQueueCommit(b.queue, &buffers[0], 1, options)
+	b.queue.commit(&buffers[0], 1, options)
 	release(options)
 	// signalDrawable MUST follow the commit it is meant to cover. The queue is an ordered
 	// timeline, so signalling first marks the drawable ready ahead of the work that draws
 	// into it, and the present below then shows whatever the frame happened to contain at
 	// that moment — torn or half-drawn frames under load.
 	if drawable != 0 {
-		commandQueueSignalDrawable(b.queue, drawable)
+		b.queue.signalDrawable(drawable)
 	}
-	commandQueueSignalEvent(b.queue, b.event, s.value)
+	b.queue.signalEvent(b.event, s.value)
 	if drawable != 0 {
 		drawablePresent(drawable)
 	}

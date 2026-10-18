@@ -94,10 +94,11 @@ type Backend struct {
 	// users is how many Inits have no Destroy yet: the device lives while any do.
 	users int
 
-	device          device
-	queue, compiler id
-	residencySet    residencySet
-	event, fence    id
+	device       device
+	queue        queue
+	compiler     id
+	residencySet residencySet
+	event, fence id
 	// The command allocator, command buffer and argument table are created once and
 	// reused every frame rather than recreated each Begin. That reuse is exactly what
 	// MTL4's allocator model exists to make cheap — recreating them per frame was
@@ -290,7 +291,7 @@ func (b *Backend) init() error {
 	if b.residencySet, err = b.device.newResidencySet(); err != nil {
 		return err
 	}
-	commandQueueAddResidencySet(b.queue, b.residencySet)
+	b.queue.addResidencySet(b.residencySet)
 	b.resources = map[uint64]*resource{}
 	b.fences = map[uint64]uint64{}
 	b.feedback = make(chan feedback, 16)
@@ -379,7 +380,7 @@ func (b *Backend) destroy() {
 	}
 	b.resources = nil
 	for _, o := range []id{b.textureTable, b.samplerTable, b.rootArena, id(b.residencySet), b.compiler, b.event,
-		b.fence, b.allocator, b.buffer, b.argTable, b.queue, id(b.device)} {
+		b.fence, b.allocator, b.buffer, b.argTable, id(b.queue), id(b.device)} {
 		release(o)
 	}
 	*b = Backend{}

@@ -341,8 +341,8 @@ func deviceMaxBufferLength(d device) uint {
 func deviceMaxArgumentBufferSamplerCount(d device) uint {
 	return uint(C.gk_u_(o(d), selMaxArgumentBufferSamplerCount))
 }
-func deviceNewMTL4CommandQueue(d device) id {
-	return id(C.gk_o(o(d), selNewMTL4CommandQueue))
+func deviceNewMTL4CommandQueue(d device) queue {
+	return queue(C.gk_o(o(d), selNewMTL4CommandQueue))
 }
 func deviceNewSharedEvent(d device) id {
 	return id(C.gk_o(o(d), selNewSharedEvent))
@@ -392,16 +392,16 @@ func deviceSampleTimestamps(d device, cpu, gpu *uint64) {
 
 // MTL4CommandQueue, MTLResidencySet, MTLSharedEvent.
 
-func commandQueueAddResidencySet(q id, set residencySet) {
+func commandQueueAddResidencySet(q queue, set residencySet) {
 	C.gk_v_o(o(q), selAddResidencySet, o(set))
 }
-func commandQueueCommit(q id, buffers *id, count uint, options id) {
+func commandQueueCommit(q queue, buffers *id, count uint, options id) {
 	C.gk_v_puo(o(q), selCommitCountOptions, (*C.gk_obj)(unsafe.Pointer(buffers)), C.gk_u(count), o(options))
 }
-func commandQueueSignalDrawable(q, drawable id) {
+func commandQueueSignalDrawable(q queue, drawable id) {
 	C.gk_v_o(o(q), selSignalDrawable, o(drawable))
 }
-func commandQueueSignalEvent(q, event id, value uint64) {
+func commandQueueSignalEvent(q queue, event id, value uint64) {
 	C.gk_v_ou(o(q), selSignalEventValue, o(event), C.gk_u(value))
 }
 func residencySetAddAllocation(s residencySet, allocation id) {
