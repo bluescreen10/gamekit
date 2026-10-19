@@ -3,7 +3,7 @@
 package metal
 
 // mtl4CommandQueue is a Metal command queue. Its methods dispatch through the native binding
-// functions in objc_darwin.go.
+// functions in objc.go.
 type mtl4CommandQueue id
 
 func (q mtl4CommandQueue) release() {

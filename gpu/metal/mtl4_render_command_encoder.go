@@ -3,7 +3,7 @@
 package metal
 
 // mtl4RenderCommandEncoder is a Metal render encoder. Its methods dispatch through the
-// native binding functions in objc_darwin.go.
+// native binding functions in objc.go.
 type mtl4RenderCommandEncoder id
 
 func (e mtl4RenderCommandEncoder) release() {

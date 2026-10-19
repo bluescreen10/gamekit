@@ -4,6 +4,8 @@ package metal_test
 
 import (
 	"bytes"
+	"fmt"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -172,12 +174,22 @@ func TestTimestampsAroundEachDispatchMeasureIt(t *testing.T) {
 
 func TestInvalidShader(t *testing.T) {
 	b := device(t)
+
 	defer func() {
-		if recover() == nil {
+		value := recover()
+		if value == nil {
 			t.Fatal("invalid shader accepted")
 		}
+
+		if message := fmt.Sprint(value); !strings.Contains(message, "error:") {
+			t.Fatalf("invalid shader panic = %q, want a compiler diagnostic", message)
+		}
 	}()
-	b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: []byte("not valid MSL")})
+
+	b.CreateComputePipeline(gpu.ComputePipelineDescriptor{
+		Shader:        []byte("not valid MSL"),
+		WorkgroupSize: [3]uint32{1, 1, 1},
+	})
 }
 
 func TestRenderPassSplit(t *testing.T) {

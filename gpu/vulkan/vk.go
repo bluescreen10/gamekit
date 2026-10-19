@@ -60,7 +60,7 @@ import "unsafe"
 // package's only contact with C: the rest of the package calls Vulkan through the
 // names declared here, and never imports "C". The wrappers were generated from the
 // Vulkan headers' prototypes; add new ones by hand in the same form. They follow one
-// naming convention, shared with gpu/metal's objc_darwin.go, so that a C name always
+// naming convention, shared with gpu/metal's objc.go, so that a C name always
 // gives its Go name:
 //
 //   - A function keeps its C name, unexported as Vulkan's names already are, and takes

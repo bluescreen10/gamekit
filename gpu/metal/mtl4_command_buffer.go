@@ -3,7 +3,7 @@
 package metal
 
 // mtl4CommandBuffer is a Metal command buffer. Its methods dispatch through the native
-// binding functions in objc_darwin.go.
+// binding functions in objc.go.
 type mtl4CommandBuffer id
 
 func (b mtl4CommandBuffer) release() {

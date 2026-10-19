@@ -3,7 +3,7 @@
 package metal
 
 // mtl4ComputeCommandEncoder is a Metal compute encoder. Its methods dispatch through
-// the native binding functions in objc_darwin.go.
+// the native binding functions in objc.go.
 type mtl4ComputeCommandEncoder id
 
 func (e mtl4ComputeCommandEncoder) release() {

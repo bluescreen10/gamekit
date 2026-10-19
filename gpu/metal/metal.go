@@ -371,8 +371,8 @@ func (b *Backend) init() error {
 }
 
 // newWithDescriptor creates an object with a new, configured descriptor.
-// The creation function reports an NSError on failure.
-func newWithDescriptor[T, R ~uintptr](create func(descriptor T, err *id) R, descriptor func() T, configure func(T), failure string) (R, error) {
+// It releases the descriptor after the creation function returns.
+func newWithDescriptor[T, R ~uintptr](create func(descriptor T) (R, error), descriptor func() T, configure func(T)) (R, error) {
 	d := descriptor()
 	defer release(d)
 
@@ -380,13 +380,7 @@ func newWithDescriptor[T, R ~uintptr](create func(descriptor T, err *id) R, desc
 		configure(d)
 	}
 
-	var nserr id
-	x := create(d, &nserr)
-	if x == 0 {
-		return 0, fmt.Errorf("%s", errorText(nserr, failure))
-	}
-
-	return x, nil
+	return create(d)
 }
 
 // Destroy removes a user (see gpu.Backend.Init), and with the last releases the device.
@@ -754,10 +748,10 @@ func (b *Backend) shaderLibrary(code []byte) mtlLibrary {
 	check(len(code) > 0, "empty shader")
 
 	var lib mtlLibrary
-	var nserr id
+	var err error
 	if bytes.HasPrefix(code, []byte("MTLB")) {
 		data := dispatchDataCreate(unsafe.Pointer(&code[0]), len(code))
-		lib = b.device.newLibraryWithData(data, &nserr)
+		lib, err = b.device.newLibraryWithData(data)
 		release(data)
 	} else {
 		check(len(code) < 4 || binary.LittleEndian.Uint32(code) != 0x07230203,
@@ -769,13 +763,15 @@ func (b *Backend) shaderLibrary(code []byte) mtlLibrary {
 		options := newObject("MTLCompileOptions")
 		compileOptionsSetLanguageVersion(options, mtlLanguageVersion3_0)
 
-		lib = b.device.newLibraryWithSource(source, options, &nserr)
+		lib, err = b.device.newLibraryWithSource(source, options)
 
 		release(options)
 		release(source)
 	}
 
-	check(lib != 0, errorText(nserr, "shader compilation failed"))
+	if err != nil {
+		panic("metal: " + err.Error())
+	}
 
 	return mtlLibrary(objectAutorelease(id(lib)))
 }
@@ -880,9 +876,10 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 	desc.setComputeFunctionDescriptor(specializedFunction(b.libraryFunction(code, d.Entry), constants))
 	desc.setOptions(pipelineOptions())
 
-	var nserr id
-	ps := b.compiler.newComputePipelineState(desc, 0, &nserr)
-	check(ps != 0, errorText(nserr, "compute pipeline creation failed"))
+	ps, err := b.compiler.newComputePipelineState(desc, 0)
+	if err != nil {
+		panic("metal: " + err.Error())
+	}
 
 	r := &resource{kind: kindCompute, object: id(ps)}
 	r.group = [3]uint{uint(group[0]), uint(group[1]), uint(group[2])}
@@ -981,9 +978,10 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	// Metal 4 pipeline state is no longer tied to a depth/stencil attachment format; it
 	// lives purely on the render pass descriptor. The descriptor's depth fields still
 	// select the depth-stencil state's compare and write behavior below.
-	var nserr id
-	ps := b.compiler.newRenderPipelineState(desc, 0, &nserr)
-	check(ps != 0, errorText(nserr, "render pipeline creation failed"))
+	ps, err := b.compiler.newRenderPipelineState(desc, 0)
+	if err != nil {
+		panic("metal: " + err.Error())
+	}
 
 	r := &resource{kind: kindGraphics, object: id(ps), depthWrite: d.DepthWrite}
 
@@ -1229,7 +1227,7 @@ func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 	heap, err := newWithDescriptor(b.device.newCounterHeap, newMTL4CounterHeapDescriptor, func(d mtl4CounterHeapDescriptor) {
 		d.setType(mtl4CounterHeapTypeTimestamp)
 		d.setCount(uint(n))
-	}, "")
+	})
 	if err != nil {
 		return gpu.QueryPool{} // unsupported device: degrade to no timestamps.
 	}

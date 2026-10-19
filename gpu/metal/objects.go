@@ -13,7 +13,7 @@ import (
 // selector components in order, without colons. Helpers such as clone and enrol
 // perform additional work.
 
-// Helpers over the messages in objc_darwin.go.
+// Helpers over the messages in objc.go.
 
 func class(name string) id {
 	return objcGetClass(name)
