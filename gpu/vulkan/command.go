@@ -87,28 +87,28 @@ func (b *Backend) Submit(cmd gpu.CommandBuffer) gpu.Fence {
 	c := cmd.(*cmdBuffer)
 	vkEndCommandBuffer(c.cb)
 	fi := vkFenceCreateInfo{sType: vkStructureTypeFenceCreateInfo}
-	var fence vkFence
-	if r := vkCreateFence(b.device, &fi, nil, &fence); r != vkSuccess {
+	var nativeFence vkFence
+	if r := vkCreateFence(b.device, &fi, nil, &nativeFence); r != vkSuccess {
 		panic(fmt.Sprintf("vulkan: create fence failed (%d)", int(r)))
 	}
-	if r := b.submit(c.cb, nil, nil, fence); r != vkSuccess {
+	if r := b.submit(c.cb, nil, nil, nativeFence); r != vkSuccess {
 		panic(fmt.Sprintf("vulkan: submit failed (%d)", int(r)))
 	}
 	h := b.nextID.Add(1)
-	b.fences[h] = fenceEntry{cb: c.cb, fence: fence}
-	return gpu.Fence{H: gpu.Handle(h)}
+	b.fences[h] = fenceEntry{cb: c.cb, fence: nativeFence}
+	return &fence{reference{b, h}}
 }
 
 // Wait blocks until the fence signals, then frees the command buffer + fence.
 func (b *Backend) Wait(f gpu.Fence) {
-	e, ok := b.fences[uint64(f.H)]
+	e, ok := b.fences[b.handle(f)]
 	if !ok {
 		return
 	}
 	vkWaitForFences(b.device, 1, &e.fence, vkTrue, math.MaxUint64)
 	vkDestroyFence(b.device, e.fence, nil)
 	vkFreeCommandBuffers(b.device, b.cmdPool, 1, &e.cb)
-	delete(b.fences, uint64(f.H))
+	delete(b.fences, b.handle(f))
 }
 
 // submit submits cb to the queue, signalling fence. A non-nil acquire is waited on
@@ -150,11 +150,11 @@ func (b *Backend) WaitIdle() {
 // --- CommandBuffer ---
 
 func (b *Backend) tex(t gpu.Texture) *textureEntry {
-	return b.textures[uint64(t.H)]
+	return b.textures[b.handle(t)]
 }
 
 func (b *Backend) bufRaw(buf gpu.Buffer) vkBuffer {
-	return b.buffers[uint64(buf.H)].buf
+	return b.buffers[b.handle(buf)].buf
 }
 
 func aspectOf(e *textureEntry) vkImageAspectFlags {
@@ -244,7 +244,7 @@ func (c *cmdBuffer) BeginRenderPass(rt gpu.RenderTargets) {
 		if e.transient {
 			checkTransientAttachment(ca.Load, ca.Store)
 		}
-		if ca.ResolveTexture.IsValid() {
+		if ca.ResolveTexture != nil && ca.ResolveTexture.IsValid() {
 			if ca.Store != gpu.StoreDontCare {
 				panic("vulkan: BeginRenderPass: a resolved color attachment cannot also store its samples")
 			}
@@ -275,7 +275,7 @@ func (c *cmdBuffer) BeginRenderPass(rt gpu.RenderTargets) {
 		if e.transient {
 			checkTransientAttachment(rt.Depth.Load, rt.Depth.Store)
 		}
-		if rt.Depth.ResolveTexture.IsValid() {
+		if rt.Depth.ResolveTexture != nil && rt.Depth.ResolveTexture.IsValid() {
 			if rt.Depth.Store != gpu.StoreDontCare {
 				panic("vulkan: BeginRenderPass: a resolved depth attachment cannot also store its samples")
 			}
@@ -328,7 +328,7 @@ func (c *cmdBuffer) EndRenderPass() {
 // SetPipeline binds a pipeline to its own bind point (graphics or compute),
 // recorded when the pipeline was created.
 func (c *cmdBuffer) SetPipeline(p gpu.Pipeline) {
-	e := c.backend.pipelines[uint64(p.H)]
+	e := c.backend.pipelines[c.backend.handle(p)]
 	vkCmdBindPipeline(c.cb, e.bindPoint, e.pipe)
 	if e.bindPoint == vkPipelineBindPointGraphics {
 		// Depth bias is always a dynamic pipeline state (see CreateGraphicsPipeline); Vulkan
@@ -401,7 +401,7 @@ func (c *cmdBuffer) Dispatch(data []byte, x, y, z uint32) {
 
 func (c *cmdBuffer) DispatchIndirect(data []byte, args gpu.Buffer, offset uint64) {
 	// The workgroup counts are three uint32s, at a multiple of 4 inside the buffer.
-	if size := c.backend.buffers[uint64(args.H)].size; offset%4 != 0 || offset+12 > size {
+	if size := c.backend.buffers[c.backend.handle(args)].size; offset%4 != 0 || offset+12 > size {
 		panic(fmt.Sprintf("vulkan: DispatchIndirect: offset %d does not hold 12 aligned bytes in a %d-byte buffer", offset, size))
 	}
 	c.initializeImages()

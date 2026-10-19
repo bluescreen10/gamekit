@@ -18,7 +18,7 @@ func texture(t *testing.T, b gpu.Backend, desc gpu.TextureDescriptor) gpu.Textur
 		b.DestroyTexture(tex)
 	})
 
-	if !tex.IsValid() {
+	if tex == nil || !tex.IsValid() {
 		t.Fatal("CreateTexture returned an invalid texture")
 	}
 
@@ -94,7 +94,7 @@ func TestTextureFormatCopies(t *testing.T) {
 			cmd.CopyTextureToBuffer(readback, tex, 0, 0)
 			b.Wait(b.Submit(cmd))
 
-			got := unsafe.Slice((*byte)(readback.Ptr), readback.Size)
+			got := unsafe.Slice((*byte)(readback.Ptr()), readback.Size())
 			want = append(want, bytes.Repeat([]byte{0xa5}, 16)...)
 			if !bytes.Equal(got, want) {
 				t.Fatalf("texture copy = %v, want %v (including unchanged guard)", got, want)
@@ -164,7 +164,7 @@ func TestTextureSubresources(t *testing.T) {
 
 			for _, r := range resources {
 				t.Run(fmt.Sprintf("layer=%d/mip=%d", r.layer, r.mip), func(t *testing.T) {
-					got := unsafe.Slice((*byte)(r.readback.Ptr), r.readback.Size)
+					got := unsafe.Slice((*byte)(r.readback.Ptr()), r.readback.Size())
 					if !bytes.Equal(got, r.want) {
 						t.Fatalf("subresource = %v, want %v", got, r.want)
 					}
@@ -190,7 +190,7 @@ func TestTextureCreatedDuringRecording(t *testing.T) {
 	cmd.CopyTextureToBuffer(readback, tex, 0, 0)
 	b.Wait(b.Submit(cmd))
 
-	if got := unsafe.Slice((*byte)(readback.Ptr), 16); !bytes.Equal(got, want) {
+	if got := unsafe.Slice((*byte)(readback.Ptr()), 16); !bytes.Equal(got, want) {
 		t.Fatalf("texture created after Begin = %v, want %v", got, want)
 	}
 }

@@ -39,7 +39,7 @@ func TestIndexTypesAgree(t *testing.T) {
 	}
 
 	vb := b.Alloc(uint64(len(corners))*24, gpu.MemoryHost, "verts")
-	vs := unsafe.Slice((*vertex3D)(vb.Ptr), len(corners))
+	vs := unsafe.Slice((*vertex3D)(vb.Ptr()), len(corners))
 	for i, c := range corners {
 		vs[i] = vertex3D{c[0], c[1], c[2], c[0] + 0.5, c[1] + 0.5, c[2] + 0.5}
 	}
@@ -47,10 +47,10 @@ func TestIndexTypesAgree(t *testing.T) {
 	// The same indices, in both widths. Every value here fits in 16 bits, so the two
 	// buffers describe exactly the same geometry.
 	ib32 := b.Alloc(uint64(len(indices))*4, gpu.MemoryHost, "indices32")
-	copy(unsafe.Slice((*uint32)(ib32.Ptr), len(indices)), indices)
+	copy(unsafe.Slice((*uint32)(ib32.Ptr()), len(indices)), indices)
 
 	ib16 := b.Alloc(uint64(len(indices))*2, gpu.MemoryHost, "indices16")
-	dst16 := unsafe.Slice((*uint16)(ib16.Ptr), len(indices))
+	dst16 := unsafe.Slice((*uint16)(ib16.Ptr()), len(indices))
 	for i, v := range indices {
 		dst16[i] = uint16(v)
 	}
@@ -59,9 +59,9 @@ func TestIndexTypesAgree(t *testing.T) {
 	view := lookAtRH(vec3{2, 2, 3}, vec3{0, 0, 0}, vec3{0, 1, 0})
 
 	rb := b.Alloc(128, gpu.MemoryHost, "root")
-	root := (*meshRoot)(rb.Ptr)
+	root := (*meshRoot)(rb.Ptr())
 	root.mvp = mul4x4(proj, view)
-	root.verts = vb.Addr
+	root.verts = vb.Addr()
 
 	pipe := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: meshVert, FragmentShader: meshFrag,
@@ -87,7 +87,7 @@ func TestIndexTypesAgree(t *testing.T) {
 			Depth: &gpu.DepthAttachment{Texture: depth, Load: gpu.LoadClear, Store: gpu.StoreKeep, Clear: 1.0},
 		})
 		cmd.SetPipeline(pipe)
-		rootAddr := rb.Addr
+		rootAddr := rb.Addr()
 		cmd.SetViewport(0, 0, size, size, 0, 1)
 		cmd.SetScissor(0, 0, size, size)
 		cmd.DrawIndexed(utils.ToBytes(&rootAddr), ib, it, count, 1, firstIndex, 0, 0)
@@ -97,7 +97,7 @@ func TestIndexTypesAgree(t *testing.T) {
 		b.Wait(b.Submit(cmd))
 
 		out := make([]byte, size*size*4)
-		copy(out, unsafe.Slice((*byte)(readback.Ptr), size*size*4))
+		copy(out, unsafe.Slice((*byte)(readback.Ptr()), size*size*4))
 		return out
 	}
 

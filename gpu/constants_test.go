@@ -32,10 +32,10 @@ func readComputeConstants(t *testing.T, constants map[string]float64) shaderCons
 
 	cmd := b.Begin()
 	cmd.SetPipeline(pipe)
-	addr := out.Addr
+	addr := out.Addr()
 	cmd.Dispatch(utils.ToBytes(&addr), 1, 1, 1)
 	b.Wait(b.Submit(cmd))
-	return *(*shaderConstants)(out.Ptr)
+	return *(*shaderConstants)(out.Ptr())
 }
 
 // TestComputeConstantsDefault: a pipeline that sets no constants runs its shader with
@@ -156,7 +156,7 @@ func drawConstantsQuad(t *testing.T, constants map[string]float64) (left, right 
 	cmd.CopyTextureToBuffer(readback, target, 0, 0)
 	b.Wait(b.Submit(cmd))
 
-	pixels := unsafe.Slice((*byte)(readback.Ptr), size*size*4)
+	pixels := unsafe.Slice((*byte)(readback.Ptr()), size*size*4)
 	pixel := func(x, y int) [4]byte {
 		i := (y*size + x) * 4
 		return [4]byte(pixels[i : i+4])

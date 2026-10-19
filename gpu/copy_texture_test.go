@@ -22,7 +22,7 @@ func TestCopyTextureToTexture(t *testing.T) {
 	// mip 0 is 4x4 and mip 1 2x2; every byte of each differs from every other.
 	mipBytes := [2]int{4 * 4 * 4, 2 * 2 * 4}
 	staging := b.Alloc(uint64(mipBytes[0]+mipBytes[1]), gpu.MemoryHost, "staging")
-	texels := unsafe.Slice((*byte)(staging.Ptr), mipBytes[0]+mipBytes[1])
+	texels := unsafe.Slice((*byte)(staging.Ptr()), mipBytes[0]+mipBytes[1])
 	for i := range texels {
 		texels[i] = byte(i + 1)
 	}
@@ -47,7 +47,7 @@ func TestCopyTextureToTexture(t *testing.T) {
 				start = mipBytes[0]
 			}
 			want := texels[start : start+mipBytes[mip]]
-			got := unsafe.Slice((*byte)(readbacks[mip].Ptr), mipBytes[mip])
+			got := unsafe.Slice((*byte)(readbacks[mip].Ptr()), mipBytes[mip])
 			if !bytes.Equal(got, want) {
 				t.Errorf("CopyTextureToTexture mip %d: read back %v, want %v", mip, got, want)
 			}

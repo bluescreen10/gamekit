@@ -17,7 +17,7 @@ func sampler(t *testing.T, b gpu.Backend, desc gpu.SamplerDescriptor) gpu.Sample
 		b.DestroySampler(s)
 	})
 
-	if !s.IsValid() {
+	if s == nil || !s.IsValid() {
 		t.Fatal("CreateSampler returned an invalid sampler")
 	}
 
@@ -42,9 +42,9 @@ func samplePixelsWithShader(t *testing.T, b gpu.Backend, tex gpu.Texture, s gpu.
 		{-1, -1, uv[0], uv[1]}, {1, 1, uv[2], uv[3]}, {-1, 1, uv[0], uv[3]},
 	}
 	vb := allocation(t, b, uint64(len(vertices))*16, gpu.MemoryHost)
-	copy(unsafe.Slice((*texVertex)(vb.Ptr), len(vertices)), vertices)
+	copy(unsafe.Slice((*texVertex)(vb.Ptr()), len(vertices)), vertices)
 	root := allocation(t, b, 16, gpu.MemoryHost)
-	*(*texRoot)(root.Ptr) = texRoot{verts: vb.Addr, tex: tex.Index, samp: s.Index}
+	*(*texRoot)(root.Ptr()) = texRoot{verts: vb.Addr(), tex: tex.Index(), samp: s.Index()}
 	readback := allocation(t, b, size*size*4, gpu.MemoryHost)
 	pipeline := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: texturedVert, FragmentShader: fragment,
@@ -61,14 +61,14 @@ func samplePixelsWithShader(t *testing.T, b gpu.Backend, tex gpu.Texture, s gpu.
 	cmd.SetPipeline(pipeline)
 	cmd.SetViewport(0, 0, size, size, 0, 1)
 	cmd.SetScissor(0, 0, size, size)
-	addr := root.Addr
+	addr := root.Addr()
 	cmd.Draw(utils.ToBytes(&addr), 6, 1, 0, 0)
 	cmd.EndRenderPass()
 	cmd.Barrier(gpu.StageColorOutput, gpu.StageTransfer, 0)
 	cmd.CopyTextureToBuffer(readback, color, 0, 0)
 	b.Wait(b.Submit(cmd))
 
-	return append([][4]byte(nil), unsafe.Slice((*[4]byte)(readback.Ptr), size*size)...)
+	return append([][4]byte(nil), unsafe.Slice((*[4]byte)(readback.Ptr()), size*size)...)
 }
 
 func wantPixels(t *testing.T, pixels [][4]byte, want [4]byte, tolerance int) {
@@ -90,7 +90,7 @@ func TestSamplerAddressModes(t *testing.T) {
 	})
 	colors := [4][4]byte{{255, 0, 0, 255}, {0, 255, 0, 255}, {0, 0, 255, 255}, {255, 255, 255, 255}}
 	upload := allocation(t, b, 16, gpu.MemoryHost)
-	copy(unsafe.Slice((*[4]byte)(upload.Ptr), 4), colors[:])
+	copy(unsafe.Slice((*[4]byte)(upload.Ptr()), 4), colors[:])
 	cmd := b.Begin()
 	cmd.CopyBufferToTexture(tex, 0, 0, upload, 0)
 	cmd.Barrier(gpu.StageTransfer, gpu.StageFragment, 0)
@@ -165,7 +165,7 @@ func TestSamplerMipFiltering(t *testing.T) {
 		count := (8 >> mip) * (8 >> mip)
 		upload := allocation(t, b, uint64(count*4), gpu.MemoryHost)
 		for i := range count {
-			*(*[4]byte)(unsafe.Add(upload.Ptr, i*4)) = color
+			*(*[4]byte)(unsafe.Add(upload.Ptr(), i*4)) = color
 		}
 		uploads = append(uploads, upload)
 	}
@@ -209,7 +209,7 @@ func TestSampledTextureViews(t *testing.T) {
 		count := (4 >> (i % 2)) * (4 >> (i % 2))
 		upload := allocation(t, b, uint64(count*4), gpu.MemoryHost)
 		for texel := range count {
-			*(*[4]byte)(unsafe.Add(upload.Ptr, texel*4)) = color
+			*(*[4]byte)(unsafe.Add(upload.Ptr(), texel*4)) = color
 		}
 		uploads = append(uploads, upload)
 	}
@@ -224,11 +224,11 @@ func TestSampledTextureViews(t *testing.T) {
 	var views []gpu.Texture
 	for i := range colors {
 		view := b.TextureView(parent, gpu.Texture2D, uint32(i%2), 1, uint32(i/2), 1)
-		if !view.IsValid() {
+		if view == nil || !view.IsValid() {
 			t.Fatal("TextureView returned an invalid texture")
 		}
 		for _, other := range views {
-			if view.Index == other.Index {
+			if view.Index() == other.Index() {
 				t.Fatal("distinct live views share a bindless index")
 			}
 		}

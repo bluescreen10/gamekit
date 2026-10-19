@@ -24,7 +24,7 @@ func TestBufferWriteCopiesAtOffset(t *testing.T) {
 	buf.Write([]byte{1, 2, 3, 4}, 0)
 	buf.Write([]byte{5, 6}, 4)
 
-	got := unsafe.Slice((*byte)(buf.Ptr), buf.Size)
+	got := unsafe.Slice((*byte)(buf.Ptr()), buf.Size())
 	want := []byte{1, 2, 3, 4, 5, 6, untouched, untouched}
 	for i := range want {
 		if got[i] != want[i] {
@@ -36,7 +36,9 @@ func TestBufferWriteCopiesAtOffset(t *testing.T) {
 // TestBufferWriteEmptyIsNoop: writing zero bytes must not panic even against a
 // buffer with no mapped pointer, since there is nothing to bounds-check.
 func TestBufferWriteEmptyIsNoop(t *testing.T) {
-	var buf gpu.Buffer // zero value: Ptr is nil, Size is 0
+	b := testBackend(t)
+	buf := b.Alloc(4, gpu.MemoryDevice, "unmapped empty write")
+	defer b.Free(buf)
 	buf.Write(nil, 0)
 }
 
@@ -72,14 +74,14 @@ func TestBufferWriteOffsetOverrunPanics(t *testing.T) {
 	buf.Write([]byte{1, 2, 3}, 6)
 }
 
-// TestBufferWriteNoPtrPanics: a MemoryDevice buffer (or a zero Buffer) has no mapped
+// TestBufferWriteNoPtrPanics: a MemoryDevice buffer has no mapped
 // pointer at all, so writing to it must panic rather than dereference nil.
 func TestBufferWriteNoPtrPanics(t *testing.T) {
 	b := testBackend(t)
 
 	buf := b.Alloc(64, gpu.MemoryDevice, "device-only")
 	defer b.Free(buf)
-	if buf.Ptr != nil {
+	if buf.Ptr() != nil {
 		t.Fatal("MemoryDevice allocation unexpectedly has a mapped pointer")
 	}
 

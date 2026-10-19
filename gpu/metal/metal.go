@@ -79,7 +79,7 @@ type resource struct {
 
 	// Swapchains: the acquired drawable and its texture's handle.
 	drawable        mtlDrawable
-	drawableTexture gpu.Handle
+	drawableTexture uint64
 
 	// Timestamp pools.
 	written            map[uint32]bool
@@ -145,13 +145,13 @@ type Backend struct {
 
 	// swapchainFormats is each swapchain's backbuffer format, as created.
 	swapchainMu      sync.Mutex
-	swapchainFormats map[gpu.Handle]gpu.Format
+	swapchainFormats map[uint64]gpu.Format
 
 	// transients holds the textures created with gpu.TextureTransient, which a render
 	// pass may only clear or not care about, and never store — checked on every device,
 	// memoryless or not, so that misuse fails alike everywhere.
 	transientMu sync.Mutex
-	transients  map[gpu.Handle]bool
+	transients  map[uint64]bool
 }
 
 var _ gpu.Backend = (*Backend)(nil)
@@ -481,16 +481,16 @@ func (b *Backend) Alloc(size uint64, mem gpu.MemoryType, label string) gpu.Buffe
 		r.ptr = object.contents()
 	}
 
-	return gpu.Buffer{H: gpu.Handle(h), Size: size, Addr: r.addr, Ptr: r.ptr}
+	return &buffer{reference: b.reference(h), mtlBuffer: object}
 }
 
 func (b *Backend) Free(v gpu.Buffer) {
-	b.release(v.H)
+	b.release(b.handle(v))
 }
 
 // release frees a handle: its bindless slot, its residency, and its object.
-func (b *Backend) release(h gpu.Handle) {
-	r := b.resources[uint64(h)]
+func (b *Backend) release(h uint64) {
+	r := b.resources[h]
 	if r == nil {
 		return
 	}
@@ -512,7 +512,7 @@ func (b *Backend) release(h gpu.Handle) {
 	b.releaseLater(r.object)
 	b.releaseLater(id(r.depthStencil))
 
-	delete(b.resources, uint64(h))
+	delete(b.resources, h)
 }
 
 // slot hands out a bindless slot for a texture or sampler and records its resource ID.
@@ -624,23 +624,22 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 		b.residencySet.enrol(r.object)
 	}
 
-	var index uint32
 	if d.Usage&(gpu.TextureSampled|gpu.TextureStorage) != 0 {
-		index = b.slot(r)
+		b.slot(r)
 	}
 
 	if d.Usage&gpu.TextureTransient != 0 {
 		b.transientMu.Lock()
 
 		if b.transients == nil {
-			b.transients = make(map[gpu.Handle]bool)
+			b.transients = make(map[uint64]bool)
 		}
 
-		b.transients[gpu.Handle(h)] = true
+		b.transients[h] = true
 		b.transientMu.Unlock()
 	}
 
-	return gpu.Texture{H: gpu.Handle(h), Index: index}
+	return &texture{reference: b.reference(h), mtlTexture: mtlTexture(r.object)}
 }
 
 // isTransient reports whether t was created with gpu.TextureTransient.
@@ -648,11 +647,11 @@ func (b *Backend) isTransient(t gpu.Texture) bool {
 	b.transientMu.Lock()
 	defer b.transientMu.Unlock()
 
-	return b.transients[t.H]
+	return b.transients[b.handle(t)]
 }
 
 func (b *Backend) TextureView(t gpu.Texture, k gpu.TextureKind, firstMip, mipCount, firstLayer, layerCount uint32) gpu.Texture {
-	src := b.resource(uint64(t.H), kindTexture)
+	src := b.resource(b.handle(t), kindTexture)
 	check(mipCount > 0 && layerCount > 0 && uint64(firstMip+mipCount) <= src.mips, "invalid texture view range")
 
 	pool := pushPool()
@@ -674,15 +673,18 @@ func (b *Backend) TextureView(t gpu.Texture, k gpu.TextureKind, firstMip, mipCou
 		b.residencySet.enrol(v.object)
 	}
 
-	return gpu.Texture{H: gpu.Handle(h), Index: b.slot(&v)}
+	b.slot(&v)
+	return &texture{reference: b.reference(h), mtlTexture: mtlTexture(v.object)}
 }
 
 func (b *Backend) DestroyTexture(t gpu.Texture) {
+	h := b.handle(t)
+
 	b.transientMu.Lock()
-	delete(b.transients, t.H)
+	delete(b.transients, h)
 	b.transientMu.Unlock()
 
-	b.release(t.H)
+	b.release(h)
 }
 
 var addressModes = [...]mtlSamplerAddressMode{
@@ -728,11 +730,12 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	r := &resource{kind: kindSampler, object: id(b.device.newSamplerState(desc))}
 	h := b.add(r)
 
-	return gpu.Sampler{H: gpu.Handle(h), Index: b.slot(r)}
+	b.slot(r)
+	return &sampler{reference: b.reference(h), mtlSamplerState: mtlSamplerState(r.object)}
 }
 
 func (b *Backend) DestroySampler(s gpu.Sampler) {
-	b.release(s.H)
+	b.release(b.handle(s))
 }
 
 func entry(s string) string {
@@ -891,7 +894,7 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 
 	r.rootSize = rootBytes(computePipelineReflectionBindings(ps.reflection()))
 
-	return gpu.Pipeline{H: gpu.Handle(b.add(r))}
+	return &pipeline{b.reference(b.add(r))}
 }
 
 var blendFactors = [...]mtlBlendFactor{
@@ -1008,7 +1011,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 		r.winding = mtlWindingClockwise
 	}
 
-	return gpu.Pipeline{H: gpu.Handle(b.add(r))}
+	return &pipeline{b.reference(b.add(r))}
 }
 
 // stageShader is one stage's shader, as resolveConstants reads it.
@@ -1089,7 +1092,7 @@ func (b *Backend) functionConstants(stage stageShader) []specialization.Declarat
 }
 
 func (b *Backend) DestroyPipeline(p gpu.Pipeline) {
-	b.release(p.H)
+	b.release(b.handle(p))
 }
 
 // CreateSwapchain creates a presentation chain for a CAMetalLayer surface.
@@ -1100,7 +1103,7 @@ func (b *Backend) CreateSwapchain(surface gpu.Surface, desc gpu.SwapchainDescrip
 	}
 
 	if !slices.Contains(layerFormats, format) {
-		return gpu.Swapchain{}, fmt.Errorf("metal: swapchain format %v is not one a CAMetalLayer presents", format)
+		return nil, fmt.Errorf("metal: swapchain format %v is not one a CAMetalLayer presents", format)
 	}
 
 	layer := caMetalLayer(surface)
@@ -1111,17 +1114,17 @@ func (b *Backend) CreateSwapchain(surface gpu.Surface, desc gpu.SwapchainDescrip
 	layer.setFramebufferOnly(false)
 	layer.setDrawableSize(float64(desc.Width), float64(desc.Height))
 
-	sc := gpu.Swapchain{H: gpu.Handle(b.add(&resource{kind: kindSwapchain, object: id(layer.retain())}))}
+	sc := &swapchain{reference: b.reference(b.add(&resource{kind: kindSwapchain, object: id(layer.retain())})), caMetalLayer: layer}
 	b.setDisplaySync(sc, desc.PresentMode)
 
 	b.swapchainMu.Lock()
 	defer b.swapchainMu.Unlock()
 
 	if b.swapchainFormats == nil {
-		b.swapchainFormats = make(map[gpu.Handle]gpu.Format)
+		b.swapchainFormats = make(map[uint64]gpu.Format)
 	}
 
-	b.swapchainFormats[sc.H] = format
+	b.swapchainFormats[b.handle(sc)] = format
 
 	return sc, nil
 }
@@ -1137,7 +1140,7 @@ func (b *Backend) SwapchainFormats(surface gpu.Surface) []gpu.Format {
 func (b *Backend) ResizeSwapchain(s gpu.Swapchain, w, h uint32) {
 	b.WaitIdle()
 
-	r := b.resource(uint64(s.H), kindSwapchain)
+	r := b.resource(b.handle(s), kindSwapchain)
 	check(r.drawable == 0, "cannot resize with an acquired drawable")
 
 	caMetalLayer(r.object).setDrawableSize(float64(w), float64(h))
@@ -1153,11 +1156,11 @@ func (b *Backend) SetPresentMode(s gpu.Swapchain, mode gpu.PresentMode) {
 }
 
 func (b *Backend) setDisplaySync(s gpu.Swapchain, mode gpu.PresentMode) {
-	caMetalLayer(b.resource(uint64(s.H), kindSwapchain).object).setDisplaySyncEnabled(mode != gpu.PresentImmediate)
+	caMetalLayer(b.resource(b.handle(s), kindSwapchain).object).setDisplaySyncEnabled(mode != gpu.PresentImmediate)
 }
 
 func (b *Backend) SwapchainSize(s gpu.Swapchain) (uint32, uint32) {
-	w, h := caMetalLayer(b.resource(uint64(s.H), kindSwapchain).object).drawableSize()
+	w, h := caMetalLayer(b.resource(b.handle(s), kindSwapchain).object).drawableSize()
 
 	return uint32(w), uint32(h)
 }
@@ -1166,11 +1169,11 @@ func (b *Backend) SwapchainFormat(s gpu.Swapchain) gpu.Format {
 	b.swapchainMu.Lock()
 	defer b.swapchainMu.Unlock()
 
-	return b.swapchainFormats[s.H]
+	return b.swapchainFormats[b.handle(s)]
 }
 
 func (b *Backend) AcquireNext(s gpu.Swapchain) (gpu.Texture, gpu.Fence) {
-	r := b.resource(uint64(s.H), kindSwapchain)
+	r := b.resource(b.handle(s), kindSwapchain)
 	check(r.drawable == 0, "drawable already acquired")
 
 	pool := pushPool()
@@ -1193,20 +1196,20 @@ func (b *Backend) AcquireNext(s gpu.Swapchain) (gpu.Texture, gpu.Fence) {
 
 	b.next++
 	b.resources[b.next] = tex
-	r.drawableTexture = gpu.Handle(b.next)
+	r.drawableTexture = b.next
 
-	return gpu.Texture{H: r.drawableTexture}, gpu.Fence{}
+	return &texture{reference: b.reference(r.drawableTexture), mtlTexture: t}, nil
 }
 
 func (b *Backend) Present(s gpu.Swapchain, c gpu.CommandBuffer) {
 	v := b.cmd(c)
-	r := b.resource(uint64(s.H), kindSwapchain)
+	r := b.resource(b.handle(s), kindSwapchain)
 	check(r.drawable != 0, "no acquired drawable")
 
 	value := b.submit(v, r.drawable)
 
-	b.releaseLater(b.resources[uint64(r.drawableTexture)].object)
-	delete(b.resources, uint64(r.drawableTexture))
+	b.releaseLater(b.resources[r.drawableTexture].object)
+	delete(b.resources, r.drawableTexture)
 	b.releaseLater(id(r.drawable))
 
 	r.drawable, r.drawableTexture = 0, 0
@@ -1218,7 +1221,7 @@ func (b *Backend) Present(s gpu.Swapchain, c gpu.CommandBuffer) {
 
 func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 	if n == 0 {
-		return gpu.QueryPool{}
+		return nil
 	}
 
 	pool := pushPool()
@@ -1229,7 +1232,7 @@ func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 		d.setCount(uint(n))
 	})
 	if err != nil {
-		return gpu.QueryPool{} // unsupported device: degrade to no timestamps.
+		return nil // unsupported device: degrade to no timestamps.
 	}
 
 	r := &resource{kind: kindQuery, object: id(heap), count: uint64(n), written: map[uint32]bool{}, overrides: map[uint32]uint64{}}
@@ -1238,21 +1241,21 @@ func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 	b.device.sampleTimestamps(&cpu, &gpuStart)
 	r.cpuStart, r.gpuStart = cpu, gpuStart
 
-	return gpu.QueryPool{H: gpu.Handle(b.add(r))}
+	return &queryPool{reference: b.reference(b.add(r)), mtl4CounterHeap: heap}
 }
 
 func (b *Backend) DestroyTimestampPool(p gpu.QueryPool) {
-	b.release(p.H)
+	b.release(b.handle(p))
 }
 
 // ReadTimestamps returns host nanoseconds: GPU counter values are calibrated against
 // the CPU clock sampled when the pool was created and again now.
 func (b *Backend) ReadTimestamps(p gpu.QueryPool, n uint32) []uint64 {
-	if !p.IsValid() || n == 0 {
+	if p == nil || !p.IsValid() || n == 0 {
 		return nil
 	}
 
-	r := b.resource(uint64(p.H), kindQuery)
+	r := b.resource(b.handle(p), kindQuery)
 	check(uint64(n) <= r.count, "query read out of bounds")
 
 	pool := pushPool()

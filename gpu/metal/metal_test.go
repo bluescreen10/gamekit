@@ -28,10 +28,10 @@ func TestMemoryAndTextureCopies(t *testing.T) {
 	src := b.Alloc(512, gpu.MemoryHost, "upload")
 	dst := b.Alloc(512, gpu.MemoryHost, "readback")
 	private := b.Alloc(512, gpu.MemoryDevice, "private")
-	if src.Ptr == nil || src.Addr == 0 || private.Ptr != nil || private.Addr == 0 {
+	if src.Ptr() == nil || src.Addr() == 0 || private.Ptr() != nil || private.Addr() == 0 {
 		t.Fatal("invalid mapped/private allocation")
 	}
-	data := unsafe.Slice((*byte)(src.Ptr), 512)
+	data := unsafe.Slice((*byte)(src.Ptr()), 512)
 	for i := range data {
 		data[i] = byte(i*17 + 3)
 	}
@@ -39,22 +39,22 @@ func TestMemoryAndTextureCopies(t *testing.T) {
 	c.CopyBuffer(private, src, 0, 0, 512)
 	c.CopyBuffer(dst, private, 0, 0, 512)
 	b.Wait(b.Submit(c))
-	if !bytes.Equal(data, unsafe.Slice((*byte)(dst.Ptr), 512)) {
+	if !bytes.Equal(data, unsafe.Slice((*byte)(dst.Ptr()), 512)) {
 		t.Fatal("private buffer copy mismatch")
 	}
 	// Odd-width, multi-row, nonzero mip/layer copies exercise tight packing.
 	tex := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture2DArray, Width: 14, Height: 10, Layers: 2, Mips: 2, Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureSampled | gpu.TextureTransfer})
 	view := b.TextureView(tex, gpu.Texture2D, 1, 1, 1, 1)
-	if view.Index == 0 || view.Index == tex.Index {
+	if view.Index() == 0 || view.Index() == tex.Index() {
 		t.Fatal("view did not get its own bindless slot")
 	}
-	clear(unsafe.Slice((*byte)(dst.Ptr), 512))
+	clear(unsafe.Slice((*byte)(dst.Ptr()), 512))
 	c = b.Begin()
 	c.CopyBufferToTexture(tex, 1, 1, src, 4)
 	c.Barrier(gpu.StageTransfer, gpu.StageTransfer, 0)
 	c.CopyTextureToBuffer(dst, tex, 1, 1)
 	b.Wait(b.Submit(c))
-	if !bytes.Equal(data[4:4+7*5*4], unsafe.Slice((*byte)(dst.Ptr), 7*5*4)) {
+	if !bytes.Equal(data[4:4+7*5*4], unsafe.Slice((*byte)(dst.Ptr()), 7*5*4)) {
 		t.Fatal("texture subresource copy mismatch")
 	}
 	// A view's base level is its first mip, so the view of mip 1 is 7x5, and reads back
@@ -63,7 +63,7 @@ func TestMemoryAndTextureCopies(t *testing.T) {
 	c = b.Begin()
 	c.CopyTextureToBuffer(exact, view, 0, 0)
 	b.Wait(b.Submit(c))
-	if !bytes.Equal(data[4:4+7*5*4], unsafe.Slice((*byte)(exact.Ptr), 7*5*4)) {
+	if !bytes.Equal(data[4:4+7*5*4], unsafe.Slice((*byte)(exact.Ptr()), 7*5*4)) {
 		t.Fatal("mip view copy mismatch")
 	}
 	b.Free(exact)
@@ -85,19 +85,19 @@ func TestDispatchIndirectAndEntries(t *testing.T) {
  kernel void increment(constant Push &p [[buffer(0)]]) {atomic_fetch_add_explicit(p.root->value,1u,memory_order_relaxed);}`)
 	p := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: source, WorkgroupSize: [3]uint32{4, 2, 1}, Entry: "increment"})
 	value := b.Alloc(4, gpu.MemoryHost, "counter")
-	*(*uint32)(value.Ptr) = 0
+	*(*uint32)(value.Ptr()) = 0
 	root := b.Alloc(8, gpu.MemoryHost, "root")
-	*(*uint64)(root.Ptr) = value.Addr
+	*(*uint64)(root.Ptr()) = value.Addr()
 	args := b.Alloc(16, gpu.MemoryHost, "dispatch")
-	copy(unsafe.Slice((*uint32)(args.Ptr), 4), []uint32{99, 3, 2, 1})
+	copy(unsafe.Slice((*uint32)(args.Ptr()), 4), []uint32{99, 3, 2, 1})
 	c := b.Begin()
 	c.SetPipeline(p)
-	rootAddr := root.Addr
+	rootAddr := root.Addr()
 	c.DispatchIndirect(utils.ToBytes(&rootAddr), args, 4)
 	c.Barrier(gpu.StageCompute, gpu.StageCompute, 0)
 	c.Dispatch(utils.ToBytes(&rootAddr), 1, 1, 1)
 	b.Wait(b.Submit(c))
-	if got := *(*uint32)(value.Ptr); got != 56 {
+	if got := *(*uint32)(value.Ptr()); got != 56 {
 		t.Fatalf("dispatch executed %d threads, want 56", got)
 	}
 	b.DestroyPipeline(p)
@@ -111,7 +111,7 @@ func TestDispatchIndirectAndEntries(t *testing.T) {
 func TestTimestamps(t *testing.T) {
 	b := device(t)
 	p := b.CreateTimestampPool(3)
-	if !p.IsValid() {
+	if p == nil || !p.IsValid() {
 		t.Skip("timestamp counters unavailable")
 	}
 	defer b.DestroyTimestampPool(p)
@@ -135,7 +135,7 @@ func TestTimestamps(t *testing.T) {
 func TestTimestampsAroundEachDispatchMeasureIt(t *testing.T) {
 	b := device(t)
 	pool := b.CreateTimestampPool(4)
-	if !pool.IsValid() {
+	if pool == nil || !pool.IsValid() {
 		t.Skip("timestamp counters unavailable")
 	}
 	defer b.DestroyTimestampPool(pool)
@@ -151,7 +151,7 @@ func TestTimestampsAroundEachDispatchMeasureIt(t *testing.T) {
 	defer b.DestroyPipeline(pipeline)
 	const groups = 1024
 	out := b.Alloc(groups*64*4, gpu.MemoryDevice, "out")
-	outAddr := out.Addr
+	outAddr := out.Addr()
 
 	// Two pieces of work timed one after the other, as a profiler times consecutive
 	// steps: each between a start and an end of its own, with nothing in between.
@@ -215,7 +215,7 @@ func TestRenderPassSplit(t *testing.T) {
 	c.Barrier(gpu.StageColorOutput, gpu.StageTransfer, 0)
 	c.CopyTextureToBuffer(read, target, 0, 0)
 	b.Wait(b.Submit(c))
-	pixels := unsafe.Slice((*byte)(read.Ptr), 8*8*4)
+	pixels := unsafe.Slice((*byte)(read.Ptr()), 8*8*4)
 	for y := 0; y < 8; y++ {
 		for x := 0; x < 8; x++ {
 			at := (y*8 + x) * 4

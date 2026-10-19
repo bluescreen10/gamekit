@@ -28,17 +28,26 @@ func TestFormatAspects(t *testing.T) {
 }
 
 func TestZeroResourcesAreInvalid(t *testing.T) {
+	var buffer gpu.Buffer
+	var texture gpu.Texture
+	var sampler gpu.Sampler
+	var pipeline gpu.Pipeline
+	var swapchain gpu.Swapchain
+	var fence gpu.Fence
+	var queryPool gpu.QueryPool
+
 	for _, tc := range []struct {
 		name  string
 		valid bool
 	}{
-		{"buffer", (gpu.Buffer{}).IsValid()},
-		{"texture", (gpu.Texture{}).IsValid()},
-		{"sampler", (gpu.Sampler{}).IsValid()},
-		{"pipeline", (gpu.Pipeline{}).IsValid()},
-		{"swapchain", (gpu.Swapchain{}).IsValid()},
+		{"buffer", buffer != nil},
+		{"texture", texture != nil},
+		{"sampler", sampler != nil},
+		{"pipeline", pipeline != nil},
+		{"swapchain", swapchain != nil},
+		{"fence", fence != nil},
 		{"surface", gpu.Surface(0).IsValid()},
-		{"query-pool", (gpu.QueryPool{}).IsValid()},
+		{"query-pool", queryPool != nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.valid {

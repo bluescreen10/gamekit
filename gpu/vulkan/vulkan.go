@@ -63,7 +63,7 @@ type Backend struct {
 	cmdPool vkCommandPool
 	fences  map[uint64]fenceEntry
 
-	// Resource registries, keyed by gpu.Handle (backend-private).
+	// Resource registries, keyed by backend-private IDs.
 	buffers    map[uint64]bufferEntry
 	textures   map[uint64]*textureEntry
 	samplers   map[uint64]vkSampler

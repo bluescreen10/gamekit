@@ -17,16 +17,16 @@ const (
 // pixels partway, and returns the root's address.
 func whiteTriangleRoot(b gpu.Backend) uint64 {
 	vb := b.Alloc(256, gpu.MemoryHost, "verts")
-	verts := unsafe.Slice((*vertex)(vb.Ptr), 3)
+	verts := unsafe.Slice((*vertex)(vb.Ptr()), 3)
 	verts[0] = vertex{-0.9, -0.9, 1, 1, 1}
 	verts[1] = vertex{0.9, -0.7, 1, 1, 1}
 	verts[2] = vertex{-0.1, 0.9, 1, 1, 1}
 
 	rb := b.Alloc(64, gpu.MemoryHost, "root")
-	root := (*rootData)(rb.Ptr)
+	root := (*rootData)(rb.Ptr())
 	root.tint = [4]float32{1, 1, 1, 1}
-	root.verts = vb.Addr
-	return rb.Addr
+	root.verts = vb.Addr()
+	return rb.Addr()
 }
 
 // TestMultisampleColorResolve draws a white triangle on black into a 4x target and
@@ -68,7 +68,7 @@ func TestMultisampleColorResolve(t *testing.T) {
 	cmd.CopyTextureToBuffer(readback, resolved, 0, 0)
 	b.Wait(b.Submit(cmd))
 
-	pixels := unsafe.Slice((*byte)(readback.Ptr), msaaSize*msaaSize*4)
+	pixels := unsafe.Slice((*byte)(readback.Ptr()), msaaSize*msaaSize*4)
 	var black, white, partial int
 	for i := 0; i < len(pixels); i += 4 {
 		switch red := pixels[i]; red {
@@ -133,7 +133,7 @@ func TestMultisampleDepthResolve(t *testing.T) {
 	cmd.CopyTextureToBuffer(readback, resolved, 0, 0)
 	b.Wait(b.Submit(cmd))
 
-	depths := unsafe.Slice((*float32)(readback.Ptr), msaaSize*msaaSize)
+	depths := unsafe.Slice((*float32)(readback.Ptr()), msaaSize*msaaSize)
 	depthAt := func(x, y int) float32 {
 		return depths[y*msaaSize+x]
 	}
@@ -188,8 +188,8 @@ func TestMultisampleResolveInLaterPass(t *testing.T) {
 	cmd.CopyTextureToBuffer(depthReadback, resolvedDepth, 0, 0)
 	b.Wait(b.Submit(cmd))
 
-	pixels := unsafe.Slice((*[4]byte)(colorReadback.Ptr), msaaSize*msaaSize)
-	depths := unsafe.Slice((*float32)(depthReadback.Ptr), msaaSize*msaaSize)
+	pixels := unsafe.Slice((*[4]byte)(colorReadback.Ptr()), msaaSize*msaaSize)
+	depths := unsafe.Slice((*float32)(depthReadback.Ptr()), msaaSize*msaaSize)
 	for i := range pixels {
 		if pixels[i] != [4]byte{255, 0, 0, 255} || depths[i] != 0.25 {
 			t.Fatalf("resolved pixel %d = colour %v, depth %v; want the first pass's red and 0.25", i, pixels[i], depths[i])
@@ -244,12 +244,12 @@ func TestMultisampledTexturesReadPerSample(t *testing.T) {
 	cmd.EndRenderPass()
 	cmd.Barrier(gpu.StageColorOutput|gpu.StageDepth, gpu.StageCompute, 0)
 	cmd.SetPipeline(reader)
-	data := readSamplesData{samples: samples.Addr, color: color.Index, depth: depth.Index, size: msaaSize, sampleCount: msaaSamples}
+	data := readSamplesData{samples: samples.Addr(), color: color.Index(), depth: depth.Index(), size: msaaSize, sampleCount: msaaSamples}
 	cmd.Dispatch(utils.ToBytes(&data), msaaSize/8, msaaSize/8, 1)
 	cmd.Barrier(gpu.StageCompute, gpu.StageAll, 0)
 	b.Wait(b.Submit(cmd))
 
-	values := unsafe.Slice((*[2]float32)(samples.Ptr), msaaSize*msaaSize*msaaSamples)
+	values := unsafe.Slice((*[2]float32)(samples.Ptr()), msaaSize*msaaSize*msaaSamples)
 	var partial int
 	for pixel := 0; pixel < msaaSize*msaaSize; pixel++ {
 		var covered int
@@ -333,7 +333,7 @@ func TestTransientMultisampleResolve(t *testing.T) {
 	cmd.CopyTextureToBuffer(depthReadback, resolvedDepth, 0, 0)
 	b.Wait(b.Submit(cmd))
 
-	pixels := unsafe.Slice((*byte)(colorReadback.Ptr), msaaSize*msaaSize*4)
+	pixels := unsafe.Slice((*byte)(colorReadback.Ptr()), msaaSize*msaaSize*4)
 	var black, white, partial int
 	for i := 0; i < len(pixels); i += 4 {
 		switch red := pixels[i]; red {
@@ -348,7 +348,7 @@ func TestTransientMultisampleResolve(t *testing.T) {
 	if black == 0 || white == 0 || partial == 0 {
 		t.Errorf("resolved colour has %d black, %d white, %d partly covered pixels, want some of each", black, white, partial)
 	}
-	depths := unsafe.Slice((*float32)(depthReadback.Ptr), msaaSize*msaaSize)
+	depths := unsafe.Slice((*float32)(depthReadback.Ptr()), msaaSize*msaaSize)
 	if got := depths[1*msaaSize+msaaSize-2]; got != 1 {
 		t.Errorf("resolved depth at the empty corner = %v, want the clear depth 1", got)
 	}

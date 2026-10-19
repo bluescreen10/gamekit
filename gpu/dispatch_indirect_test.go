@@ -27,19 +27,19 @@ func TestDispatchIndirectRunsWholeWorkgroups(t *testing.T) {
 	const argsOffset = 16
 	args := b.Alloc(argsOffset+12, gpu.MemoryHost, "dispatch args")
 	defer b.Free(args)
-	*(*[3]uint32)(unsafe.Add(args.Ptr, argsOffset)) = [3]uint32{imageSize / 8, imageSize / 8, 1}
+	*(*[3]uint32)(unsafe.Add(args.Ptr(), argsOffset)) = [3]uint32{imageSize / 8, imageSize / 8, 1}
 	readback := b.Alloc(imageSize*imageSize*4, gpu.MemoryHost, "readback")
 	defer b.Free(readback)
 
 	cmd := b.Begin()
 	cmd.SetPipeline(comp)
-	data := storageWriteData{image: image.Index, size: imageSize}
+	data := storageWriteData{image: image.Index(), size: imageSize}
 	cmd.DispatchIndirect(utils.ToBytes(&data), args, argsOffset)
 	cmd.Barrier(gpu.StageCompute, gpu.StageTransfer, 0)
 	cmd.CopyTextureToBuffer(readback, image, 0, 0)
 	b.Wait(b.Submit(cmd))
 
-	px := unsafe.Slice((*byte)(readback.Ptr), imageSize*imageSize*4)
+	px := unsafe.Slice((*byte)(readback.Ptr()), imageSize*imageSize*4)
 	for _, probe := range []struct {
 		x, y int
 		want [3]byte

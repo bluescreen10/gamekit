@@ -20,7 +20,7 @@ func computePipeline(t *testing.T, b gpu.Backend, desc gpu.ComputePipelineDescri
 		b.DestroyPipeline(p)
 	})
 
-	if !p.IsValid() {
+	if p == nil || !p.IsValid() {
 		t.Fatal("CreateComputePipeline returned an invalid pipeline")
 	}
 
@@ -33,13 +33,13 @@ func TestDispatchCopiesPerCallData(t *testing.T) {
 	// More than 64 calls also tests backends that grow a per-command data arena.
 	const calls = 160
 	out := allocation(t, b, calls*120, gpu.MemoryHost)
-	clear(unsafe.Slice((*byte)(out.Ptr), out.Size))
+	clear(unsafe.Slice((*byte)(out.Ptr()), out.Size()))
 	data := make([]byte, 128)
 
 	cmd := b.Begin()
 	cmd.SetPipeline(p)
 	for call := range calls {
-		binary.NativeEndian.PutUint64(data, out.Addr+uint64(call*120))
+		binary.NativeEndian.PutUint64(data, out.Addr()+uint64(call*120))
 		for word := range 30 {
 			binary.NativeEndian.PutUint32(data[8+word*4:], uint32(call*100+word+1))
 		}
@@ -48,7 +48,7 @@ func TestDispatchCopiesPerCallData(t *testing.T) {
 	clear(data)
 	b.Wait(b.Submit(cmd))
 
-	got := unsafe.Slice((*uint32)(out.Ptr), calls*30)
+	got := unsafe.Slice((*uint32)(out.Ptr()), calls*30)
 	for call := range calls {
 		for word := range 30 {
 			want := uint32(call*100 + word + 1)
@@ -67,7 +67,7 @@ func TestDispatchAcceptsMaxDataSize(t *testing.T) {
 	if len(data) < 128 {
 		t.Fatalf("GetMaxDataSize = %d, want at least 128", len(data))
 	}
-	binary.NativeEndian.PutUint64(data, out.Addr)
+	binary.NativeEndian.PutUint64(data, out.Addr())
 
 	cmd := b.Begin()
 	cmd.SetPipeline(p)
@@ -75,7 +75,7 @@ func TestDispatchAcceptsMaxDataSize(t *testing.T) {
 	clear(data)
 	b.Wait(b.Submit(cmd))
 
-	if got := unsafe.Slice((*byte)(out.Ptr), 120); !bytes.Equal(got, bytes.Repeat([]byte{0x3c}, 120)) {
+	if got := unsafe.Slice((*byte)(out.Ptr()), 120); !bytes.Equal(got, bytes.Repeat([]byte{0x3c}, 120)) {
 		t.Fatalf("maximum-sized dispatch data = %v, want 120 bytes of 0x3c", got)
 	}
 }
@@ -92,13 +92,13 @@ func TestComputePipelineSwitch(t *testing.T) {
 	cmd := b.Begin()
 	for i, p := range []gpu.Pipeline{first, second, first} {
 		cmd.SetPipeline(p)
-		addr := out.Addr + uint64(i*16)
+		addr := out.Addr() + uint64(i*16)
 		cmd.Dispatch(utils.ToBytes(&addr), 1, 1, 1)
 	}
 	b.Wait(b.Submit(cmd))
 
 	for i, count := range []uint32{11, 23, 11} {
-		got := *(*shaderConstants)(unsafe.Add(out.Ptr, i*16))
+		got := *(*shaderConstants)(unsafe.Add(out.Ptr(), i*16))
 		want := shaderConstants{offset: -3, count: count, scale: 0.5}
 		if got != want {
 			t.Fatalf("dispatch %d constants = %+v, want %+v", i, got, want)
@@ -110,14 +110,14 @@ func TestComputeBarrierOrdersBufferWrites(t *testing.T) {
 	b := testBackend(t)
 	p := computePipeline(t, b, gpu.ComputePipelineDescriptor{Shader: fillIndirect, WorkgroupSize: [3]uint32{1, 1, 1}})
 	args := allocation(t, b, 20, gpu.MemoryHost)
-	clear(unsafe.Slice((*byte)(args.Ptr), args.Size))
+	clear(unsafe.Slice((*byte)(args.Ptr()), args.Size()))
 	root := allocation(t, b, 8, gpu.MemoryHost)
-	*(*uint64)(root.Ptr) = args.Addr
+	*(*uint64)(root.Ptr()) = args.Addr()
 	readback := allocation(t, b, 20, gpu.MemoryHost)
 
 	cmd := b.Begin()
 	cmd.SetPipeline(p)
-	addr := root.Addr
+	addr := root.Addr()
 	for i := range 4 {
 		if i != 0 {
 			cmd.Barrier(gpu.StageCompute, gpu.StageCompute, 0)
@@ -128,7 +128,7 @@ func TestComputeBarrierOrdersBufferWrites(t *testing.T) {
 	cmd.CopyBuffer(readback, args, 0, 0, 20)
 	b.Wait(b.Submit(cmd))
 
-	got := *(*drawIndexedIndirect)(readback.Ptr)
+	got := *(*drawIndexedIndirect)(readback.Ptr())
 	want := drawIndexedIndirect{indexCount: 3, instanceCount: 4}
 	if got != want {
 		t.Fatalf("compute -> compute -> transfer = %+v, want %+v", got, want)
@@ -159,7 +159,7 @@ func TestSubmissionCompletion(t *testing.T) {
 				second.Barrier(gpu.StageTransfer, gpu.StageTransfer, 0)
 				second.CopyBuffer(readback, device, 0, 0, 64)
 				b.Wait(b.Submit(second))
-				if got := unsafe.Slice((*byte)(readback.Ptr), 64); !bytes.Equal(got, want) {
+				if got := unsafe.Slice((*byte)(readback.Ptr()), 64); !bytes.Equal(got, want) {
 					t.Fatalf("round %d readback = %v, want %v", round, got, want)
 				}
 			}
@@ -176,7 +176,7 @@ func TestEmptySubmission(t *testing.T) {
 func TestTimestampPoolReuse(t *testing.T) {
 	b := testBackend(t)
 	pool := b.CreateTimestampPool(4)
-	if !pool.IsValid() {
+	if pool == nil || !pool.IsValid() {
 		t.Skip("device does not support timestamp pools")
 	}
 	defer b.DestroyTimestampPool(pool)

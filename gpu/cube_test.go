@@ -42,7 +42,7 @@ func TestCube(t *testing.T) {
 		{-0.5, -0.5, 0.5}, {0.5, -0.5, 0.5}, {0.5, 0.5, 0.5}, {-0.5, 0.5, 0.5},
 	}
 	vb := b.Alloc(uint64(len(corners))*24, gpu.MemoryHost, "verts")
-	vs := unsafe.Slice((*vertex3D)(vb.Ptr), len(corners))
+	vs := unsafe.Slice((*vertex3D)(vb.Ptr()), len(corners))
 	for i, c := range corners {
 		vs[i] = vertex3D{c[0], c[1], c[2], c[0] + 0.5, c[1] + 0.5, c[2] + 0.5}
 	}
@@ -55,7 +55,7 @@ func TestCube(t *testing.T) {
 		1, 5, 6, 1, 6, 2, // right
 	}
 	ib := b.Alloc(uint64(len(indices))*4, gpu.MemoryHost, "indices")
-	copy(unsafe.Slice((*uint32)(ib.Ptr), len(indices)), indices)
+	copy(unsafe.Slice((*uint32)(ib.Ptr()), len(indices)), indices)
 
 	// MVP = perspective * lookAt * model(identity).
 	proj := perspectiveRH(float32(45*math.Pi/180), 1, 0.1, 100)
@@ -63,9 +63,9 @@ func TestCube(t *testing.T) {
 	mvp := mul4x4(proj, view)
 
 	rb := b.Alloc(128, gpu.MemoryHost, "root")
-	root := (*meshRoot)(rb.Ptr)
+	root := (*meshRoot)(rb.Ptr())
 	root.mvp = mvp
-	root.verts = vb.Addr
+	root.verts = vb.Addr()
 
 	pipe := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: meshVert, FragmentShader: meshFrag,
@@ -82,7 +82,7 @@ func TestCube(t *testing.T) {
 		Depth: &gpu.DepthAttachment{Texture: depth, Load: gpu.LoadClear, Store: gpu.StoreKeep, Clear: 1.0},
 	})
 	cmd.SetPipeline(pipe)
-	rootAddr := rb.Addr
+	rootAddr := rb.Addr()
 	cmd.SetViewport(0, 0, size, size, 0, 1)
 	cmd.SetScissor(0, 0, size, size)
 	cmd.DrawIndexed(utils.ToBytes(&rootAddr), ib, gpu.IndexUint32, uint32(len(indices)), 1, 0, 0, 0)
@@ -92,7 +92,7 @@ func TestCube(t *testing.T) {
 	f := b.Submit(cmd)
 	b.Wait(f)
 
-	px := unsafe.Slice((*byte)(readback.Ptr), size*size*4)
+	px := unsafe.Slice((*byte)(readback.Ptr()), size*size*4)
 	lit := 0
 	for i := 0; i < len(px); i += 4 {
 		if px[i] != 0 || px[i+1] != 0 || px[i+2] != 0 {

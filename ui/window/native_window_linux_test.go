@@ -62,7 +62,7 @@ func TestNativeWindowAndVulkanSurface(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if swapchain.H == 0 {
+	if swapchain == nil || !swapchain.IsValid() {
 		t.Fatal("Vulkan swapchain is invalid")
 	}
 }

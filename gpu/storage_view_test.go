@@ -23,13 +23,13 @@ func TestStorageViewWritesOneMip(t *testing.T) {
 
 	cmd := b.Begin()
 	cmd.SetPipeline(comp)
-	data := storageWriteData{image: view.Index, size: side / 2}
+	data := storageWriteData{image: view.Index(), size: side / 2}
 	cmd.Dispatch(utils.ToBytes(&data), 1, 1, 1)
 	cmd.Barrier(gpu.StageCompute, gpu.StageTransfer, 0)
 	cmd.CopyTextureToBuffer(readback, tex, 1, 0)
 	b.Wait(b.Submit(cmd))
 
-	px := unsafe.Slice((*byte)(readback.Ptr), 4*4*4)
+	px := unsafe.Slice((*byte)(readback.Ptr()), 4*4*4)
 	for _, probe := range []struct {
 		x, y int
 		want [4]byte

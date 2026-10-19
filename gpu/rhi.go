@@ -21,98 +21,51 @@
 //     lists.
 package gpu
 
-import (
-	"fmt"
-	"unsafe"
-)
+import "unsafe"
 
 // ----------------------------------------------------------------------------
-// Handles
+// Resources
 // ----------------------------------------------------------------------------
 
-// Handle is a backend-defined opaque id (e.g. a slab index into the backend's
-// resource registry). It is exported so a backend in another package can set it,
-// but it is otherwise private to that backend — callers must not interpret it.
-type Handle uint64
+// Resource interfaces hide native handles. Nil means no resource; check for nil
+// before calling a method. Use each resource only with its creating backend and
+// never use it after destruction.
 
-// Buffer is a GPU allocation. Addr is its device address (BDA): pass it to
-// shaders directly or embed it in a root struct. Ptr is a persistently-mapped
-// CPU pointer for MemoryHost allocations (nil for MemoryDevice); write straight
-// through it — no staging, no descriptor updates. H is the backend handle.
-type Buffer struct {
-	Addr uint64
-	Ptr  unsafe.Pointer //TODO: turn into uintptr
-	Size uint64
-	H    Handle
+// Buffer is a backend-owned GPU allocation. Pass it only to its creating backend.
+// A nil Buffer represents no allocation.
+type Buffer interface {
+	IsValid() bool
+	// Addr is the device address that shaders use to access the buffer.
+	Addr() uint64
+	// Ptr is mapped, coherent CPU memory for MemoryHost, or nil for MemoryDevice.
+	Ptr() unsafe.Pointer
+	Size() uint64
+	// Write copies data at byteOffset. Empty writes do nothing. Other writes panic
+	// if the buffer is not mapped or the range exceeds Size.
+	Write(data []byte, byteOffset uint64)
 }
 
-// Valid reports whether the buffer refers to a live allocation.
-func (b Buffer) IsValid() bool {
-	return b.H != 0
+// Texture is a backend-owned texture or view. Index is its bindless shader slot.
+// A nil Texture represents no texture, including an absent resolve attachment.
+type Texture interface {
+	IsValid() bool
+	Index() uint32
 }
 
-// TODO: buffer should be opaque
-// func (b Buffer) Size() uint64 {
-// 	return b.Size
-// }
-
-// Write copies data into the buffer's persistently-mapped memory at byteOffset.
-// It panics rather than segfaulting if the buffer has no mapped pointer (a
-// MemoryDevice allocation, or an invalid Buffer) or if byteOffset+len(data) would
-// write past Size.
-func (b Buffer) Write(data []byte, byteOffset uint64) {
-	if len(data) == 0 {
-		return
-	}
-	if b.Ptr == nil {
-		panic("gpu: Buffer.Write: buffer has no mapped pointer")
-	}
-	if byteOffset > b.Size || uint64(len(data)) > b.Size-byteOffset {
-		panic(fmt.Sprintf("gpu: Buffer.Write: write of %d bytes at offset %d overruns a %d-byte buffer",
-			len(data), byteOffset, b.Size))
-	}
-	dst := unsafe.Slice((*byte)(b.Ptr), b.Size)
-	copy(dst[byteOffset:], data)
+// Sampler is a backend-owned sampler. Index is its bindless shader slot.
+type Sampler interface {
+	IsValid() bool
+	Index() uint32
 }
 
-// Texture is a slot in the global bindless heap. Index is what a shader uses to
-// sample (nonuniformEXT(index) into the sampled-image array). H is the backend
-// handle (for render-target/storage/destroy use).
-type Texture struct {
-	Index uint32
-	H     Handle
+// Pipeline is a backend-owned compute or graphics pipeline.
+type Pipeline interface {
+	IsValid() bool
 }
 
-func (t Texture) IsValid() bool { return t.H != 0 }
-
-// Sampler is a slot in the bindless sampler heap; Index is used from shaders.
-type Sampler struct {
-	Index uint32
-	H     Handle
-}
-
-func (s Sampler) IsValid() bool {
-	return s.H != 0
-}
-
-// Pipeline is a compiled compute or graphics pipeline. Graphics pipelines carry
-// only formats + topology + minimal state; everything else is dynamic or root data.
-type Pipeline struct {
-	H Handle
-}
-
-func (p Pipeline) IsValid() bool {
-	return p.H != 0
-}
-
-// Swapchain is a window's presentation chain. Backbuffers are surfaced as
-// Textures (render targets) via AcquireNext.
-type Swapchain struct {
-	H Handle
-}
-
-func (s Swapchain) IsValid() bool {
-	return s.H != 0
+// Swapchain is a backend-owned presentation chain. AcquireNext returns its backbuffer.
+type Swapchain interface {
+	IsValid() bool
 }
 
 // Surface is a backend-specific presentation surface created from a native
@@ -182,14 +135,16 @@ const (
 	PresentMailbox
 )
 
-// Fence is a submission completion token.
-type Fence struct{ H Handle }
+// Fence is a backend-owned submission completion token. A nil Fence needs no wait.
+type Fence interface {
+	IsValid() bool
+}
 
 // QueryPool is a set of GPU timestamp queries (for profiling pass/frame time).
-type QueryPool struct{ H Handle }
-
-// Valid reports whether the pool was created.
-func (q QueryPool) IsValid() bool { return q.H != 0 }
+// CreateTimestampPool returns nil when timestamps are unavailable.
+type QueryPool interface {
+	IsValid() bool
+}
 
 // ----------------------------------------------------------------------------
 // Enums
@@ -471,7 +426,7 @@ const (
 // ----------------------------------------------------------------------------
 
 // TextureDescriptor describes a texture to create. It is registered into the bindless
-// heap when it has TextureSampled usage; the returned Texture.Index is the heap slot.
+// heap when it has TextureSampled usage; Texture.Index returns the heap slot.
 type TextureDescriptor struct {
 	Kind          TextureKind
 	Width, Height uint32

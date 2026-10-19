@@ -29,29 +29,29 @@ func TestComputeIndirect(t *testing.T) {
 
 	// Vertices + indices (host-visible, read via BDA / index buffer).
 	vb := b.Alloc(256, gpu.MemoryHost, "verts")
-	verts := unsafe.Slice((*vertex)(vb.Ptr), 3)
+	verts := unsafe.Slice((*vertex)(vb.Ptr()), 3)
 	verts[0] = vertex{-0.9, -0.9, 1, 0, 0}
 	verts[1] = vertex{0.9, -0.9, 0, 1, 0}
 	verts[2] = vertex{0.0, 0.9, 0, 0, 1}
 
 	ib := b.Alloc(64, gpu.MemoryHost, "indices")
-	idx := unsafe.Slice((*uint32)(ib.Ptr), 3)
+	idx := unsafe.Slice((*uint32)(ib.Ptr()), 3)
 	idx[0], idx[1], idx[2] = 0, 1, 2
 
 	// Indirect args buffer, zeroed — compute fills it.
 	indirect := b.Alloc(64, gpu.MemoryHost, "indirect")
-	args := (*drawIndexedIndirect)(indirect.Ptr)
+	args := (*drawIndexedIndirect)(indirect.Ptr())
 	*args = drawIndexedIndirect{} // instanceCount = 0
 
 	// Compute root: pointer to the indirect args buffer.
 	cRoot := b.Alloc(64, gpu.MemoryHost, "comp-root")
-	*(*uint64)(cRoot.Ptr) = indirect.Addr
+	*(*uint64)(cRoot.Ptr()) = indirect.Addr()
 
 	// Graphics root: white tint + vertex buffer address.
 	gRoot := b.Alloc(64, gpu.MemoryHost, "gfx-root")
-	root := (*rootData)(gRoot.Ptr)
+	root := (*rootData)(gRoot.Ptr())
 	root.tint = [4]float32{1, 1, 1, 1}
-	root.verts = vb.Addr
+	root.verts = vb.Addr()
 
 	comp := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{
 		Shader: fillIndirect, WorkgroupSize: [3]uint32{1, 1, 1},
@@ -67,7 +67,7 @@ func TestComputeIndirect(t *testing.T) {
 
 	cmd := b.Begin()
 	cmd.SetPipeline(comp)
-	computeRoot := cRoot.Addr
+	computeRoot := cRoot.Addr()
 	cmd.Dispatch(utils.ToBytes(&computeRoot), 1, 1, 1)
 	// Order the compute writes before the indirect fetch + vertex/index read.
 	cmd.Barrier(gpu.StageCompute, gpu.StageIndirect|gpu.StageVertex, 0)
@@ -76,7 +76,7 @@ func TestComputeIndirect(t *testing.T) {
 		Color: []gpu.ColorAttachment{{Texture: target, Load: gpu.LoadClear, Store: gpu.StoreKeep, Clear: [4]float32{0, 0, 0, 1}}},
 	})
 	cmd.SetPipeline(gfx)
-	graphicsRoot := gRoot.Addr
+	graphicsRoot := gRoot.Addr()
 	cmd.SetViewport(0, 0, size, size, 0, 1)
 	cmd.SetScissor(0, 0, size, size)
 	cmd.DrawIndexedIndirect(utils.ToBytes(&graphicsRoot), ib, gpu.IndexUint32, indirect, 0, 1, 20)
@@ -93,7 +93,7 @@ func TestComputeIndirect(t *testing.T) {
 	t.Logf("indirect args from compute: indexCount=%d instanceCount=%d", args.indexCount, args.instanceCount)
 
 	// And the indirect draw must have rendered.
-	px := unsafe.Slice((*byte)(readback.Ptr), size*size*4)
+	px := unsafe.Slice((*byte)(readback.Ptr()), size*size*4)
 	i := (size/2*size + size/2) * 4
 	if px[i] == 0 && px[i+1] == 0 && px[i+2] == 0 {
 		t.Fatal("center pixel black — indirect draw did not render")

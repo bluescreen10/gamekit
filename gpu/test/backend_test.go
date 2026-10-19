@@ -1,6 +1,10 @@
 package test_test
 
 import (
+	"bytes"
+	"fmt"
+	"math"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -8,9 +12,88 @@ import (
 	gputest "github.com/bluescreen10/gamekit/gpu/test"
 )
 
+func TestEmptyWritesNeedNoMappedMemory(t *testing.T) {
+	b := newBackend(t)
+	buf := b.Alloc(4, gpu.MemoryDevice, "unmapped")
+	defer b.Free(buf)
+
+	buf.Write(nil, 0)
+	buf.Write([]byte{}, math.MaxUint64)
+}
+
+func TestResourcesBelongToTheirCreatingBackend(t *testing.T) {
+	b := newBackend(t)
+	other := newBackend(t)
+	local := b.Alloc(4, gpu.MemoryHost, "local")
+	defer b.Free(local)
+	local.Write([]byte{1, 2, 3, 4}, 0)
+	foreignBuffer := other.Alloc(4, gpu.MemoryHost, "foreign")
+	defer other.Free(foreignBuffer)
+	foreignTexture := other.CreateTexture(gpu.TextureDescriptor{Width: 1, Height: 1, Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureSampled})
+	defer other.DestroyTexture(foreignTexture)
+	foreignSampler := other.CreateSampler(gpu.SamplerDescriptor{})
+	defer other.DestroySampler(foreignSampler)
+	foreignPipeline := other.CreateGraphicsPipeline(gpu.PipelineDescriptor{})
+	defer other.DestroyPipeline(foreignPipeline)
+	foreignPool := other.CreateTimestampPool(1)
+	defer other.DestroyTimestampPool(foreignPool)
+	foreignFence := other.Submit(other.Begin())
+	foreignSwapchain, err := other.CreateSwapchain(0, gpu.SwapchainDescriptor{Width: 1, Height: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		call func()
+	}{
+		{"buffer", func() {
+			b.Free(foreignBuffer)
+		}},
+		{"texture", func() {
+			b.DestroyTexture(foreignTexture)
+		}},
+		{"sampler", func() {
+			b.DestroySampler(foreignSampler)
+		}},
+		{"pipeline", func() {
+			b.DestroyPipeline(foreignPipeline)
+		}},
+		{"query-pool", func() {
+			b.ReadTimestamps(foreignPool, 1)
+		}},
+		{"swapchain", func() {
+			b.SwapchainFormat(foreignSwapchain)
+		}},
+		{"fence", func() {
+			b.Wait(foreignFence)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				value := recover()
+				if value == nil || !strings.Contains(fmt.Sprint(value), "another backend") {
+					t.Errorf("foreign resource panic = %v, want an ownership error", value)
+				}
+			}()
+			tc.call()
+		})
+	}
+	other.Wait(foreignFence)
+
+	readback := b.Alloc(4, gpu.MemoryHost, "readback")
+	defer b.Free(readback)
+	cmd := b.Begin()
+	cmd.CopyBuffer(readback, local, 0, 0, 4)
+	b.Wait(b.Submit(cmd))
+	if got := gpuBufferBytes(readback); !bytes.Equal(got, []byte{1, 2, 3, 4}) {
+		t.Fatalf("local buffer after foreign operations = %v", got)
+	}
+}
+
 // gpuBufferBytes views a host-mapped buffer's contents for assertions.
 func gpuBufferBytes(b gpu.Buffer) []byte {
-	return unsafe.Slice((*byte)(b.Ptr), b.Size)
+	return unsafe.Slice((*byte)(b.Ptr()), b.Size())
 }
 
 func newBackend(t *testing.T) *gputest.Backend {
@@ -42,11 +125,11 @@ func TestHostAllocHasMappedPointer(t *testing.T) {
 
 	buf := b.Alloc(16, gpu.MemoryHost, "test")
 	defer b.Free(buf)
-	if buf.Ptr == nil {
+	if buf.Ptr() == nil {
 		t.Fatal("MemoryHost buffer has a nil Ptr")
 	}
-	if buf.Size != 16 {
-		t.Fatalf("Size = %d, want 16", buf.Size)
+	if buf.Size() != 16 {
+		t.Fatalf("Size = %d, want 16", buf.Size())
 	}
 
 	buf.Write([]byte{1, 2, 3, 4}, 4)
@@ -68,7 +151,7 @@ func TestDeviceAllocHasNoMappedPointer(t *testing.T) {
 
 	buf := b.Alloc(16, gpu.MemoryDevice, "test")
 	defer b.Free(buf)
-	if buf.Ptr != nil {
+	if buf.Ptr() != nil {
 		t.Fatal("MemoryDevice buffer unexpectedly has a mapped Ptr")
 	}
 }
@@ -119,7 +202,7 @@ func TestTextureRoundTripsThroughBufferCopies(t *testing.T) {
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureSampled | gpu.TextureTransfer,
 	})
 	defer b.DestroyTexture(tex)
-	if tex.Index == 0 {
+	if tex.Index() == 0 {
 		t.Fatal("a TextureSampled texture got heap index 0, want a nonzero bindless slot")
 	}
 
@@ -174,8 +257,8 @@ func TestSamplerIndicesAreUnique(t *testing.T) {
 	c := b.CreateSampler(gpu.SamplerDescriptor{Label: "c"})
 	defer b.DestroySampler(c)
 
-	if a.Index == c.Index {
-		t.Fatalf("two samplers share heap index %d", a.Index)
+	if a.Index() == c.Index() {
+		t.Fatalf("two samplers share heap index %d", a.Index())
 	}
 }
 
@@ -192,7 +275,7 @@ func TestPipelinesGetDistinctValidHandles(t *testing.T) {
 	if !g.IsValid() || !c.IsValid() {
 		t.Fatal("a created pipeline reports invalid")
 	}
-	if g.H == c.H {
+	if g == c {
 		t.Fatal("graphics and compute pipelines share a handle")
 	}
 }
@@ -207,13 +290,13 @@ func TestSwapchainAcquireReturnsAUsableBackbuffer(t *testing.T) {
 		t.Fatal(err)
 	}
 	tex, _ := b.AcquireNext(sc)
-	if tex.H == 0 {
+	if tex == nil || !tex.IsValid() {
 		t.Fatal("AcquireNext returned an invalid texture")
 	}
 
 	b.ResizeSwapchain(sc, 128, 64)
 	resized, _ := b.AcquireNext(sc)
-	if resized.H == tex.H {
+	if resized == tex {
 		t.Fatal("resizing the swapchain did not replace the backbuffer")
 	}
 }

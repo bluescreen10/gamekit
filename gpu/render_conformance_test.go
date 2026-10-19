@@ -19,7 +19,7 @@ func graphicsPipeline(t *testing.T, b gpu.Backend, desc gpu.PipelineDescriptor) 
 		b.DestroyPipeline(p)
 	})
 
-	if !p.IsValid() {
+	if p == nil || !p.IsValid() {
 		t.Fatal("CreateGraphicsPipeline returned an invalid pipeline")
 	}
 
@@ -41,7 +41,7 @@ func readColor(t *testing.T, b gpu.Backend, cmd gpu.CommandBuffer, target gpu.Te
 	cmd.CopyTextureToBuffer(readback, target, 0, 0)
 	b.Wait(b.Submit(cmd))
 
-	return append([][4]byte(nil), unsafe.Slice((*[4]byte)(readback.Ptr), renderSize*renderSize)...)
+	return append([][4]byte(nil), unsafe.Slice((*[4]byte)(readback.Ptr()), renderSize*renderSize)...)
 }
 
 func TestRenderPassClearAndLoad(t *testing.T) {
@@ -80,7 +80,7 @@ func TestRenderPassClearAndLoad(t *testing.T) {
 
 	for i, attachment := range attachments {
 		t.Run(fmt.Sprintf("attachment=%d", i), func(t *testing.T) {
-			wantPixels(t, unsafe.Slice((*[4]byte)(attachment.readback.Ptr), renderSize*renderSize), attachment.want, 0)
+			wantPixels(t, unsafe.Slice((*[4]byte)(attachment.readback.Ptr()), renderSize*renderSize), attachment.want, 0)
 		})
 	}
 }
@@ -165,11 +165,11 @@ func TestDrawCopiesPerCallData(t *testing.T) {
 		VertexShader: triangleVert, FragmentShader: tintFrag, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 	})
 	vb := allocation(t, b, 60, gpu.MemoryHost)
-	copy(unsafe.Slice((*vertex)(vb.Ptr), 3), []vertex{{-1, -1, 1, 1, 1}, {3, -1, 1, 1, 1}, {-1, 3, 1, 1, 1}})
+	copy(unsafe.Slice((*vertex)(vb.Ptr()), 3), []vertex{{-1, -1, 1, 1, 1}, {3, -1, 1, 1, 1}, {-1, 3, 1, 1, 1}})
 	red := allocation(t, b, 32, gpu.MemoryHost)
 	green := allocation(t, b, 32, gpu.MemoryHost)
-	*(*rootData)(red.Ptr) = rootData{tint: [4]float32{1, 0, 0, 1}, verts: vb.Addr}
-	*(*rootData)(green.Ptr) = rootData{tint: [4]float32{0, 1, 0, 1}, verts: vb.Addr}
+	*(*rootData)(red.Ptr()) = rootData{tint: [4]float32{1, 0, 0, 1}, verts: vb.Addr()}
+	*(*rootData)(green.Ptr()) = rootData{tint: [4]float32{0, 1, 0, 1}, verts: vb.Addr()}
 
 	cmd := b.Begin()
 	cmd.BeginRenderPass(gpu.RenderTargets{
@@ -178,10 +178,10 @@ func TestDrawCopiesPerCallData(t *testing.T) {
 	cmd.SetPipeline(p)
 	cmd.SetViewport(0, 0, renderSize, renderSize, 0, 1)
 	cmd.SetScissor(0, 0, renderSize/2, renderSize)
-	addr := red.Addr
+	addr := red.Addr()
 	data := utils.ToBytes(&addr)
 	cmd.Draw(data, 3, 1, 0, 0)
-	addr = green.Addr
+	addr = green.Addr()
 	cmd.SetScissor(renderSize/2, 0, renderSize/2, renderSize)
 	cmd.Draw(data, 3, 1, 0, 0)
 	clear(data) // The caller can reuse the data before Submit.
@@ -208,14 +208,14 @@ func TestDrawOffsets(t *testing.T) {
 				VertexShader: triangleVert, FragmentShader: tintFrag, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 			})
 			vb := allocation(t, b, 12*20, gpu.MemoryHost)
-			vertices := unsafe.Slice((*vertex)(vb.Ptr), 12)
+			vertices := unsafe.Slice((*vertex)(vb.Ptr()), 12)
 			clear(vertices)
 			copy(vertices[3:], []vertex{
 				{-1, -1, 1, 1, 1}, {1, -1, 1, 1, 1}, {1, 1, 1, 1, 1},
 				{-1, -1, 1, 1, 1}, {1, 1, 1, 1, 1}, {-1, 1, 1, 1, 1},
 			})
 			root := allocation(t, b, 32, gpu.MemoryHost)
-			*(*rootData)(root.Ptr) = rootData{tint: [4]float32{0, 0, 1, 1}, verts: vb.Addr}
+			*(*rootData)(root.Ptr()) = rootData{tint: [4]float32{0, 0, 1, 1}, verts: vb.Addr()}
 			it := gpu.IndexUint32
 			if name == "indexed16" || name == "negative-base16" || name == "indirect16" {
 				it = gpu.IndexUint16
@@ -232,15 +232,15 @@ func TestDrawOffsets(t *testing.T) {
 					value = uint32(i-2) + indexBase
 				}
 				if it == gpu.IndexUint16 {
-					*(*uint16)(unsafe.Add(indices.Ptr, i*2)) = uint16(value)
+					*(*uint16)(unsafe.Add(indices.Ptr(), i*2)) = uint16(value)
 				} else {
-					*(*uint32)(unsafe.Add(indices.Ptr, i*4)) = value
+					*(*uint32)(unsafe.Add(indices.Ptr(), i*4)) = value
 				}
 			}
 			args := allocation(t, b, 68, gpu.MemoryHost)
-			clear(unsafe.Slice((*byte)(args.Ptr), args.Size))
-			*(*drawIndexedIndirect)(unsafe.Add(args.Ptr, 16)) = drawIndexedIndirect{indexCount: 3, instanceCount: 1, firstIndex: 2, vertexOffset: 3}
-			*(*drawIndexedIndirect)(unsafe.Add(args.Ptr, 48)) = drawIndexedIndirect{indexCount: 3, instanceCount: 1, firstIndex: 5, vertexOffset: 3}
+			clear(unsafe.Slice((*byte)(args.Ptr()), args.Size()))
+			*(*drawIndexedIndirect)(unsafe.Add(args.Ptr(), 16)) = drawIndexedIndirect{indexCount: 3, instanceCount: 1, firstIndex: 2, vertexOffset: 3}
+			*(*drawIndexedIndirect)(unsafe.Add(args.Ptr(), 48)) = drawIndexedIndirect{indexCount: 3, instanceCount: 1, firstIndex: 5, vertexOffset: 3}
 
 			cmd := b.Begin()
 			cmd.BeginRenderPass(gpu.RenderTargets{
@@ -249,7 +249,7 @@ func TestDrawOffsets(t *testing.T) {
 			cmd.SetPipeline(p)
 			cmd.SetViewport(0, 0, renderSize, renderSize, 0, 1)
 			cmd.SetScissor(0, 0, renderSize, renderSize)
-			addr := root.Addr
+			addr := root.Addr()
 			switch name {
 			case "first-vertex":
 				cmd.Draw(utils.ToBytes(&addr), 6, 1, 3, 0)
@@ -355,7 +355,7 @@ func TestDepthOnlyAndReadOnlyPasses(t *testing.T) {
 	cmd.CopyTextureToBuffer(readback, depth, 0, 0)
 	wantPixels(t, readColor(t, b, cmd, target), [4]byte{0, 0, 255, 255}, 0)
 
-	for i, value := range unsafe.Slice((*float32)(readback.Ptr), renderSize*renderSize) {
+	for i, value := range unsafe.Slice((*float32)(readback.Ptr()), renderSize*renderSize) {
 		if value != 0.25 {
 			t.Fatalf("depth pixel %d = %v, want the depth-only pass's 0.25", i, value)
 		}
@@ -405,11 +405,11 @@ func TestTriangleStrip(t *testing.T) {
 		Topology: gpu.TopologyTriangleStrip, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 	})
 	vb := allocation(t, b, 80, gpu.MemoryHost)
-	copy(unsafe.Slice((*vertex)(vb.Ptr), 4), []vertex{
+	copy(unsafe.Slice((*vertex)(vb.Ptr()), 4), []vertex{
 		{-1, -1, 1, 1, 1}, {1, -1, 1, 1, 1}, {-1, 1, 1, 1, 1}, {1, 1, 1, 1, 1},
 	})
 	root := allocation(t, b, 32, gpu.MemoryHost)
-	*(*rootData)(root.Ptr) = rootData{tint: [4]float32{1, 0, 0, 1}, verts: vb.Addr}
+	*(*rootData)(root.Ptr()) = rootData{tint: [4]float32{1, 0, 0, 1}, verts: vb.Addr()}
 
 	cmd := b.Begin()
 	cmd.BeginRenderPass(gpu.RenderTargets{
@@ -418,7 +418,7 @@ func TestTriangleStrip(t *testing.T) {
 	cmd.SetPipeline(p)
 	cmd.SetViewport(0, 0, renderSize, renderSize, 0, 1)
 	cmd.SetScissor(0, 0, renderSize, renderSize)
-	addr := root.Addr
+	addr := root.Addr()
 	cmd.Draw(utils.ToBytes(&addr), 4, 1, 0, 0)
 	cmd.EndRenderPass()
 
@@ -536,5 +536,5 @@ func TestMultipleRenderTargets(t *testing.T) {
 	cmd.Barrier(gpu.StageColorOutput, gpu.StageTransfer, 0)
 	cmd.CopyTextureToBuffer(readback, second, 0, 0)
 	wantPixels(t, readColor(t, b, cmd, first), [4]byte{128, 255, 0, 255}, 1)
-	wantPixels(t, unsafe.Slice((*[4]byte)(readback.Ptr), renderSize*renderSize), [4]byte{128, 64, 128, 255}, 1)
+	wantPixels(t, unsafe.Slice((*[4]byte)(readback.Ptr()), renderSize*renderSize), [4]byte{128, 64, 128, 255}, 1)
 }

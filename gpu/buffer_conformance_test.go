@@ -19,11 +19,11 @@ func allocation(t *testing.T, b gpu.Backend, size uint64, memory gpu.MemoryType)
 		b.Free(buf)
 	})
 
-	if !buf.IsValid() || buf.Addr == 0 || buf.Size != size {
+	if buf == nil || !buf.IsValid() || buf.Addr() == 0 || buf.Size() != size {
 		t.Fatalf("Alloc(%d, %v) = %+v; want a valid buffer, a device address, and Size %d", size, memory, buf, size)
 	}
-	if (buf.Ptr != nil) != (memory == gpu.MemoryHost) {
-		t.Fatalf("Alloc(%d, %v).Ptr = %p; only host buffers must have a mapped pointer", size, memory, buf.Ptr)
+	if (buf.Ptr() != nil) != (memory == gpu.MemoryHost) {
+		t.Fatalf("Alloc(%d, %v).Ptr = %p; only host buffers must have a mapped pointer", size, memory, buf.Ptr())
 	}
 
 	return buf
@@ -47,12 +47,12 @@ func TestBufferCopyRanges(t *testing.T) {
 			src := allocation(t, b, size+16, gpu.MemoryHost)
 			device := allocation(t, b, size+32, gpu.MemoryDevice)
 			dst := allocation(t, b, size+40, gpu.MemoryHost)
-			source := make([]byte, src.Size)
+			source := make([]byte, src.Size())
 			for i := range source {
 				source[i] = byte(i*37 + 11)
 			}
 			src.Write(source, 0)
-			want := bytes.Repeat([]byte{0xa5}, int(dst.Size))
+			want := bytes.Repeat([]byte{0xa5}, int(dst.Size()))
 			dst.Write(want, 0)
 			copy(want[20:20+size], source[8:8+size])
 
@@ -62,7 +62,7 @@ func TestBufferCopyRanges(t *testing.T) {
 			cmd.CopyBuffer(dst, device, 20, 16, size)
 			b.Wait(b.Submit(cmd))
 
-			got := unsafe.Slice((*byte)(dst.Ptr), dst.Size)
+			got := unsafe.Slice((*byte)(dst.Ptr()), dst.Size())
 			if !bytes.Equal(got, want) {
 				t.Fatalf("copy through device memory = %v, want %v (including unchanged guards)", got, want)
 			}
@@ -73,7 +73,7 @@ func TestBufferCopyRanges(t *testing.T) {
 func TestBufferCopyWithinAllocation(t *testing.T) {
 	b := testBackend(t)
 	buf := allocation(t, b, 64, gpu.MemoryHost)
-	want := make([]byte, buf.Size)
+	want := make([]byte, buf.Size())
 	for i := range want {
 		want[i] = byte(i + 1)
 	}
@@ -84,7 +84,7 @@ func TestBufferCopyWithinAllocation(t *testing.T) {
 	cmd.CopyBuffer(buf, buf, 40, 4, 16)
 	b.Wait(b.Submit(cmd))
 
-	if got := unsafe.Slice((*byte)(buf.Ptr), buf.Size); !bytes.Equal(got, want) {
+	if got := unsafe.Slice((*byte)(buf.Ptr()), buf.Size()); !bytes.Equal(got, want) {
 		t.Fatalf("non-overlapping copy within one buffer = %v, want %v", got, want)
 	}
 }
@@ -97,7 +97,7 @@ func TestBufferWriteBounds(t *testing.T) {
 			buf.Write(bytes.Repeat([]byte{0xa5}, 8), 0)
 			if offset == 7 {
 				buf.Write([]byte{42}, offset)
-				if got := *(*byte)(unsafe.Add(buf.Ptr, 7)); got != 42 {
+				if got := *(*byte)(unsafe.Add(buf.Ptr(), 7)); got != 42 {
 					t.Fatalf("last byte = %d, want 42", got)
 				}
 				return
@@ -106,7 +106,7 @@ func TestBufferWriteBounds(t *testing.T) {
 			mustPanic(t, func() {
 				buf.Write([]byte{42}, offset)
 			})
-			if got := unsafe.Slice((*byte)(buf.Ptr), 8); !bytes.Equal(got, bytes.Repeat([]byte{0xa5}, 8)) {
+			if got := unsafe.Slice((*byte)(buf.Ptr()), 8); !bytes.Equal(got, bytes.Repeat([]byte{0xa5}, 8)) {
 				t.Fatalf("failed Write changed memory to %v", got)
 			}
 		})
@@ -154,7 +154,7 @@ func TestResourcesRemainIndependentAfterFree(t *testing.T) {
 	b.Wait(b.Submit(cmd))
 
 	for i := range survivors {
-		got := unsafe.Slice((*byte)(unsafe.Add(readback.Ptr, i*64)), 64)
+		got := unsafe.Slice((*byte)(unsafe.Add(readback.Ptr(), i*64)), 64)
 		want := bytes.Repeat([]byte{byte(2*i + 2)}, 64)
 		if !bytes.Equal(got, want) {
 			t.Fatalf("surviving buffer %d = %v, want %v", i, got, want)

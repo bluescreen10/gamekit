@@ -126,13 +126,13 @@ func blendedTexel(t *testing.T, clear, source [4]float32, blend gpu.BlendState) 
 
 	vb := b.Alloc(256, gpu.MemoryHost, "verts")
 	defer b.Free(vb)
-	verts := unsafe.Slice((*vertex)(vb.Ptr), 3)
+	verts := unsafe.Slice((*vertex)(vb.Ptr()), 3)
 	verts[0] = vertex{-1, -1, 1, 1, 1}
 	verts[1] = vertex{3, -1, 1, 1, 1}
 	verts[2] = vertex{-1, 3, 1, 1, 1}
 	rb := b.Alloc(64, gpu.MemoryHost, "root")
 	defer b.Free(rb)
-	*(*rootData)(rb.Ptr) = rootData{tint: source, verts: vb.Addr}
+	*(*rootData)(rb.Ptr()) = rootData{tint: source, verts: vb.Addr()}
 	readback := b.Alloc(8, gpu.MemoryHost, "readback")
 	defer b.Free(readback)
 
@@ -143,14 +143,14 @@ func blendedTexel(t *testing.T, clear, source [4]float32, blend gpu.BlendState) 
 	cmd.SetPipeline(pipeline)
 	cmd.SetViewport(0, 0, 1, 1, 0, 1)
 	cmd.SetScissor(0, 0, 1, 1)
-	rootAddr := rb.Addr
+	rootAddr := rb.Addr()
 	cmd.Draw(utils.ToBytes(&rootAddr), 3, 1, 0, 0)
 	cmd.EndRenderPass()
 	cmd.Barrier(gpu.StageColorOutput, gpu.StageTransfer, 0)
 	cmd.CopyTextureToBuffer(readback, target, 0, 0)
 	b.Wait(b.Submit(cmd))
 
-	halves := unsafe.Slice((*uint16)(readback.Ptr), 4)
+	halves := unsafe.Slice((*uint16)(readback.Ptr()), 4)
 	var texel [4]float32
 	for i, h := range halves {
 		texel[i] = halfToFloat32(h)

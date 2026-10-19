@@ -23,10 +23,10 @@ func TestBindless(t *testing.T) {
 
 	a := b.CreateSampler(gpu.SamplerDescriptor{MagLinear: true, MinLinear: true, MipLinear: true})
 	c := b.CreateSampler(gpu.SamplerDescriptor{Compare: gpu.CompareLessEqual}) // shadow comparison sampler
-	if a.Index != 0 || c.Index != 1 {
-		t.Fatalf("unexpected sampler indices: %d %d", a.Index, c.Index)
+	if a.Index() != 0 || c.Index() != 1 {
+		t.Fatalf("unexpected sampler indices: %d %d", a.Index(), c.Index())
 	}
-	t.Logf("samplers registered at heap indices %d, %d", a.Index, c.Index)
+	t.Logf("samplers registered at heap indices %d, %d", a.Index(), c.Index())
 	b.DestroySampler(a)
 	b.DestroySampler(c)
 }

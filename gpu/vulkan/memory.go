@@ -37,7 +37,7 @@ func (b *Backend) Alloc(size uint64, mem gpu.MemoryType, label string) gpu.Buffe
 	h := b.nextID.Add(1)
 	e.size = size
 	b.buffers[h] = e
-	return gpu.Buffer{Addr: addr, Ptr: ptr, Size: size, H: gpu.Handle(h)}
+	return &buffer{reference: reference{b, h}, bufferEntry: e, addr: addr, ptr: ptr}
 }
 
 // allocBuffer creates a buffer with one dedicated allocation, binds them, maps
@@ -114,12 +114,12 @@ func (b *Backend) freeBuffer(e bufferEntry) {
 
 // Free destroys the buffer and releases its memory. No-op on a stale handle.
 func (b *Backend) Free(buf gpu.Buffer) {
-	e, ok := b.buffers[uint64(buf.H)]
+	e, ok := b.buffers[b.handle(buf)]
 	if !ok {
 		return
 	}
 	b.freeBuffer(e)
-	delete(b.buffers, uint64(buf.H))
+	delete(b.buffers, b.handle(buf))
 }
 
 // destroyAllBuffers releases every live buffer (shutdown).

@@ -10,26 +10,32 @@ import (
 
 // CreateTimestampPool allocates a pool of count timestamp query slots.
 func (b *Backend) CreateTimestampPool(count uint32) gpu.QueryPool {
+	if count == 0 {
+		return nil
+	}
+
 	ci := vkQueryPoolCreateInfo{
 		sType:      vkStructureTypeQueryPoolCreateInfo,
 		queryType:  vkQueryTypeTimestamp,
 		queryCount: cUint32(count),
 	}
 	var pool vkQueryPool
-	vkCreateQueryPool(b.device, &ci, nil, &pool)
+	if r := vkCreateQueryPool(b.device, &ci, nil, &pool); r != vkSuccess {
+		return nil
+	}
 	h := b.nextID.Add(1)
 	if b.queryPools == nil {
 		b.queryPools = map[uint64]vkQueryPool{}
 	}
 	b.queryPools[h] = pool
-	return gpu.QueryPool{H: gpu.Handle(h)}
+	return &queryPool{reference{b, h}}
 }
 
 // DestroyTimestampPool releases a timestamp pool.
 func (b *Backend) DestroyTimestampPool(p gpu.QueryPool) {
-	if pool, ok := b.queryPools[uint64(p.H)]; ok {
+	if pool, ok := b.queryPools[b.handle(p)]; ok {
 		vkDestroyQueryPool(b.device, pool, nil)
-		delete(b.queryPools, uint64(p.H))
+		delete(b.queryPools, b.handle(p))
 	}
 }
 
@@ -37,7 +43,11 @@ func (b *Backend) DestroyTimestampPool(p gpu.QueryPool) {
 // them as raw ticks (convert deltas with TimestampPeriod). Returns nil if the pool
 // has no valid results yet.
 func (b *Backend) ReadTimestamps(p gpu.QueryPool, count uint32) []uint64 {
-	pool, ok := b.queryPools[uint64(p.H)]
+	if p == nil || count == 0 {
+		return nil
+	}
+
+	pool, ok := b.queryPools[b.handle(p)]
 	if !ok {
 		return nil
 	}
@@ -65,13 +75,13 @@ func (b *Backend) TimestampValidBits() uint32 {
 }
 
 func (c *cmdBuffer) ResetTimestamps(p gpu.QueryPool, count uint32) {
-	if pool, ok := c.backend.queryPools[uint64(p.H)]; ok {
+	if pool, ok := c.backend.queryPools[c.backend.handle(p)]; ok {
 		vkCmdResetQueryPool(c.cb, pool, 0, cUint32(count))
 	}
 }
 
 func (c *cmdBuffer) WriteTimestamp(p gpu.QueryPool, index uint32, at gpu.Stage) {
-	pool, ok := c.backend.queryPools[uint64(p.H)]
+	pool, ok := c.backend.queryPools[c.backend.handle(p)]
 	if !ok {
 		return
 	}

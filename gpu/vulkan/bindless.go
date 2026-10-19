@@ -246,17 +246,17 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 
 	h := b.nextID.Add(1)
 	b.samplers[h] = s
-	return gpu.Sampler{Index: index, H: gpu.Handle(h)}
+	return &sampler{reference: reference{b, h}, native: s, index: index}
 }
 
 // DestroySampler releases a sampler (its heap slot is not reclaimed yet).
 func (b *Backend) DestroySampler(s gpu.Sampler) {
-	vs, ok := b.samplers[uint64(s.H)]
+	vs, ok := b.samplers[b.handle(s)]
 	if !ok {
 		return
 	}
 	vkDestroySampler(b.device, vs, nil)
-	delete(b.samplers, uint64(s.H))
+	delete(b.samplers, b.handle(s))
 }
 
 // compareOp maps an gpu compare op to Vulkan.

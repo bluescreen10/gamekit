@@ -111,15 +111,15 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 
 	// One index for both arrays: a shader samples gTextures[i] and writes gImages[i],
 	// with the same i, which is also how Metal's single texture table works.
-	tex := gpu.Texture{H: gpu.Handle(h)}
+	tex := &texture{reference: reference{b, h}, textureEntry: b.textures[h]}
 	if d.Usage&(gpu.TextureSampled|gpu.TextureStorage) != 0 {
-		tex.Index = b.nextTextureIndex(d.Usage)
+		tex.index = b.nextTextureIndex(d.Usage)
 	}
 	if d.Usage&gpu.TextureSampled != 0 {
-		b.writeSampledImage(tex.Index, view)
+		b.writeSampledImage(tex.Index(), view)
 	}
 	if d.Usage&gpu.TextureStorage != 0 {
-		b.writeStorageImage(tex.Index, view)
+		b.writeStorageImage(tex.Index(), view)
 	}
 	return tex
 }
@@ -234,7 +234,7 @@ func (b *Backend) nextTextureIndex(usage gpu.TextureUsage) uint32 {
 // returns a Texture whose Index is the new heap slot. The returned handle owns only
 // the view (owned=false), so DestroyTexture frees the view but not the image.
 func (b *Backend) TextureView(t gpu.Texture, kind gpu.TextureKind, baseMip, mipCount, baseLayer, layerCount uint32) gpu.Texture {
-	src, ok := b.textures[uint64(t.H)]
+	src, ok := b.textures[b.handle(t)]
 	if !ok {
 		panic("vulkan: TextureView of unknown texture")
 	}
@@ -264,17 +264,17 @@ func (b *Backend) TextureView(t gpu.Texture, kind gpu.TextureKind, baseMip, mipC
 	if src.writable && mipCount == 1 {
 		usage |= gpu.TextureStorage
 	}
-	tex := gpu.Texture{H: gpu.Handle(h), Index: b.nextTextureIndex(usage)}
-	b.writeSampledImage(tex.Index, view)
+	tex := &texture{reference: reference{b, h}, textureEntry: b.textures[h], index: b.nextTextureIndex(usage)}
+	b.writeSampledImage(tex.Index(), view)
 	if usage&gpu.TextureStorage != 0 {
-		b.writeStorageImage(tex.Index, view)
+		b.writeStorageImage(tex.Index(), view)
 	}
 	return tex
 }
 
 // DestroyTexture releases a texture (heap slots are not reclaimed yet).
 func (b *Backend) DestroyTexture(t gpu.Texture) {
-	e, ok := b.textures[uint64(t.H)]
+	e, ok := b.textures[b.handle(t)]
 	if !ok {
 		return
 	}
@@ -283,7 +283,7 @@ func (b *Backend) DestroyTexture(t gpu.Texture) {
 	} else {
 		vkDestroyImageView(b.device, e.view, nil)
 	}
-	delete(b.textures, uint64(t.H))
+	delete(b.textures, b.handle(t))
 }
 
 // destroyAllTextures releases every live texture (shutdown).

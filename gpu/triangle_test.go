@@ -33,16 +33,16 @@ func TestTriangle(t *testing.T) {
 
 	// Vertex buffer (host-visible; GPU reads via BDA).
 	vb := b.Alloc(256, gpu.MemoryHost, "verts")
-	verts := unsafe.Slice((*vertex)(vb.Ptr), 3)
+	verts := unsafe.Slice((*vertex)(vb.Ptr()), 3)
 	verts[0] = vertex{-0.9, -0.9, 1, 0, 0} // red
 	verts[1] = vertex{0.9, -0.9, 0, 1, 0}  // green
 	verts[2] = vertex{0.0, 0.9, 0, 0, 1}   // blue
 
 	// Root struct: white tint + address of the vertex buffer.
 	rb := b.Alloc(64, gpu.MemoryHost, "root")
-	root := (*rootData)(rb.Ptr)
+	root := (*rootData)(rb.Ptr())
 	root.tint = [4]float32{1, 1, 1, 1}
-	root.verts = vb.Addr
+	root.verts = vb.Addr()
 
 	pipe := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: triangleVert, FragmentShader: triangleFrag,
@@ -57,7 +57,7 @@ func TestTriangle(t *testing.T) {
 		Color: []gpu.ColorAttachment{{Texture: target, Load: gpu.LoadClear, Store: gpu.StoreKeep, Clear: [4]float32{0, 0, 0, 1}}},
 	})
 	cmd.SetPipeline(pipe)
-	rootAddr := rb.Addr
+	rootAddr := rb.Addr()
 	cmd.SetViewport(0, 0, size, size, 0, 1)
 	cmd.SetScissor(0, 0, size, size)
 	cmd.Draw(utils.ToBytes(&rootAddr), 3, 1, 0, 0)
@@ -67,7 +67,7 @@ func TestTriangle(t *testing.T) {
 	f := b.Submit(cmd)
 	b.Wait(f)
 
-	px := unsafe.Slice((*byte)(readback.Ptr), size*size*4)
+	px := unsafe.Slice((*byte)(readback.Ptr()), size*size*4)
 	at := func(x, y int) (r, g, bl, a byte) {
 		i := (y*size + x) * 4
 		return px[i], px[i+1], px[i+2], px[i+3]

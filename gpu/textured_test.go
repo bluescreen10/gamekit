@@ -32,7 +32,7 @@ func TestBindlessTexture(t *testing.T) {
 	tex := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture2D, Width: 2, Height: 2,
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureSampled | gpu.TextureTransfer, Label: "checker"})
 	staging := b.Alloc(uint64(len(texels)), gpu.MemoryHost, "staging")
-	copy(unsafe.Slice((*byte)(staging.Ptr), len(texels)), texels)
+	copy(unsafe.Slice((*byte)(staging.Ptr()), len(texels)), texels)
 
 	samp := b.CreateSampler(gpu.SamplerDescriptor{AddressU: gpu.AddressClamp, AddressV: gpu.AddressClamp})
 
@@ -47,10 +47,10 @@ func TestBindlessTexture(t *testing.T) {
 		{-1, -1, 0, 0}, {1, 1, 1, 1}, {-1, 1, 0, 1},
 	}
 	vbuf := b.Alloc(uint64(len(verts))*16, gpu.MemoryHost, "verts")
-	copy(unsafe.Slice((*texVertex)(vbuf.Ptr), len(verts)), verts)
+	copy(unsafe.Slice((*texVertex)(vbuf.Ptr()), len(verts)), verts)
 
 	root := b.Alloc(64, gpu.MemoryHost, "root")
-	*(*texRoot)(root.Ptr) = texRoot{verts: vbuf.Addr, tex: tex.Index, samp: samp.Index}
+	*(*texRoot)(root.Ptr()) = texRoot{verts: vbuf.Addr(), tex: tex.Index(), samp: samp.Index()}
 
 	pipe := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: texturedVert, FragmentShader: texturedFrag,
@@ -66,7 +66,7 @@ func TestBindlessTexture(t *testing.T) {
 		Color: []gpu.ColorAttachment{{Texture: color, Load: gpu.LoadClear, Store: gpu.StoreKeep, Clear: [4]float32{0, 0, 0, 1}}},
 	})
 	cmd.SetPipeline(pipe)
-	rootAddr := root.Addr
+	rootAddr := root.Addr()
 	cmd.SetViewport(0, 0, size, size, 0, 1)
 	cmd.SetScissor(0, 0, size, size)
 	cmd.Draw(utils.ToBytes(&rootAddr), 6, 1, 0, 0)
@@ -76,7 +76,7 @@ func TestBindlessTexture(t *testing.T) {
 	f := b.Submit(cmd)
 	b.Wait(f)
 
-	px := unsafe.Slice((*byte)(readback.Ptr), size*size*4)
+	px := unsafe.Slice((*byte)(readback.Ptr()), size*size*4)
 	at := func(x, y int) (byte, byte, byte) {
 		i := (y*size + x) * 4
 		return px[i], px[i+1], px[i+2]

@@ -36,9 +36,9 @@ func TestStorageImageWrittenThenSampled(t *testing.T) {
 		{-1, -1, 0, 0}, {1, 1, 1, 1}, {-1, 1, 0, 1},
 	}
 	vbuf := b.Alloc(uint64(len(verts))*16, gpu.MemoryHost, "verts")
-	copy(unsafe.Slice((*texVertex)(vbuf.Ptr), len(verts)), verts)
+	copy(unsafe.Slice((*texVertex)(vbuf.Ptr()), len(verts)), verts)
 	root := b.Alloc(64, gpu.MemoryHost, "root")
-	*(*texRoot)(root.Ptr) = texRoot{verts: vbuf.Addr, tex: image.Index, samp: samp.Index}
+	*(*texRoot)(root.Ptr()) = texRoot{verts: vbuf.Addr(), tex: image.Index(), samp: samp.Index()}
 
 	comp := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: storageWrite, WorkgroupSize: [3]uint32{8, 8, 1}, Label: "storage-write"})
 	pipe := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
@@ -50,14 +50,14 @@ func TestStorageImageWrittenThenSampled(t *testing.T) {
 	readback := b.Alloc(size*size*4, gpu.MemoryHost, "readback")
 	cmd := b.Begin()
 	cmd.SetPipeline(comp)
-	data := storageWriteData{image: image.Index, size: imageSize}
+	data := storageWriteData{image: image.Index(), size: imageSize}
 	cmd.Dispatch(utils.ToBytes(&data), imageSize/8, imageSize/8, 1)
 	cmd.Barrier(gpu.StageCompute, gpu.StageFragment, 0)
 	cmd.BeginRenderPass(gpu.RenderTargets{
 		Color: []gpu.ColorAttachment{{Texture: color, Load: gpu.LoadClear, Store: gpu.StoreKeep, Clear: [4]float32{0, 0, 0, 1}}},
 	})
 	cmd.SetPipeline(pipe)
-	rootAddr := root.Addr
+	rootAddr := root.Addr()
 	cmd.SetViewport(0, 0, size, size, 0, 1)
 	cmd.SetScissor(0, 0, size, size)
 	cmd.Draw(utils.ToBytes(&rootAddr), 6, 1, 0, 0)
@@ -66,7 +66,7 @@ func TestStorageImageWrittenThenSampled(t *testing.T) {
 	cmd.CopyTextureToBuffer(readback, color, 0, 0)
 	b.Wait(b.Submit(cmd))
 
-	px := unsafe.Slice((*byte)(readback.Ptr), size*size*4)
+	px := unsafe.Slice((*byte)(readback.Ptr()), size*size*4)
 	q := size / 4
 	for _, probe := range []struct {
 		x, y int

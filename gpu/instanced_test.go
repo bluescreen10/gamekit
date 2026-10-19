@@ -67,13 +67,13 @@ func cubeGeometry(b gpu.Backend) (verts, idx gpu.Buffer, indexCount int) {
 	corners := [8][3]float32{{-0.3, -0.3, -0.3}, {0.3, -0.3, -0.3}, {0.3, 0.3, -0.3}, {-0.3, 0.3, -0.3},
 		{-0.3, -0.3, 0.3}, {0.3, -0.3, 0.3}, {0.3, 0.3, 0.3}, {-0.3, 0.3, 0.3}}
 	verts = b.Alloc(uint64(len(corners))*24, gpu.MemoryHost, "verts")
-	vs := unsafe.Slice((*vertex3D)(verts.Ptr), len(corners))
+	vs := unsafe.Slice((*vertex3D)(verts.Ptr()), len(corners))
 	for i, c := range corners {
 		vs[i] = vertex3D{c[0], c[1], c[2], c[0] + 0.5, c[1] + 0.5, c[2] + 0.5}
 	}
 	indices := []uint32{0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 0, 4, 5, 0, 5, 1, 3, 2, 6, 3, 6, 7, 0, 3, 7, 0, 7, 4, 1, 5, 6, 1, 6, 2}
 	idx = b.Alloc(uint64(len(indices))*4, gpu.MemoryHost, "indices")
-	copy(unsafe.Slice((*uint32)(idx.Ptr), len(indices)), indices)
+	copy(unsafe.Slice((*uint32)(idx.Ptr()), len(indices)), indices)
 	return verts, idx, len(indices)
 }
 
@@ -86,9 +86,9 @@ func renderInstances(b gpu.Backend, size int, offsets [][3]float32, eye vec3) (p
 
 	n := len(offsets)
 	models := b.Alloc(uint64(n)*64, gpu.MemoryHost, "models")
-	ms := unsafe.Slice((*mat4)(models.Ptr), n)
+	ms := unsafe.Slice((*mat4)(models.Ptr()), n)
 	drawables := b.Alloc(uint64(n)*20, gpu.MemoryHost, "drawables")
-	ds := unsafe.Slice((*gpuDrawable)(drawables.Ptr), n)
+	ds := unsafe.Slice((*gpuDrawable)(drawables.Ptr()), n)
 	for i, o := range offsets {
 		ms[i] = translate(o[0], o[1], o[2])
 		ds[i] = gpuDrawable{bounds: [4]float32{0, 0, 0, 0.55}, transformID: uint32(i)}
@@ -96,7 +96,7 @@ func renderInstances(b gpu.Backend, size int, offsets [][3]float32, eye vec3) (p
 	visible := b.Alloc(uint64(n)*4, gpu.MemoryHost, "visible")
 
 	indirect := b.Alloc(64, gpu.MemoryHost, "indirect")
-	args := (*drawIndexedIndirect)(indirect.Ptr)
+	args := (*drawIndexedIndirect)(indirect.Ptr())
 	*args = drawIndexedIndirect{indexCount: uint32(indexCount)}
 
 	proj := perspectiveRH(float32(50*math.Pi/180), 1, 0.1, 100)
@@ -104,11 +104,11 @@ func renderInstances(b gpu.Backend, size int, offsets [][3]float32, eye vec3) (p
 	vp := mul4x4(proj, view)
 
 	cr := b.Alloc(256, gpu.MemoryHost, "cull-root")
-	*(*cullRoot)(cr.Ptr) = cullRoot{drawables: drawables.Addr, models: models.Addr, indirect: indirect.Addr,
-		visible: visible.Addr, count: uint32(n), planes: extractPlanes(vp)}
+	*(*cullRoot)(cr.Ptr()) = cullRoot{drawables: drawables.Addr(), models: models.Addr(), indirect: indirect.Addr(),
+		visible: visible.Addr(), count: uint32(n), planes: extractPlanes(vp)}
 	dr := b.Alloc(128, gpu.MemoryHost, "draw-root")
-	*(*drawRoot)(dr.Ptr) = drawRoot{viewProj: vp, verts: verts.Addr, models: models.Addr,
-		drawables: drawables.Addr, visible: visible.Addr}
+	*(*drawRoot)(dr.Ptr()) = drawRoot{viewProj: vp, verts: verts.Addr(), models: models.Addr(),
+		drawables: drawables.Addr(), visible: visible.Addr()}
 
 	cull := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{
 		Shader: instancedComp, WorkgroupSize: [3]uint32{64, 1, 1},
@@ -124,7 +124,7 @@ func renderInstances(b gpu.Backend, size int, offsets [][3]float32, eye vec3) (p
 	readback := b.Alloc(uint64(size*size*4), gpu.MemoryHost, "readback")
 	cmd := b.Begin()
 	cmd.SetPipeline(cull)
-	rootAddr := cr.Addr
+	rootAddr := cr.Addr()
 	cmd.Dispatch(utils.ToBytes(&rootAddr), uint32((n+63)/64), 1, 1)
 	cmd.Barrier(gpu.StageCompute, gpu.StageIndirect|gpu.StageVertex, 0)
 	cmd.BeginRenderPass(gpu.RenderTargets{
@@ -132,7 +132,7 @@ func renderInstances(b gpu.Backend, size int, offsets [][3]float32, eye vec3) (p
 		Depth: &gpu.DepthAttachment{Texture: depth, Load: gpu.LoadClear, Store: gpu.StoreKeep, Clear: 1.0},
 	})
 	cmd.SetPipeline(draw)
-	rootAddr = dr.Addr
+	rootAddr = dr.Addr()
 	cmd.SetViewport(0, 0, float32(size), float32(size), 0, 1)
 	cmd.SetScissor(0, 0, int32(size), int32(size))
 	cmd.DrawIndexedIndirect(utils.ToBytes(&rootAddr), idx, gpu.IndexUint32, indirect, 0, 1, 20)
@@ -143,7 +143,7 @@ func renderInstances(b gpu.Backend, size int, offsets [][3]float32, eye vec3) (p
 	b.Wait(f)
 
 	out := make([]byte, size*size*4)
-	copy(out, unsafe.Slice((*byte)(readback.Ptr), size*size*4))
+	copy(out, unsafe.Slice((*byte)(readback.Ptr()), size*size*4))
 	return out, args.instanceCount
 }
 
