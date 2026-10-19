@@ -688,7 +688,7 @@ func feedbackOf(s *submission, fb id) feedback {
 // event and the feedback handler are independent notifications, and Metal guarantees
 // both follow GPU completion, not that one precedes the other.
 func (b *Backend) completed(value uint64) {
-	check(sharedEventWaitUntilSignaledValue(b.event, value, 30000), "GPU command timed out")
+	check(b.event.waitUntilSignaledValue(value, 30000), "GPU command timed out")
 	f, ok := b.early[value]
 	delete(b.early, value)
 	timeout := time.After(30 * time.Second)

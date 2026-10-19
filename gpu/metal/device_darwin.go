@@ -34,11 +34,11 @@ func (d device) newMTL4CommandQueue() queue {
 	return deviceNewMTL4CommandQueue(d)
 }
 
-func (d device) newSharedEvent() id {
+func (d device) newSharedEvent() sharedEvent {
 	return deviceNewSharedEvent(d)
 }
 
-func (d device) newFence() id {
+func (d device) newFence() fence {
 	return deviceNewFence(d)
 }
 

@@ -344,11 +344,11 @@ func deviceMaxArgumentBufferSamplerCount(d device) uint {
 func deviceNewMTL4CommandQueue(d device) queue {
 	return queue(C.gk_o(o(d), selNewMTL4CommandQueue))
 }
-func deviceNewSharedEvent(d device) id {
-	return id(C.gk_o(o(d), selNewSharedEvent))
+func deviceNewSharedEvent(d device) sharedEvent {
+	return sharedEvent(C.gk_o(o(d), selNewSharedEvent))
 }
-func deviceNewFence(d device) id {
-	return id(C.gk_o(o(d), selNewFence))
+func deviceNewFence(d device) fence {
+	return fence(C.gk_o(o(d), selNewFence))
 }
 func deviceNewCommandBuffer(d device) commandBuffer {
 	return commandBuffer(C.gk_o(o(d), selNewCommandBuffer))
@@ -401,7 +401,7 @@ func commandQueueCommit(q queue, buffers *commandBuffer, count uint, options id)
 func commandQueueSignalDrawable(q queue, drawable id) {
 	C.gk_v_o(o(q), selSignalDrawable, o(drawable))
 }
-func commandQueueSignalEvent(q queue, event id, value uint64) {
+func commandQueueSignalEvent(q queue, event sharedEvent, value uint64) {
 	C.gk_v_ou(o(q), selSignalEventValue, o(event), C.gk_u(value))
 }
 func residencySetAddAllocation(s residencySet, allocation id) {
@@ -416,7 +416,7 @@ func residencySetCommit(s residencySet) {
 func residencySetRequestResidency(s residencySet) {
 	C.gk_v(o(s), selRequestResidency)
 }
-func sharedEventWaitUntilSignaledValue(e id, value uint64, timeoutMS uint) bool {
+func sharedEventWaitUntilSignaledValue(e sharedEvent, value uint64, timeoutMS uint) bool {
 	return C.gk_b_uu(o(e), selWaitUntilSignaledValue, C.gk_u(value), C.gk_u(timeoutMS)) != 0
 }
 
@@ -798,10 +798,10 @@ func commitFeedbackGPUEndTime(f id) float64 {
 func commandEncoderEndEncoding(e id) {
 	C.gk_v(o(e), selEndEncoding)
 }
-func commandEncoderUpdateFence(e, fence id, stages uint) {
+func commandEncoderUpdateFence(e id, fence fence, stages uint) {
 	C.gk_v_ou(o(e), selUpdateFenceAfterEncoderStages, o(fence), C.gk_u(stages))
 }
-func commandEncoderWaitForFence(e, fence id, stages uint) {
+func commandEncoderWaitForFence(e id, fence fence, stages uint) {
 	C.gk_v_ou(o(e), selWaitForFenceBeforeEncoderStages, o(fence), C.gk_u(stages))
 }
 

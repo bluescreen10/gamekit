@@ -14,11 +14,11 @@ func (e renderCommandEncoder) endEncoding() {
 	commandEncoderEndEncoding(id(e))
 }
 
-func (e renderCommandEncoder) updateFence(fence id, stages uint) {
+func (e renderCommandEncoder) updateFence(fence fence, stages uint) {
 	commandEncoderUpdateFence(id(e), fence, stages)
 }
 
-func (e renderCommandEncoder) waitForFence(fence id, stages uint) {
+func (e renderCommandEncoder) waitForFence(fence fence, stages uint) {
 	commandEncoderWaitForFence(id(e), fence, stages)
 }
 

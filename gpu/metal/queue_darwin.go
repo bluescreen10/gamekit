@@ -22,6 +22,6 @@ func (q queue) signalDrawable(drawable id) {
 	commandQueueSignalDrawable(q, drawable)
 }
 
-func (q queue) signalEvent(event id, value uint64) {
+func (q queue) signalEvent(event sharedEvent, value uint64) {
 	commandQueueSignalEvent(q, event, value)
 }

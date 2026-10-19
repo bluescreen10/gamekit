@@ -98,7 +98,8 @@ type Backend struct {
 	queue        queue
 	compiler     compiler
 	residencySet residencySet
-	event, fence id
+	event        sharedEvent
+	fence        fence
 	// The command allocator, command buffer and argument table are created once and
 	// reused every frame rather than recreated each Begin. That reuse is exactly what
 	// MTL4's allocator model exists to make cheap — recreating them per frame was
