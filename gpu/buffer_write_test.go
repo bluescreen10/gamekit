@@ -11,13 +11,7 @@ import (
 // TestBufferWriteCopiesAtOffset covers the ordinary path: bytes land at the given
 // offset in the mapped memory, leaving the rest untouched.
 func TestBufferWriteCopiesAtOffset(t *testing.T) {
-	if !gpu.HasBackend() {
-		t.Skip("no gpu backend registered")
-	}
-	b := gpu.Instance(nil)
-	if err := b.Init(); err != nil {
-		t.Skipf("device unavailable: %v", err)
-	}
+	b := testBackend(t)
 
 	buf := b.Alloc(8, gpu.MemoryHost, "write-test")
 	defer b.Free(buf)
@@ -49,13 +43,7 @@ func TestBufferWriteEmptyIsNoop(t *testing.T) {
 // TestBufferWriteOverrunPanics guards the segfault this method exists to replace: a
 // write that would run past Size must panic instead of corrupting adjacent memory.
 func TestBufferWriteOverrunPanics(t *testing.T) {
-	if !gpu.HasBackend() {
-		t.Skip("no gpu backend registered")
-	}
-	b := gpu.Instance(nil)
-	if err := b.Init(); err != nil {
-		t.Skipf("device unavailable: %v", err)
-	}
+	b := testBackend(t)
 
 	buf := b.Alloc(4, gpu.MemoryHost, "overrun-test")
 	defer b.Free(buf)
@@ -71,13 +59,7 @@ func TestBufferWriteOverrunPanics(t *testing.T) {
 // TestBufferWriteOffsetOverrunPanics: an in-bounds length can still overrun once the
 // offset is added; both terms of the bound must be checked together, not separately.
 func TestBufferWriteOffsetOverrunPanics(t *testing.T) {
-	if !gpu.HasBackend() {
-		t.Skip("no gpu backend registered")
-	}
-	b := gpu.Instance(nil)
-	if err := b.Init(); err != nil {
-		t.Skipf("device unavailable: %v", err)
-	}
+	b := testBackend(t)
 
 	buf := b.Alloc(8, gpu.MemoryHost, "offset-overrun-test")
 	defer b.Free(buf)
@@ -93,13 +75,7 @@ func TestBufferWriteOffsetOverrunPanics(t *testing.T) {
 // TestBufferWriteNoPtrPanics: a MemoryDevice buffer (or a zero Buffer) has no mapped
 // pointer at all, so writing to it must panic rather than dereference nil.
 func TestBufferWriteNoPtrPanics(t *testing.T) {
-	if !gpu.HasBackend() {
-		t.Skip("no gpu backend registered")
-	}
-	b := gpu.Instance(nil)
-	if err := b.Init(); err != nil {
-		t.Skipf("device unavailable: %v", err)
-	}
+	b := testBackend(t)
 
 	buf := b.Alloc(64, gpu.MemoryDevice, "device-only")
 	defer b.Free(buf)

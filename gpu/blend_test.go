@@ -23,6 +23,33 @@ func TestBlendStates(t *testing.T) {
 		want  [4]float32
 	}{
 		{
+			name: "disabled replaces all channels",
+			want: source,
+		},
+		{
+			name: "minimum ignores factors",
+			blend: gpu.BlendState{
+				Enable:  true,
+				ColorOp: gpu.BlendFactorOp{Src: gpu.BlendZero, Dst: gpu.BlendZero, Op: gpu.BlendMin},
+				AlphaOp: gpu.BlendFactorOp{Src: gpu.BlendZero, Dst: gpu.BlendZero, Op: gpu.BlendMin},
+			},
+			want: [4]float32{0.5, 0.5, 0.25, 0.25},
+		},
+		{
+			name: "maximum ignores factors",
+			blend: gpu.BlendState{
+				Enable:  true,
+				ColorOp: gpu.BlendFactorOp{Src: gpu.BlendZero, Dst: gpu.BlendZero, Op: gpu.BlendMax},
+				AlphaOp: gpu.BlendFactorOp{Src: gpu.BlendZero, Dst: gpu.BlendZero, Op: gpu.BlendMax},
+			},
+			want: [4]float32{1, 0.5, 0.5, 0.75},
+		},
+		{
+			name:  "disabled blending still applies the write mask",
+			blend: gpu.BlendState{WriteMask: 1 | 4},
+			want:  [4]float32{0.5, 0.5, 0.5, 0.25},
+		},
+		{
 			name: "colour scaled by one minus destination alpha",
 			blend: gpu.BlendState{
 				Enable:  true,

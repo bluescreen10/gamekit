@@ -9,7 +9,7 @@ import (
 	"github.com/bluescreen10/gamekit/utils"
 )
 
-// shaderConstants matches Constants in testdata/constants.comp.
+// shaderConstants matches Constants in testdata/constants.comp.glsl.
 type shaderConstants struct {
 	enabled uint32
 	offset  int32

@@ -9,13 +9,13 @@ import (
 	"github.com/bluescreen10/gamekit/utils"
 )
 
-// gpuDrawable matches Drawable in testdata/instanced.{comp,vert} (scalar, 20 bytes).
+// gpuDrawable matches Drawable in testdata/instanced.{comp,vert}.glsl (scalar, 20 bytes).
 type gpuDrawable struct {
 	bounds      [4]float32 // xyz = local center, w = radius
 	transformID uint32
 }
 
-// cullRoot matches CullRoot in testdata/instanced.comp (scalar; pointers first,
+// cullRoot matches CullRoot in testdata/instanced.comp.glsl (scalar; pointers first,
 // count, then planes at offset 36 — scalar packs vec4 at 4-byte alignment).
 type cullRoot struct {
 	drawables uint64
@@ -26,7 +26,7 @@ type cullRoot struct {
 	planes    [6][4]float32
 }
 
-// drawRoot matches DrawRoot in testdata/instanced.vert.
+// drawRoot matches DrawRoot in testdata/instanced.vert.glsl.
 type drawRoot struct {
 	viewProj  [16]float32
 	verts     uint64

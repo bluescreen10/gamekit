@@ -19,3 +19,19 @@ func TestDeviceOutlivesAnotherUser(t *testing.T) {
 		t.Errorf("after another user's Destroy, constants = %+v, want %+v", got, want)
 	}
 }
+
+func TestBackendReinitializes(t *testing.T) {
+	b := testBackend(t)
+	b.WaitIdle()
+	b.Destroy()
+	if err := b.Init(); err != nil {
+		backendErr = err
+		t.Fatalf("Init after final Destroy: %v", err)
+	}
+
+	got := readComputeConstants(t, nil)
+	want := shaderConstants{enabled: 0, offset: -3, count: 7, scale: 0.5}
+	if got != want {
+		t.Fatalf("after reinitialization, constants = %+v, want %+v", got, want)
+	}
+}

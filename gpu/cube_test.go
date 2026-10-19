@@ -9,13 +9,13 @@ import (
 	"github.com/bluescreen10/gamekit/utils"
 )
 
-// vertex3D matches Vertex3D in testdata/mesh.vert (scalar, 24 bytes).
+// vertex3D matches Vertex3D in testdata/mesh.vert.glsl (scalar, 24 bytes).
 type vertex3D struct {
 	px, py, pz float32
 	cr, cg, cb float32
 }
 
-// meshRoot matches MeshRoot in testdata/mesh.vert (mat4 @0, ptr @64).
+// meshRoot matches MeshRoot in testdata/mesh.vert.glsl (mat4 @0, ptr @64).
 type meshRoot struct {
 	mvp   [16]float32
 	verts uint64

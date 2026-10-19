@@ -5,21 +5,24 @@ package gpu_test
 // so validate ANY backend, not just Vulkan. The backend is obtained from the
 // registry and the suite skips when none is registered/initializable — so
 // `go test ./...` passes on every platform, running the tests only where a backend
-// exists. Register a backend for this suite with a build-tagged blank import (see
-// backend_darwin_test.go).
+// exists. gpu/default registers the platform backend through one shared import.
 
 import (
 	"embed"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
 
 	"github.com/bluescreen10/gamekit/gpu"
+	_ "github.com/bluescreen10/gamekit/gpu/default"
 )
 
+//go:generate go run ./testdata/generate.go -dir ./testdata
+
 // Test shaders are fixtures under gpu/testdata, embedded here (a _test.go file) so
-// they never enter the production shaders package. Metal fixtures are generated
-// from the same SPIR-V and carry reflected compute workgroup sizes.
+// they never enter the production shaders package. Metal fixtures are compiled
+// libraries generated from the corresponding shader sources.
 var (
 	//go:embed testdata/*.metalbin
 	metalFixtures embed.FS
@@ -57,6 +60,12 @@ var (
 	constantsVert []byte
 	//go:embed testdata/constants.frag.spv
 	constantsFrag []byte
+	//go:embed testdata/payload.comp.spv
+	payloadComp []byte
+	//go:embed testdata/shadow.frag.spv
+	shadowFrag []byte
+	//go:embed testdata/attachments.frag.spv
+	attachmentsFrag []byte
 )
 
 var (
@@ -70,12 +79,27 @@ var (
 // GAMEKIT_GPU_BACKEND selects an implementation explicitly and fails on init errors.
 func testBackend(t *testing.T) gpu.Backend {
 	t.Helper()
+	name := os.Getenv("GAMEKIT_GPU_BACKEND")
 	if !gpu.HasBackend() {
+		if name != "" {
+			t.Fatalf("requested backend %q is not registered", name)
+		}
+
 		t.Skip("no gpu backend registered for this platform")
 	}
+
 	backendOnce.Do(func() {
-		name := os.Getenv("GAMEKIT_GPU_BACKEND")
-		backendInst = gpu.Instance(&name)
+		if name == "" {
+			backendInst = gpu.Instance(nil)
+		} else {
+			var ok bool
+			backendInst, ok = gpu.Lookup(name)
+			if !ok {
+				backendErr = fmt.Errorf("backend %q is not registered", name)
+				return
+			}
+		}
+
 		if metal, ok := gpu.Lookup("metal"); ok && backendInst == metal {
 			variant := func(name string) []byte {
 				data, err := metalFixtures.ReadFile("testdata/" + name + ".metalbin")
@@ -101,14 +125,29 @@ func testBackend(t *testing.T) gpu.Backend {
 			constantsComp = variant("constants.comp")
 			constantsVert = variant("constants.vert")
 			constantsFrag = variant("constants.frag")
+			payloadComp = variant("payload.comp")
+			shadowFrag = variant("shadow.frag")
+			attachmentsFrag = variant("attachments.frag")
 		}
 		backendErr = backendInst.Init()
 	})
+
 	if backendErr != nil {
-		if os.Getenv("GAMEKIT_GPU_BACKEND") != "" {
+		if name != "" {
 			t.Fatalf("requested backend init failed: %v", backendErr)
 		}
 		t.Skipf("gpu backend init failed (no device?): %v", backendErr)
 	}
+
 	return backendInst
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if backendInst != nil && backendErr == nil {
+		backendInst.WaitIdle()
+		backendInst.Destroy()
+	}
+
+	os.Exit(code)
 }
