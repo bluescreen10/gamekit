@@ -60,8 +60,8 @@ type resource struct {
 	// Textures.
 	width, height, depth  uint64
 	mips, layers, samples uint64
-	textureType           uint
-	format                uint
+	textureType           mtlTextureType
+	format                mtlPixelFormat
 	memoryless            bool
 
 	// Pipelines: the depth-stencil state, fixed-function state, and the bytes the
@@ -70,9 +70,9 @@ type resource struct {
 	// more tightly hands the argument table a short root and the shader reads past it.
 	// Zero when the shader takes no root argument.
 	depthStencil mtlDepthStencilState
-	topology     uint
-	cull         uint
-	winding      uint
+	topology     mtlPrimitiveType
+	cull         mtlCullMode
+	winding      mtlWinding
 	depthWrite   bool
 	group        [3]uint
 	rootSize     uint64
@@ -164,7 +164,7 @@ func (*Backend) ShaderFormat() string {
 
 // pixelFormats maps every gpu.Format this backend supports to Metal. ETC2/EAC are
 // missing because Metal never exposes them, on any platform.
-var pixelFormats = map[gpu.Format]uint{
+var pixelFormats = map[gpu.Format]mtlPixelFormat{
 	gpu.FormatR8Unorm: mtlPixelFormatR8Unorm, gpu.FormatRG8Unorm: mtlPixelFormatRG8Unorm,
 	gpu.FormatRGBA8Unorm: mtlPixelFormatRGBA8Unorm, gpu.FormatBGRA8Unorm: mtlPixelFormatBGRA8Unorm,
 	gpu.FormatRGBA8Srgb: mtlPixelFormatRGBA8Unorm_sRGB, gpu.FormatBGRA8Srgb: mtlPixelFormatBGRA8Unorm_sRGB,
@@ -219,7 +219,7 @@ var supportedFormats = func() []gpu.Format {
 	return formats
 }()
 
-func pixelFormat(f gpu.Format) uint {
+func pixelFormat(f gpu.Format) mtlPixelFormat {
 	if p, ok := pixelFormats[f]; ok {
 		return p
 	}
@@ -425,7 +425,7 @@ func (b *Backend) Alloc(size uint64, mem gpu.MemoryType, label string) gpu.Buffe
 	check(size > 0 && size <= b.maxBufferLength && mem <= gpu.MemoryDevice, "invalid buffer allocation")
 	pool := pushPool()
 	defer pool.drain()
-	options := uint(mtlResourceStorageModeShared)
+	options := mtlResourceStorageModeShared
 	if mem == gpu.MemoryDevice {
 		options = mtlResourceStorageModePrivate
 	}
@@ -486,13 +486,13 @@ func (b *Backend) slot(r *resource) uint32 {
 	return r.slot
 }
 
-var textureTypes = [...]uint{
+var textureTypes = [...]mtlTextureType{
 	gpu.Texture2D: mtlTextureType2D, gpu.Texture2DArray: mtlTextureType2DArray,
 	gpu.TextureCube: mtlTextureTypeCube, gpu.TextureCubeArray: mtlTextureTypeCubeArray,
 	gpu.Texture3D: mtlTextureType3D,
 }
 
-func textureType(k gpu.TextureKind) uint {
+func textureType(k gpu.TextureKind) mtlTextureType {
 	check(int(k) < len(textureTypes), "unknown texture kind")
 	return textureTypes[k]
 }
@@ -516,7 +516,7 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 		check(d.Kind == gpu.Texture2D && r.mips == 1, "MSAA requires a 2D texture with one mip")
 		r.textureType = mtlTextureType2DMultisample
 	}
-	usage := uint(mtlTextureUsagePixelFormatView)
+	usage := mtlTextureUsagePixelFormatView
 	if d.Usage&gpu.TextureSampled != 0 {
 		usage |= mtlTextureUsageShaderRead
 	}
@@ -526,7 +526,7 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	if d.Usage&(gpu.TextureRenderTarget|gpu.TextureDepth) != 0 {
 		usage |= mtlTextureUsageRenderTarget
 	}
-	storage := uint(mtlStorageModePrivate)
+	storage := mtlStorageModePrivate
 	// gpu.TextureTransient: in tile memory alone, on the GPUs that have it.
 	if d.Usage&gpu.TextureTransient != 0 {
 		check(d.Usage&(gpu.TextureSampled|gpu.TextureStorage|gpu.TextureTransfer) == 0,
@@ -542,13 +542,13 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	defer pool.drain()
 	desc := newMTLTextureDescriptor()
 	defer desc.release()
-	desc.setTextureType(uint(r.textureType))
+	desc.setTextureType(r.textureType)
 	desc.setWidth(uint(r.width))
 	desc.setHeight(uint(r.height))
 	desc.setDepth(uint(r.depth))
 	desc.setArrayLength(uint(arrayLength))
 	desc.setMipmapLevelCount(uint(r.mips))
-	desc.setPixelFormat(uint(r.format))
+	desc.setPixelFormat(r.format)
 	desc.setSampleCount(uint(r.samples))
 	desc.setStorageMode(storage)
 	desc.setUsage(usage)
@@ -609,7 +609,7 @@ func (b *Backend) DestroyTexture(t gpu.Texture) {
 	b.release(t.H)
 }
 
-var addressModes = [...]uint{
+var addressModes = [...]mtlSamplerAddressMode{
 	gpu.AddressClamp: mtlSamplerAddressModeClampToEdge, gpu.AddressRepeat: mtlSamplerAddressModeRepeat,
 	gpu.AddressMirror: mtlSamplerAddressModeMirrorRepeat,
 }
@@ -617,7 +617,7 @@ var addressModes = [...]uint{
 func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	check(int(d.AddressU) < len(addressModes) && int(d.AddressV) < len(addressModes) &&
 		int(d.AddressW) < len(addressModes) && d.Compare < 8, "invalid sampler descriptor")
-	filter := func(linear bool) uint {
+	filter := func(linear bool) mtlSamplerMinMagFilter {
 		if linear {
 			return mtlSamplerMinMagFilterLinear
 		}
@@ -629,7 +629,7 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	defer desc.release()
 	desc.setMinFilter(filter(d.MinLinear))
 	desc.setMagFilter(filter(d.MagLinear))
-	mip := uint(mtlSamplerMipFilterNearest)
+	mip := mtlSamplerMipFilterNearest
 	if d.MipLinear {
 		mip = mtlSamplerMipFilterLinear
 	}
@@ -637,7 +637,7 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	desc.setSAddressMode(addressModes[d.AddressU])
 	desc.setTAddressMode(addressModes[d.AddressV])
 	desc.setRAddressMode(addressModes[d.AddressW])
-	desc.setCompareFunction(uint(d.Compare))
+	desc.setCompareFunction(mtlCompareFunction(d.Compare))
 	desc.setMaxAnisotropy(uint(max(d.MaxAnisotropy, 1)))
 	desc.setSupportArgumentBuffers(true)
 	desc.setLabel(d.Label)
@@ -699,7 +699,7 @@ type constant struct {
 	bits  uint32
 }
 
-var constantTypes = [...]uint{
+var constantTypes = [...]mtlDataType{
 	specialization.Bool: mtlDataTypeBool, specialization.Int: mtlDataTypeInt,
 	specialization.Uint: mtlDataTypeUInt, specialization.Float: mtlDataTypeFloat,
 }
@@ -778,18 +778,18 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 	return gpu.Pipeline{H: gpu.Handle(b.add(r))}
 }
 
-var blendFactors = [...]uint{
+var blendFactors = [...]mtlBlendFactor{
 	gpu.BlendZero: mtlBlendFactorZero, gpu.BlendOne: mtlBlendFactorOne,
 	gpu.BlendSrcAlpha: mtlBlendFactorSourceAlpha, gpu.BlendOneMinusSrcAlpha: mtlBlendFactorOneMinusSourceAlpha,
 	gpu.BlendDstAlpha: mtlBlendFactorDestinationAlpha, gpu.BlendOneMinusDstAlpha: mtlBlendFactorOneMinusDestinationAlpha,
 }
 
-var topologies = [...]uint{
+var topologies = [...]mtlPrimitiveType{
 	gpu.TopologyTriangles: mtlPrimitiveTypeTriangle, gpu.TopologyTriangleStrip: mtlPrimitiveTypeTriangleStrip,
 	gpu.TopologyLines: mtlPrimitiveTypeLine, gpu.TopologyPoints: mtlPrimitiveTypePoint,
 }
 
-var cullModes = [...]uint{
+var cullModes = [...]mtlCullMode{
 	gpu.CullNone: mtlCullModeNone, gpu.CullBack: mtlCullModeBack, gpu.CullFront: mtlCullModeFront,
 }
 
@@ -820,7 +820,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	attachments := desc.colorAttachments()
 	for i, f := range d.ColorFormats {
 		t := mtl4RenderPipelineColorAttachmentDescriptor(arrayObjectAtIndexedSubscript(attachments, uint(i)))
-		t.setPixelFormat(uint(pixelFormat(f)))
+		t.setPixelFormat(pixelFormat(f))
 		var blend gpu.BlendState
 		if i < len(d.Blend) {
 			blend = d.Blend[i]
@@ -830,7 +830,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 		if mask == 0 {
 			mask = 15
 		}
-		t.setWriteMask((mask&1)<<3 | (mask&2)<<1 | (mask&4)>>1 | (mask&8)>>3)
+		t.setWriteMask(mtlColorWriteMask((mask&1)<<3 | (mask&2)<<1 | (mask&4)>>1 | (mask&8)>>3))
 		if !blend.Enable {
 			t.setBlendingState(mtl4BlendStateDisabled)
 			continue
@@ -841,10 +841,10 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 		t.setBlendingState(mtl4BlendStateEnabled)
 		t.setSourceRGBBlendFactor(blendFactors[blend.ColorOp.Src])
 		t.setDestinationRGBBlendFactor(blendFactors[blend.ColorOp.Dst])
-		t.setRgbBlendOperation(uint(blend.ColorOp.Op))
+		t.setRgbBlendOperation(mtlBlendOperation(blend.ColorOp.Op))
 		t.setSourceAlphaBlendFactor(blendFactors[blend.AlphaOp.Src])
 		t.setDestinationAlphaBlendFactor(blendFactors[blend.AlphaOp.Dst])
-		t.setAlphaBlendOperation(uint(blend.AlphaOp.Op))
+		t.setAlphaBlendOperation(mtlBlendOperation(blend.AlphaOp.Op))
 	}
 	// Metal 4 pipeline state is no longer tied to a depth/stencil attachment format; it
 	// lives purely on the render pass descriptor. The descriptor's depth fields still
@@ -857,9 +857,9 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	reflection := ps.reflection()
 	r.rootSize = max(rootBytes(renderPipelineReflectionVertexBindings(reflection)), rootBytes(renderPipelineReflectionFragmentBindings(reflection)))
 	depth := newMTLDepthStencilDescriptor()
-	compare := uint(mtlCompareFunctionAlways)
+	compare := mtlCompareFunctionAlways
 	if d.DepthTest {
-		compare = uint(d.DepthCompare)
+		compare = mtlCompareFunction(d.DepthCompare)
 	}
 	depth.setDepthCompareFunction(compare)
 	depth.setDepthWriteEnabled(d.DepthWrite)
@@ -957,7 +957,7 @@ func (b *Backend) CreateSwapchain(surface gpu.Surface, desc gpu.SwapchainDescrip
 	layer := id(surface)
 	check(objectIsKindOfClass(layer, class("CAMetalLayer")), "surface must be a CAMetalLayer")
 	metalLayerSetDevice(layer, b.device)
-	metalLayerSetPixelFormat(layer, uint(pixelFormat(format)))
+	metalLayerSetPixelFormat(layer, pixelFormat(format))
 	metalLayerSetFramebufferOnly(layer, false)
 	metalLayerSetDrawableSize(layer, float64(desc.Width), float64(desc.Height))
 	sc := gpu.Swapchain{H: gpu.Handle(b.add(&resource{kind: kindSwapchain, object: retain(layer)}))}

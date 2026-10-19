@@ -16,31 +16,31 @@ func newMTLSamplerDescriptor() mtlSamplerDescriptor {
 	return mtlSamplerDescriptor(newObject("MTLSamplerDescriptor"))
 }
 
-func (d mtlSamplerDescriptor) setMinFilter(v uint) {
+func (d mtlSamplerDescriptor) setMinFilter(v mtlSamplerMinMagFilter) {
 	samplerDescriptorSetMinFilter(d, v)
 }
 
-func (d mtlSamplerDescriptor) setMagFilter(v uint) {
+func (d mtlSamplerDescriptor) setMagFilter(v mtlSamplerMinMagFilter) {
 	samplerDescriptorSetMagFilter(d, v)
 }
 
-func (d mtlSamplerDescriptor) setMipFilter(v uint) {
+func (d mtlSamplerDescriptor) setMipFilter(v mtlSamplerMipFilter) {
 	samplerDescriptorSetMipFilter(d, v)
 }
 
-func (d mtlSamplerDescriptor) setSAddressMode(v uint) {
+func (d mtlSamplerDescriptor) setSAddressMode(v mtlSamplerAddressMode) {
 	samplerDescriptorSetSAddressMode(d, v)
 }
 
-func (d mtlSamplerDescriptor) setTAddressMode(v uint) {
+func (d mtlSamplerDescriptor) setTAddressMode(v mtlSamplerAddressMode) {
 	samplerDescriptorSetTAddressMode(d, v)
 }
 
-func (d mtlSamplerDescriptor) setRAddressMode(v uint) {
+func (d mtlSamplerDescriptor) setRAddressMode(v mtlSamplerAddressMode) {
 	samplerDescriptorSetRAddressMode(d, v)
 }
 
-func (d mtlSamplerDescriptor) setCompareFunction(v uint) {
+func (d mtlSamplerDescriptor) setCompareFunction(v mtlCompareFunction) {
 	samplerDescriptorSetCompareFunction(d, v)
 }
 

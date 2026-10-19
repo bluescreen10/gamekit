@@ -14,11 +14,11 @@ func (e mtl4ComputeCommandEncoder) endEncoding() {
 	commandEncoderEndEncoding(id(e))
 }
 
-func (e mtl4ComputeCommandEncoder) updateFence(fence mtlFence, stages uint) {
+func (e mtl4ComputeCommandEncoder) updateFence(fence mtlFence, stages mtlStages) {
 	commandEncoderUpdateFence(id(e), fence, stages)
 }
 
-func (e mtl4ComputeCommandEncoder) waitForFence(fence mtlFence, stages uint) {
+func (e mtl4ComputeCommandEncoder) waitForFence(fence mtlFence, stages mtlStages) {
 	commandEncoderWaitForFence(id(e), fence, stages)
 }
 
@@ -57,6 +57,6 @@ func (e mtl4ComputeCommandEncoder) copyFromTextureSourceSliceSourceLevelSourceOr
 	computeCommandEncoderCopyFromTextureToTexture(e, src, srcSlice, srcLevel, srcOrigin, size, dst, dstSlice, dstLevel, dstOrigin)
 }
 
-func (e mtl4ComputeCommandEncoder) writeTimestampWithGranularity(granularity uint, heap mtl4CounterHeap, index uint) {
+func (e mtl4ComputeCommandEncoder) writeTimestampWithGranularity(granularity mtl4TimestampGranularity, heap mtl4CounterHeap, index uint) {
 	computeCommandEncoderWriteTimestampWithGranularity(e, granularity, heap, index)
 }

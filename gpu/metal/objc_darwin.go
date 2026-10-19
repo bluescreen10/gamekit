@@ -58,152 +58,152 @@ func o[T ~uintptr](x T) C.gk_obj {
 
 // Constants.
 const (
-	mtl4BlendStateDisabled                  = C.MTL4BlendStateDisabled
-	mtl4BlendStateEnabled                   = C.MTL4BlendStateEnabled
-	mtl4CounterHeapTypeTimestamp            = C.MTL4CounterHeapTypeTimestamp
-	mtl4ShaderReflectionBindingInfo         = C.MTL4ShaderReflectionBindingInfo
-	mtl4TimestampGranularityPrecise         = C.MTL4TimestampGranularityPrecise
-	mtlArgumentBuffersTier2                 = C.MTLArgumentBuffersTier2
-	mtlBindingTypeBuffer                    = C.MTLBindingTypeBuffer
-	mtlBlendFactorDestinationAlpha          = C.MTLBlendFactorDestinationAlpha
-	mtlBlendFactorOne                       = C.MTLBlendFactorOne
-	mtlBlendFactorOneMinusDestinationAlpha  = C.MTLBlendFactorOneMinusDestinationAlpha
-	mtlBlendFactorOneMinusSourceAlpha       = C.MTLBlendFactorOneMinusSourceAlpha
-	mtlBlendFactorSourceAlpha               = C.MTLBlendFactorSourceAlpha
-	mtlBlendFactorZero                      = C.MTLBlendFactorZero
-	mtlCompareFunctionAlways                = C.MTLCompareFunctionAlways
-	mtlCullModeBack                         = C.MTLCullModeBack
-	mtlCullModeFront                        = C.MTLCullModeFront
-	mtlCullModeNone                         = C.MTLCullModeNone
-	mtlDataTypeBool                         = C.MTLDataTypeBool
-	mtlDataTypeFloat                        = C.MTLDataTypeFloat
-	mtlDataTypeInt                          = C.MTLDataTypeInt
-	mtlDataTypeUInt                         = C.MTLDataTypeUInt
-	mtlGPUFamilyApple1                      = C.MTLGPUFamilyApple1
-	mtlGPUFamilyMetal4                      = C.MTLGPUFamilyMetal4
-	mtlIndexTypeUInt16                      = C.MTLIndexTypeUInt16
-	mtlIndexTypeUInt32                      = C.MTLIndexTypeUInt32
-	mtlLanguageVersion3_0                   = C.MTLLanguageVersion3_0
-	mtlLoadActionClear                      = C.MTLLoadActionClear
-	mtlLoadActionDontCare                   = C.MTLLoadActionDontCare
-	mtlLoadActionLoad                       = C.MTLLoadActionLoad
-	mtlMultisampleDepthResolveFilterSample0 = C.MTLMultisampleDepthResolveFilterSample0
-	mtlPrimitiveTypeLine                    = C.MTLPrimitiveTypeLine
-	mtlPrimitiveTypePoint                   = C.MTLPrimitiveTypePoint
-	mtlPrimitiveTypeTriangle                = C.MTLPrimitiveTypeTriangle
-	mtlPrimitiveTypeTriangleStrip           = C.MTLPrimitiveTypeTriangleStrip
-	mtlRenderStageFragment                  = C.MTLRenderStageFragment
-	mtlRenderStageVertex                    = C.MTLRenderStageVertex
-	mtlResourceStorageModePrivate           = C.MTLResourceStorageModePrivate
-	mtlResourceStorageModeShared            = C.MTLResourceStorageModeShared
-	mtlSamplerAddressModeClampToEdge        = C.MTLSamplerAddressModeClampToEdge
-	mtlSamplerAddressModeMirrorRepeat       = C.MTLSamplerAddressModeMirrorRepeat
-	mtlSamplerAddressModeRepeat             = C.MTLSamplerAddressModeRepeat
-	mtlSamplerMinMagFilterLinear            = C.MTLSamplerMinMagFilterLinear
-	mtlSamplerMinMagFilterNearest           = C.MTLSamplerMinMagFilterNearest
-	mtlSamplerMipFilterLinear               = C.MTLSamplerMipFilterLinear
-	mtlSamplerMipFilterNearest              = C.MTLSamplerMipFilterNearest
-	mtlStageAccelerationStructure           = C.MTLStageAccelerationStructure
-	mtlStageBlit                            = C.MTLStageBlit
-	mtlStageDispatch                        = C.MTLStageDispatch
-	mtlStageFragment                        = C.MTLStageFragment
-	mtlStageMesh                            = C.MTLStageMesh
-	mtlStageObject                          = C.MTLStageObject
-	mtlStageTile                            = C.MTLStageTile
-	mtlStageVertex                          = C.MTLStageVertex
-	mtlStorageModeMemoryless                = C.MTLStorageModeMemoryless
-	mtlStorageModePrivate                   = C.MTLStorageModePrivate
-	mtlStoreActionDontCare                  = C.MTLStoreActionDontCare
-	mtlStoreActionMultisampleResolve        = C.MTLStoreActionMultisampleResolve
-	mtlStoreActionStore                     = C.MTLStoreActionStore
-	mtlStoreActionUnknown                   = C.MTLStoreActionUnknown
-	mtlTextureType2D                        = C.MTLTextureType2D
-	mtlTextureType2DArray                   = C.MTLTextureType2DArray
-	mtlTextureType2DMultisample             = C.MTLTextureType2DMultisample
-	mtlTextureType3D                        = C.MTLTextureType3D
-	mtlTextureTypeCube                      = C.MTLTextureTypeCube
-	mtlTextureTypeCubeArray                 = C.MTLTextureTypeCubeArray
-	mtlTextureUsagePixelFormatView          = C.MTLTextureUsagePixelFormatView
-	mtlTextureUsageRenderTarget             = C.MTLTextureUsageRenderTarget
-	mtlTextureUsageShaderRead               = C.MTLTextureUsageShaderRead
-	mtlTextureUsageShaderWrite              = C.MTLTextureUsageShaderWrite
-	mtlWindingClockwise                     = C.MTLWindingClockwise
-	mtlWindingCounterClockwise              = C.MTLWindingCounterClockwise
-	nsUTF8StringEncoding                    = C.NSUTF8StringEncoding
+	mtl4BlendStateDisabled                  mtl4BlendState                   = C.MTL4BlendStateDisabled
+	mtl4BlendStateEnabled                   mtl4BlendState                   = C.MTL4BlendStateEnabled
+	mtl4CounterHeapTypeTimestamp            mtl4CounterHeapType              = C.MTL4CounterHeapTypeTimestamp
+	mtl4ShaderReflectionBindingInfo         mtl4ShaderReflection             = C.MTL4ShaderReflectionBindingInfo
+	mtl4TimestampGranularityPrecise         mtl4TimestampGranularity         = C.MTL4TimestampGranularityPrecise
+	mtlArgumentBuffersTier2                 mtlArgumentBuffersTier           = C.MTLArgumentBuffersTier2
+	mtlBindingTypeBuffer                    mtlBindingType                   = C.MTLBindingTypeBuffer
+	mtlBlendFactorDestinationAlpha          mtlBlendFactor                   = C.MTLBlendFactorDestinationAlpha
+	mtlBlendFactorOne                       mtlBlendFactor                   = C.MTLBlendFactorOne
+	mtlBlendFactorOneMinusDestinationAlpha  mtlBlendFactor                   = C.MTLBlendFactorOneMinusDestinationAlpha
+	mtlBlendFactorOneMinusSourceAlpha       mtlBlendFactor                   = C.MTLBlendFactorOneMinusSourceAlpha
+	mtlBlendFactorSourceAlpha               mtlBlendFactor                   = C.MTLBlendFactorSourceAlpha
+	mtlBlendFactorZero                      mtlBlendFactor                   = C.MTLBlendFactorZero
+	mtlCompareFunctionAlways                mtlCompareFunction               = C.MTLCompareFunctionAlways
+	mtlCullModeBack                         mtlCullMode                      = C.MTLCullModeBack
+	mtlCullModeFront                        mtlCullMode                      = C.MTLCullModeFront
+	mtlCullModeNone                         mtlCullMode                      = C.MTLCullModeNone
+	mtlDataTypeBool                         mtlDataType                      = C.MTLDataTypeBool
+	mtlDataTypeFloat                        mtlDataType                      = C.MTLDataTypeFloat
+	mtlDataTypeInt                          mtlDataType                      = C.MTLDataTypeInt
+	mtlDataTypeUInt                         mtlDataType                      = C.MTLDataTypeUInt
+	mtlGPUFamilyApple1                      mtlGPUFamily                     = C.MTLGPUFamilyApple1
+	mtlGPUFamilyMetal4                      mtlGPUFamily                     = C.MTLGPUFamilyMetal4
+	mtlIndexTypeUInt16                      mtlIndexType                     = C.MTLIndexTypeUInt16
+	mtlIndexTypeUInt32                      mtlIndexType                     = C.MTLIndexTypeUInt32
+	mtlLanguageVersion3_0                   mtlLanguageVersion               = C.MTLLanguageVersion3_0
+	mtlLoadActionClear                      mtlLoadAction                    = C.MTLLoadActionClear
+	mtlLoadActionDontCare                   mtlLoadAction                    = C.MTLLoadActionDontCare
+	mtlLoadActionLoad                       mtlLoadAction                    = C.MTLLoadActionLoad
+	mtlMultisampleDepthResolveFilterSample0 mtlMultisampleDepthResolveFilter = C.MTLMultisampleDepthResolveFilterSample0
+	mtlPrimitiveTypeLine                    mtlPrimitiveType                 = C.MTLPrimitiveTypeLine
+	mtlPrimitiveTypePoint                   mtlPrimitiveType                 = C.MTLPrimitiveTypePoint
+	mtlPrimitiveTypeTriangle                mtlPrimitiveType                 = C.MTLPrimitiveTypeTriangle
+	mtlPrimitiveTypeTriangleStrip           mtlPrimitiveType                 = C.MTLPrimitiveTypeTriangleStrip
+	mtlRenderStageFragment                  mtlRenderStages                  = C.MTLRenderStageFragment
+	mtlRenderStageVertex                    mtlRenderStages                  = C.MTLRenderStageVertex
+	mtlResourceStorageModePrivate           mtlResourceOptions               = C.MTLResourceStorageModePrivate
+	mtlResourceStorageModeShared            mtlResourceOptions               = C.MTLResourceStorageModeShared
+	mtlSamplerAddressModeClampToEdge        mtlSamplerAddressMode            = C.MTLSamplerAddressModeClampToEdge
+	mtlSamplerAddressModeMirrorRepeat       mtlSamplerAddressMode            = C.MTLSamplerAddressModeMirrorRepeat
+	mtlSamplerAddressModeRepeat             mtlSamplerAddressMode            = C.MTLSamplerAddressModeRepeat
+	mtlSamplerMinMagFilterLinear            mtlSamplerMinMagFilter           = C.MTLSamplerMinMagFilterLinear
+	mtlSamplerMinMagFilterNearest           mtlSamplerMinMagFilter           = C.MTLSamplerMinMagFilterNearest
+	mtlSamplerMipFilterLinear               mtlSamplerMipFilter              = C.MTLSamplerMipFilterLinear
+	mtlSamplerMipFilterNearest              mtlSamplerMipFilter              = C.MTLSamplerMipFilterNearest
+	mtlStageAccelerationStructure           mtlStages                        = C.MTLStageAccelerationStructure
+	mtlStageBlit                            mtlStages                        = C.MTLStageBlit
+	mtlStageDispatch                        mtlStages                        = C.MTLStageDispatch
+	mtlStageFragment                        mtlStages                        = C.MTLStageFragment
+	mtlStageMesh                            mtlStages                        = C.MTLStageMesh
+	mtlStageObject                          mtlStages                        = C.MTLStageObject
+	mtlStageTile                            mtlStages                        = C.MTLStageTile
+	mtlStageVertex                          mtlStages                        = C.MTLStageVertex
+	mtlStorageModeMemoryless                mtlStorageMode                   = C.MTLStorageModeMemoryless
+	mtlStorageModePrivate                   mtlStorageMode                   = C.MTLStorageModePrivate
+	mtlStoreActionDontCare                  mtlStoreAction                   = C.MTLStoreActionDontCare
+	mtlStoreActionMultisampleResolve        mtlStoreAction                   = C.MTLStoreActionMultisampleResolve
+	mtlStoreActionStore                     mtlStoreAction                   = C.MTLStoreActionStore
+	mtlStoreActionUnknown                   mtlStoreAction                   = C.MTLStoreActionUnknown
+	mtlTextureType2D                        mtlTextureType                   = C.MTLTextureType2D
+	mtlTextureType2DArray                   mtlTextureType                   = C.MTLTextureType2DArray
+	mtlTextureType2DMultisample             mtlTextureType                   = C.MTLTextureType2DMultisample
+	mtlTextureType3D                        mtlTextureType                   = C.MTLTextureType3D
+	mtlTextureTypeCube                      mtlTextureType                   = C.MTLTextureTypeCube
+	mtlTextureTypeCubeArray                 mtlTextureType                   = C.MTLTextureTypeCubeArray
+	mtlTextureUsagePixelFormatView          mtlTextureUsage                  = C.MTLTextureUsagePixelFormatView
+	mtlTextureUsageRenderTarget             mtlTextureUsage                  = C.MTLTextureUsageRenderTarget
+	mtlTextureUsageShaderRead               mtlTextureUsage                  = C.MTLTextureUsageShaderRead
+	mtlTextureUsageShaderWrite              mtlTextureUsage                  = C.MTLTextureUsageShaderWrite
+	mtlWindingClockwise                     mtlWinding                       = C.MTLWindingClockwise
+	mtlWindingCounterClockwise              mtlWinding                       = C.MTLWindingCounterClockwise
+	nsUTF8StringEncoding                                                     = C.NSUTF8StringEncoding
 
-	mtlPixelFormatInvalid               = C.MTLPixelFormatInvalid
-	mtlPixelFormatR8Unorm               = C.MTLPixelFormatR8Unorm
-	mtlPixelFormatRG8Unorm              = C.MTLPixelFormatRG8Unorm
-	mtlPixelFormatRGBA8Unorm            = C.MTLPixelFormatRGBA8Unorm
-	mtlPixelFormatBGRA8Unorm            = C.MTLPixelFormatBGRA8Unorm
-	mtlPixelFormatRGBA8Unorm_sRGB       = C.MTLPixelFormatRGBA8Unorm_sRGB
-	mtlPixelFormatBGRA8Unorm_sRGB       = C.MTLPixelFormatBGRA8Unorm_sRGB
-	mtlPixelFormatR8Snorm               = C.MTLPixelFormatR8Snorm
-	mtlPixelFormatRG8Snorm              = C.MTLPixelFormatRG8Snorm
-	mtlPixelFormatRGBA8Snorm            = C.MTLPixelFormatRGBA8Snorm
-	mtlPixelFormatR8Uint                = C.MTLPixelFormatR8Uint
-	mtlPixelFormatRG8Uint               = C.MTLPixelFormatRG8Uint
-	mtlPixelFormatRGBA8Uint             = C.MTLPixelFormatRGBA8Uint
-	mtlPixelFormatR8Sint                = C.MTLPixelFormatR8Sint
-	mtlPixelFormatRG8Sint               = C.MTLPixelFormatRG8Sint
-	mtlPixelFormatRGBA8Sint             = C.MTLPixelFormatRGBA8Sint
-	mtlPixelFormatR16Unorm              = C.MTLPixelFormatR16Unorm
-	mtlPixelFormatRG16Unorm             = C.MTLPixelFormatRG16Unorm
-	mtlPixelFormatRGBA16Unorm           = C.MTLPixelFormatRGBA16Unorm
-	mtlPixelFormatR16Snorm              = C.MTLPixelFormatR16Snorm
-	mtlPixelFormatRG16Snorm             = C.MTLPixelFormatRG16Snorm
-	mtlPixelFormatRGBA16Snorm           = C.MTLPixelFormatRGBA16Snorm
-	mtlPixelFormatR16Uint               = C.MTLPixelFormatR16Uint
-	mtlPixelFormatRG16Uint              = C.MTLPixelFormatRG16Uint
-	mtlPixelFormatRGBA16Uint            = C.MTLPixelFormatRGBA16Uint
-	mtlPixelFormatR16Sint               = C.MTLPixelFormatR16Sint
-	mtlPixelFormatRG16Sint              = C.MTLPixelFormatRG16Sint
-	mtlPixelFormatRGBA16Sint            = C.MTLPixelFormatRGBA16Sint
-	mtlPixelFormatR16Float              = C.MTLPixelFormatR16Float
-	mtlPixelFormatRG16Float             = C.MTLPixelFormatRG16Float
-	mtlPixelFormatRGBA16Float           = C.MTLPixelFormatRGBA16Float
-	mtlPixelFormatR32Uint               = C.MTLPixelFormatR32Uint
-	mtlPixelFormatRG32Uint              = C.MTLPixelFormatRG32Uint
-	mtlPixelFormatRGBA32Uint            = C.MTLPixelFormatRGBA32Uint
-	mtlPixelFormatR32Sint               = C.MTLPixelFormatR32Sint
-	mtlPixelFormatRG32Sint              = C.MTLPixelFormatRG32Sint
-	mtlPixelFormatRGBA32Sint            = C.MTLPixelFormatRGBA32Sint
-	mtlPixelFormatR32Float              = C.MTLPixelFormatR32Float
-	mtlPixelFormatRG32Float             = C.MTLPixelFormatRG32Float
-	mtlPixelFormatRGBA32Float           = C.MTLPixelFormatRGBA32Float
-	mtlPixelFormatRGB10A2Unorm          = C.MTLPixelFormatRGB10A2Unorm
-	mtlPixelFormatRGB10A2Uint           = C.MTLPixelFormatRGB10A2Uint
-	mtlPixelFormatRG11B10Float          = C.MTLPixelFormatRG11B10Float
-	mtlPixelFormatRGB9E5Float           = C.MTLPixelFormatRGB9E5Float
-	mtlPixelFormatDepth16Unorm          = C.MTLPixelFormatDepth16Unorm
-	mtlPixelFormatDepth32Float          = C.MTLPixelFormatDepth32Float
-	mtlPixelFormatDepth24Unorm_Stencil8 = C.MTLPixelFormatDepth24Unorm_Stencil8
-	mtlPixelFormatDepth32Float_Stencil8 = C.MTLPixelFormatDepth32Float_Stencil8
-	mtlPixelFormatStencil8              = C.MTLPixelFormatStencil8
-	mtlPixelFormatBC1_RGBA              = C.MTLPixelFormatBC1_RGBA
-	mtlPixelFormatBC1_RGBA_sRGB         = C.MTLPixelFormatBC1_RGBA_sRGB
-	mtlPixelFormatBC3_RGBA              = C.MTLPixelFormatBC3_RGBA
-	mtlPixelFormatBC3_RGBA_sRGB         = C.MTLPixelFormatBC3_RGBA_sRGB
-	mtlPixelFormatBC4_RUnorm            = C.MTLPixelFormatBC4_RUnorm
-	mtlPixelFormatBC4_RSnorm            = C.MTLPixelFormatBC4_RSnorm
-	mtlPixelFormatBC5_RGUnorm           = C.MTLPixelFormatBC5_RGUnorm
-	mtlPixelFormatBC5_RGSnorm           = C.MTLPixelFormatBC5_RGSnorm
-	mtlPixelFormatBC6H_RGBFloat         = C.MTLPixelFormatBC6H_RGBFloat
-	mtlPixelFormatBC6H_RGBUfloat        = C.MTLPixelFormatBC6H_RGBUfloat
-	mtlPixelFormatBC7_RGBAUnorm         = C.MTLPixelFormatBC7_RGBAUnorm
-	mtlPixelFormatBC7_RGBAUnorm_sRGB    = C.MTLPixelFormatBC7_RGBAUnorm_sRGB
-	mtlPixelFormatASTC_4x4_LDR          = C.MTLPixelFormatASTC_4x4_LDR
-	mtlPixelFormatASTC_4x4_sRGB         = C.MTLPixelFormatASTC_4x4_sRGB
-	mtlPixelFormatASTC_5x5_LDR          = C.MTLPixelFormatASTC_5x5_LDR
-	mtlPixelFormatASTC_5x5_sRGB         = C.MTLPixelFormatASTC_5x5_sRGB
-	mtlPixelFormatASTC_6x6_LDR          = C.MTLPixelFormatASTC_6x6_LDR
-	mtlPixelFormatASTC_6x6_sRGB         = C.MTLPixelFormatASTC_6x6_sRGB
-	mtlPixelFormatASTC_8x8_LDR          = C.MTLPixelFormatASTC_8x8_LDR
-	mtlPixelFormatASTC_8x8_sRGB         = C.MTLPixelFormatASTC_8x8_sRGB
-	mtlPixelFormatASTC_10x10_LDR        = C.MTLPixelFormatASTC_10x10_LDR
-	mtlPixelFormatASTC_10x10_sRGB       = C.MTLPixelFormatASTC_10x10_sRGB
-	mtlPixelFormatASTC_12x12_LDR        = C.MTLPixelFormatASTC_12x12_LDR
-	mtlPixelFormatASTC_12x12_sRGB       = C.MTLPixelFormatASTC_12x12_sRGB
+	mtlPixelFormatInvalid               mtlPixelFormat = C.MTLPixelFormatInvalid
+	mtlPixelFormatR8Unorm               mtlPixelFormat = C.MTLPixelFormatR8Unorm
+	mtlPixelFormatRG8Unorm              mtlPixelFormat = C.MTLPixelFormatRG8Unorm
+	mtlPixelFormatRGBA8Unorm            mtlPixelFormat = C.MTLPixelFormatRGBA8Unorm
+	mtlPixelFormatBGRA8Unorm            mtlPixelFormat = C.MTLPixelFormatBGRA8Unorm
+	mtlPixelFormatRGBA8Unorm_sRGB       mtlPixelFormat = C.MTLPixelFormatRGBA8Unorm_sRGB
+	mtlPixelFormatBGRA8Unorm_sRGB       mtlPixelFormat = C.MTLPixelFormatBGRA8Unorm_sRGB
+	mtlPixelFormatR8Snorm               mtlPixelFormat = C.MTLPixelFormatR8Snorm
+	mtlPixelFormatRG8Snorm              mtlPixelFormat = C.MTLPixelFormatRG8Snorm
+	mtlPixelFormatRGBA8Snorm            mtlPixelFormat = C.MTLPixelFormatRGBA8Snorm
+	mtlPixelFormatR8Uint                mtlPixelFormat = C.MTLPixelFormatR8Uint
+	mtlPixelFormatRG8Uint               mtlPixelFormat = C.MTLPixelFormatRG8Uint
+	mtlPixelFormatRGBA8Uint             mtlPixelFormat = C.MTLPixelFormatRGBA8Uint
+	mtlPixelFormatR8Sint                mtlPixelFormat = C.MTLPixelFormatR8Sint
+	mtlPixelFormatRG8Sint               mtlPixelFormat = C.MTLPixelFormatRG8Sint
+	mtlPixelFormatRGBA8Sint             mtlPixelFormat = C.MTLPixelFormatRGBA8Sint
+	mtlPixelFormatR16Unorm              mtlPixelFormat = C.MTLPixelFormatR16Unorm
+	mtlPixelFormatRG16Unorm             mtlPixelFormat = C.MTLPixelFormatRG16Unorm
+	mtlPixelFormatRGBA16Unorm           mtlPixelFormat = C.MTLPixelFormatRGBA16Unorm
+	mtlPixelFormatR16Snorm              mtlPixelFormat = C.MTLPixelFormatR16Snorm
+	mtlPixelFormatRG16Snorm             mtlPixelFormat = C.MTLPixelFormatRG16Snorm
+	mtlPixelFormatRGBA16Snorm           mtlPixelFormat = C.MTLPixelFormatRGBA16Snorm
+	mtlPixelFormatR16Uint               mtlPixelFormat = C.MTLPixelFormatR16Uint
+	mtlPixelFormatRG16Uint              mtlPixelFormat = C.MTLPixelFormatRG16Uint
+	mtlPixelFormatRGBA16Uint            mtlPixelFormat = C.MTLPixelFormatRGBA16Uint
+	mtlPixelFormatR16Sint               mtlPixelFormat = C.MTLPixelFormatR16Sint
+	mtlPixelFormatRG16Sint              mtlPixelFormat = C.MTLPixelFormatRG16Sint
+	mtlPixelFormatRGBA16Sint            mtlPixelFormat = C.MTLPixelFormatRGBA16Sint
+	mtlPixelFormatR16Float              mtlPixelFormat = C.MTLPixelFormatR16Float
+	mtlPixelFormatRG16Float             mtlPixelFormat = C.MTLPixelFormatRG16Float
+	mtlPixelFormatRGBA16Float           mtlPixelFormat = C.MTLPixelFormatRGBA16Float
+	mtlPixelFormatR32Uint               mtlPixelFormat = C.MTLPixelFormatR32Uint
+	mtlPixelFormatRG32Uint              mtlPixelFormat = C.MTLPixelFormatRG32Uint
+	mtlPixelFormatRGBA32Uint            mtlPixelFormat = C.MTLPixelFormatRGBA32Uint
+	mtlPixelFormatR32Sint               mtlPixelFormat = C.MTLPixelFormatR32Sint
+	mtlPixelFormatRG32Sint              mtlPixelFormat = C.MTLPixelFormatRG32Sint
+	mtlPixelFormatRGBA32Sint            mtlPixelFormat = C.MTLPixelFormatRGBA32Sint
+	mtlPixelFormatR32Float              mtlPixelFormat = C.MTLPixelFormatR32Float
+	mtlPixelFormatRG32Float             mtlPixelFormat = C.MTLPixelFormatRG32Float
+	mtlPixelFormatRGBA32Float           mtlPixelFormat = C.MTLPixelFormatRGBA32Float
+	mtlPixelFormatRGB10A2Unorm          mtlPixelFormat = C.MTLPixelFormatRGB10A2Unorm
+	mtlPixelFormatRGB10A2Uint           mtlPixelFormat = C.MTLPixelFormatRGB10A2Uint
+	mtlPixelFormatRG11B10Float          mtlPixelFormat = C.MTLPixelFormatRG11B10Float
+	mtlPixelFormatRGB9E5Float           mtlPixelFormat = C.MTLPixelFormatRGB9E5Float
+	mtlPixelFormatDepth16Unorm          mtlPixelFormat = C.MTLPixelFormatDepth16Unorm
+	mtlPixelFormatDepth32Float          mtlPixelFormat = C.MTLPixelFormatDepth32Float
+	mtlPixelFormatDepth24Unorm_Stencil8 mtlPixelFormat = C.MTLPixelFormatDepth24Unorm_Stencil8
+	mtlPixelFormatDepth32Float_Stencil8 mtlPixelFormat = C.MTLPixelFormatDepth32Float_Stencil8
+	mtlPixelFormatStencil8              mtlPixelFormat = C.MTLPixelFormatStencil8
+	mtlPixelFormatBC1_RGBA              mtlPixelFormat = C.MTLPixelFormatBC1_RGBA
+	mtlPixelFormatBC1_RGBA_sRGB         mtlPixelFormat = C.MTLPixelFormatBC1_RGBA_sRGB
+	mtlPixelFormatBC3_RGBA              mtlPixelFormat = C.MTLPixelFormatBC3_RGBA
+	mtlPixelFormatBC3_RGBA_sRGB         mtlPixelFormat = C.MTLPixelFormatBC3_RGBA_sRGB
+	mtlPixelFormatBC4_RUnorm            mtlPixelFormat = C.MTLPixelFormatBC4_RUnorm
+	mtlPixelFormatBC4_RSnorm            mtlPixelFormat = C.MTLPixelFormatBC4_RSnorm
+	mtlPixelFormatBC5_RGUnorm           mtlPixelFormat = C.MTLPixelFormatBC5_RGUnorm
+	mtlPixelFormatBC5_RGSnorm           mtlPixelFormat = C.MTLPixelFormatBC5_RGSnorm
+	mtlPixelFormatBC6H_RGBFloat         mtlPixelFormat = C.MTLPixelFormatBC6H_RGBFloat
+	mtlPixelFormatBC6H_RGBUfloat        mtlPixelFormat = C.MTLPixelFormatBC6H_RGBUfloat
+	mtlPixelFormatBC7_RGBAUnorm         mtlPixelFormat = C.MTLPixelFormatBC7_RGBAUnorm
+	mtlPixelFormatBC7_RGBAUnorm_sRGB    mtlPixelFormat = C.MTLPixelFormatBC7_RGBAUnorm_sRGB
+	mtlPixelFormatASTC_4x4_LDR          mtlPixelFormat = C.MTLPixelFormatASTC_4x4_LDR
+	mtlPixelFormatASTC_4x4_sRGB         mtlPixelFormat = C.MTLPixelFormatASTC_4x4_sRGB
+	mtlPixelFormatASTC_5x5_LDR          mtlPixelFormat = C.MTLPixelFormatASTC_5x5_LDR
+	mtlPixelFormatASTC_5x5_sRGB         mtlPixelFormat = C.MTLPixelFormatASTC_5x5_sRGB
+	mtlPixelFormatASTC_6x6_LDR          mtlPixelFormat = C.MTLPixelFormatASTC_6x6_LDR
+	mtlPixelFormatASTC_6x6_sRGB         mtlPixelFormat = C.MTLPixelFormatASTC_6x6_sRGB
+	mtlPixelFormatASTC_8x8_LDR          mtlPixelFormat = C.MTLPixelFormatASTC_8x8_LDR
+	mtlPixelFormatASTC_8x8_sRGB         mtlPixelFormat = C.MTLPixelFormatASTC_8x8_sRGB
+	mtlPixelFormatASTC_10x10_LDR        mtlPixelFormat = C.MTLPixelFormatASTC_10x10_LDR
+	mtlPixelFormatASTC_10x10_sRGB       mtlPixelFormat = C.MTLPixelFormatASTC_10x10_sRGB
+	mtlPixelFormatASTC_12x12_LDR        mtlPixelFormat = C.MTLPixelFormatASTC_12x12_LDR
+	mtlPixelFormatASTC_12x12_sRGB       mtlPixelFormat = C.MTLPixelFormatASTC_12x12_sRGB
 )
 
 func b2u(v bool) C.gk_u {
@@ -326,13 +326,13 @@ func dataLength(d id) uint {
 
 // MTLDevice.
 
-func deviceArgumentBuffersSupport(d mtlDevice) uint {
-	return uint(C.gk_u_(o(d), selArgumentBuffersSupport))
+func deviceArgumentBuffersSupport(d mtlDevice) mtlArgumentBuffersTier {
+	return mtlArgumentBuffersTier(C.gk_u_(o(d), selArgumentBuffersSupport))
 }
 func deviceHasUnifiedMemory(d mtlDevice) bool {
 	return C.gk_b(o(d), selHasUnifiedMemory) != 0
 }
-func deviceSupportsFamily(d mtlDevice, family uint) bool {
+func deviceSupportsFamily(d mtlDevice, family mtlGPUFamily) bool {
 	return C.gk_b_u(o(d), selSupportsFamily, C.gk_u(family)) != 0
 }
 func deviceMaxBufferLength(d mtlDevice) uint {
@@ -368,7 +368,7 @@ func deviceNewArgumentTableWithDescriptor(d mtlDevice, desc mtl4ArgumentTableDes
 func deviceNewCounterHeapWithDescriptor(d mtlDevice, desc mtl4CounterHeapDescriptor, err *id) mtl4CounterHeap {
 	return mtl4CounterHeap(C.gk_o_op(o(d), selNewCounterHeapWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewBufferWithLength(d mtlDevice, length, options uint) mtlBuffer {
+func deviceNewBufferWithLength(d mtlDevice, length uint, options mtlResourceOptions) mtlBuffer {
 	return mtlBuffer(C.gk_o_uu(o(d), selNewBufferWithLength, C.gk_u(length), C.gk_u(options)))
 }
 func deviceNewTextureWithDescriptor(d mtlDevice, desc mtlTextureDescriptor) mtlTexture {
@@ -449,10 +449,10 @@ func textureWidth(t mtlTexture) uint {
 func textureHeight(t mtlTexture) uint {
 	return uint(C.gk_u_(o(t), selHeight))
 }
-func texturePixelFormat(t mtlTexture) uint {
-	return uint(C.gk_u_(o(t), selPixelFormat))
+func texturePixelFormat(t mtlTexture) mtlPixelFormat {
+	return mtlPixelFormat(C.gk_u_(o(t), selPixelFormat))
 }
-func textureNewTextureViewWithPixelFormat(t mtlTexture, format, textureType, firstLevel, levels, firstSlice, slices uint) mtlTexture {
+func textureNewTextureViewWithPixelFormat(t mtlTexture, format mtlPixelFormat, textureType mtlTextureType, firstLevel, levels, firstSlice, slices uint) mtlTexture {
 	return mtlTexture(C.gk_o_uurr(o(t), selNewTextureViewWithPixelFormat, C.gk_u(format), C.gk_u(textureType),
 		C.NSRange{location: C.NSUInteger(firstLevel), length: C.NSUInteger(levels)},
 		C.NSRange{location: C.NSUInteger(firstSlice), length: C.NSUInteger(slices)}))
@@ -460,7 +460,7 @@ func textureNewTextureViewWithPixelFormat(t mtlTexture, format, textureType, fir
 
 // MTLTextureDescriptor.
 
-func textureDescriptorSetTextureType(d mtlTextureDescriptor, v uint) {
+func textureDescriptorSetTextureType(d mtlTextureDescriptor, v mtlTextureType) {
 	C.gk_v_u(o(d), selSetTextureType, C.gk_u(v))
 }
 func textureDescriptorSetWidth(d mtlTextureDescriptor, v uint) {
@@ -478,40 +478,40 @@ func textureDescriptorSetArrayLength(d mtlTextureDescriptor, v uint) {
 func textureDescriptorSetMipmapLevelCount(d mtlTextureDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetMipmapLevelCount, C.gk_u(v))
 }
-func textureDescriptorSetPixelFormat(d mtlTextureDescriptor, v uint) {
+func textureDescriptorSetPixelFormat(d mtlTextureDescriptor, v mtlPixelFormat) {
 	C.gk_v_u(o(d), selSetPixelFormat, C.gk_u(v))
 }
 func textureDescriptorSetSampleCount(d mtlTextureDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetSampleCount, C.gk_u(v))
 }
-func textureDescriptorSetStorageMode(d mtlTextureDescriptor, v uint) {
+func textureDescriptorSetStorageMode(d mtlTextureDescriptor, v mtlStorageMode) {
 	C.gk_v_u(o(d), selSetStorageMode, C.gk_u(v))
 }
-func textureDescriptorSetUsage(d mtlTextureDescriptor, v uint) {
+func textureDescriptorSetUsage(d mtlTextureDescriptor, v mtlTextureUsage) {
 	C.gk_v_u(o(d), selSetUsage, C.gk_u(v))
 }
 
 // MTLSamplerDescriptor.
 
-func samplerDescriptorSetMinFilter(d mtlSamplerDescriptor, v uint) {
+func samplerDescriptorSetMinFilter(d mtlSamplerDescriptor, v mtlSamplerMinMagFilter) {
 	C.gk_v_u(o(d), selSetMinFilter, C.gk_u(v))
 }
-func samplerDescriptorSetMagFilter(d mtlSamplerDescriptor, v uint) {
+func samplerDescriptorSetMagFilter(d mtlSamplerDescriptor, v mtlSamplerMinMagFilter) {
 	C.gk_v_u(o(d), selSetMagFilter, C.gk_u(v))
 }
-func samplerDescriptorSetMipFilter(d mtlSamplerDescriptor, v uint) {
+func samplerDescriptorSetMipFilter(d mtlSamplerDescriptor, v mtlSamplerMipFilter) {
 	C.gk_v_u(o(d), selSetMipFilter, C.gk_u(v))
 }
-func samplerDescriptorSetSAddressMode(d mtlSamplerDescriptor, v uint) {
+func samplerDescriptorSetSAddressMode(d mtlSamplerDescriptor, v mtlSamplerAddressMode) {
 	C.gk_v_u(o(d), selSetSAddressMode, C.gk_u(v))
 }
-func samplerDescriptorSetTAddressMode(d mtlSamplerDescriptor, v uint) {
+func samplerDescriptorSetTAddressMode(d mtlSamplerDescriptor, v mtlSamplerAddressMode) {
 	C.gk_v_u(o(d), selSetTAddressMode, C.gk_u(v))
 }
-func samplerDescriptorSetRAddressMode(d mtlSamplerDescriptor, v uint) {
+func samplerDescriptorSetRAddressMode(d mtlSamplerDescriptor, v mtlSamplerAddressMode) {
 	C.gk_v_u(o(d), selSetRAddressMode, C.gk_u(v))
 }
-func samplerDescriptorSetCompareFunction(d mtlSamplerDescriptor, v uint) {
+func samplerDescriptorSetCompareFunction(d mtlSamplerDescriptor, v mtlCompareFunction) {
 	C.gk_v_u(o(d), selSetCompareFunction, C.gk_u(v))
 }
 func samplerDescriptorSetMaxAnisotropy(d mtlSamplerDescriptor, v uint) {
@@ -524,7 +524,7 @@ func samplerDescriptorSetSupportArgumentBuffers(d mtlSamplerDescriptor, v bool) 
 // Shaders: MTLCompileOptions, MTLLibrary, MTLFunction, MTLFunctionConstant, and the
 // MTL4 function descriptors.
 
-func compileOptionsSetLanguageVersion(c id, v uint) {
+func compileOptionsSetLanguageVersion(c id, v mtlLanguageVersion) {
 	C.gk_v_u(o(c), selSetLanguageVersion, C.gk_u(v))
 }
 func libraryNewFunctionWithName(l mtlLibrary, name id) id {
@@ -533,8 +533,8 @@ func libraryNewFunctionWithName(l mtlLibrary, name id) id {
 func functionFunctionConstantsDictionary(f id) id {
 	return id(C.gk_o(o(f), selFunctionConstantsDictionary))
 }
-func functionConstantType(c id) uint {
-	return uint(C.gk_u_(o(c), selType))
+func functionConstantType(c id) mtlDataType {
+	return mtlDataType(C.gk_u_(o(c), selType))
 }
 func functionConstantIndex(c id) uint {
 	return uint(C.gk_u_(o(c), selIndex))
@@ -548,7 +548,7 @@ func libraryFunctionDescriptorSetLibrary(d mtl4LibraryFunctionDescriptor, l mtlL
 func libraryFunctionDescriptorSetName(d mtl4LibraryFunctionDescriptor, name id) {
 	C.gk_v_o(o(d), selSetName, o(name))
 }
-func functionConstantValuesSetConstantValue(v id, value unsafe.Pointer, dataType, index uint) {
+func functionConstantValuesSetConstantValue(v id, value unsafe.Pointer, dataType mtlDataType, index uint) {
 	C.gk_v_puu(o(v), selSetConstantValue, value, C.gk_u(dataType), C.gk_u(index))
 }
 func specializedFunctionDescriptorSetFunctionDescriptor(d mtl4SpecializedFunctionDescriptor, f mtl4LibraryFunctionDescriptor) {
@@ -561,7 +561,7 @@ func specializedFunctionDescriptorSetConstantValues(d mtl4SpecializedFunctionDes
 // Pipelines: MTL4PipelineOptions, the pipeline descriptors, MTL4Compiler, the pipeline
 // states and their reflection.
 
-func pipelineOptionsSetShaderReflection(p id, v uint) {
+func pipelineOptionsSetShaderReflection(p id, v mtl4ShaderReflection) {
 	C.gk_v_u(o(p), selSetShaderReflection, C.gk_u(v))
 }
 func computePipelineDescriptorSetComputeFunctionDescriptor(d mtl4ComputePipelineDescriptor, f mtl4SpecializedFunctionDescriptor) {
@@ -585,31 +585,31 @@ func renderPipelineDescriptorSetOptions(d mtl4RenderPipelineDescriptor, p id) {
 func renderPipelineDescriptorColorAttachments(d mtl4RenderPipelineDescriptor) id {
 	return id(C.gk_o(o(d), selColorAttachments))
 }
-func renderPipelineColorAttachmentDescriptorSetPixelFormat(a mtl4RenderPipelineColorAttachmentDescriptor, v uint) {
+func renderPipelineColorAttachmentDescriptorSetPixelFormat(a mtl4RenderPipelineColorAttachmentDescriptor, v mtlPixelFormat) {
 	C.gk_v_u(o(a), selSetPixelFormat, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetWriteMask(a mtl4RenderPipelineColorAttachmentDescriptor, v uint) {
+func renderPipelineColorAttachmentDescriptorSetWriteMask(a mtl4RenderPipelineColorAttachmentDescriptor, v mtlColorWriteMask) {
 	C.gk_v_u(o(a), selSetWriteMask, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetBlendingState(a mtl4RenderPipelineColorAttachmentDescriptor, v uint) {
+func renderPipelineColorAttachmentDescriptorSetBlendingState(a mtl4RenderPipelineColorAttachmentDescriptor, v mtl4BlendState) {
 	C.gk_v_u(o(a), selSetBlendingState, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetSourceRGBBlendFactor(a mtl4RenderPipelineColorAttachmentDescriptor, v uint) {
+func renderPipelineColorAttachmentDescriptorSetSourceRGBBlendFactor(a mtl4RenderPipelineColorAttachmentDescriptor, v mtlBlendFactor) {
 	C.gk_v_u(o(a), selSetSourceRGBBlendFactor, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetDestinationRGBBlendFactor(a mtl4RenderPipelineColorAttachmentDescriptor, v uint) {
+func renderPipelineColorAttachmentDescriptorSetDestinationRGBBlendFactor(a mtl4RenderPipelineColorAttachmentDescriptor, v mtlBlendFactor) {
 	C.gk_v_u(o(a), selSetDestinationRGBBlendFactor, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetRGBBlendOperation(a mtl4RenderPipelineColorAttachmentDescriptor, v uint) {
+func renderPipelineColorAttachmentDescriptorSetRGBBlendOperation(a mtl4RenderPipelineColorAttachmentDescriptor, v mtlBlendOperation) {
 	C.gk_v_u(o(a), selSetRgbBlendOperation, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetSourceAlphaBlendFactor(a mtl4RenderPipelineColorAttachmentDescriptor, v uint) {
+func renderPipelineColorAttachmentDescriptorSetSourceAlphaBlendFactor(a mtl4RenderPipelineColorAttachmentDescriptor, v mtlBlendFactor) {
 	C.gk_v_u(o(a), selSetSourceAlphaBlendFactor, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetDestinationAlphaBlendFactor(a mtl4RenderPipelineColorAttachmentDescriptor, v uint) {
+func renderPipelineColorAttachmentDescriptorSetDestinationAlphaBlendFactor(a mtl4RenderPipelineColorAttachmentDescriptor, v mtlBlendFactor) {
 	C.gk_v_u(o(a), selSetDestinationAlphaBlendFactor, C.gk_u(v))
 }
-func renderPipelineColorAttachmentDescriptorSetAlphaBlendOperation(a mtl4RenderPipelineColorAttachmentDescriptor, v uint) {
+func renderPipelineColorAttachmentDescriptorSetAlphaBlendOperation(a mtl4RenderPipelineColorAttachmentDescriptor, v mtlBlendOperation) {
 	C.gk_v_u(o(a), selSetAlphaBlendOperation, C.gk_u(v))
 }
 func compilerNewComputePipelineStateWithDescriptor(c mtl4Compiler, d mtl4ComputePipelineDescriptor, options id, err *id) mtlComputePipelineState {
@@ -639,8 +639,8 @@ func renderPipelineReflectionFragmentBindings(r id) id {
 func bindingIndex(b id) uint {
 	return uint(C.gk_u_(o(b), selIndex))
 }
-func bindingType(b id) uint {
-	return uint(C.gk_u_(o(b), selType))
+func bindingType(b id) mtlBindingType {
+	return mtlBindingType(C.gk_u_(o(b), selType))
 }
 func bindingIsUsed(b id) bool {
 	return C.gk_b(o(b), selIsUsed) != 0
@@ -648,7 +648,7 @@ func bindingIsUsed(b id) bool {
 func bufferBindingBufferDataSize(b id) uint {
 	return uint(C.gk_u_(o(b), selBufferDataSize))
 }
-func depthStencilDescriptorSetDepthCompareFunction(d mtlDepthStencilDescriptor, v uint) {
+func depthStencilDescriptorSetDepthCompareFunction(d mtlDepthStencilDescriptor, v mtlCompareFunction) {
 	C.gk_v_u(o(d), selSetDepthCompareFunction, C.gk_u(v))
 }
 func depthStencilDescriptorSetDepthWriteEnabled(d mtlDepthStencilDescriptor, v bool) {
@@ -663,7 +663,7 @@ func metalLayerLayer() id {
 func metalLayerSetDevice(l id, d mtlDevice) {
 	C.gk_v_o(o(l), selSetDevice, o(d))
 }
-func metalLayerSetPixelFormat(l id, v uint) {
+func metalLayerSetPixelFormat(l id, v mtlPixelFormat) {
 	C.gk_v_u(o(l), selSetPixelFormat, C.gk_u(v))
 }
 func metalLayerSetFramebufferOnly(l id, v bool) {
@@ -716,7 +716,7 @@ func viewBounds(v id) (x, y, width, height float64) {
 
 // Timestamps: MTL4CounterHeap and its descriptor.
 
-func counterHeapDescriptorSetType(d mtl4CounterHeapDescriptor, v uint) {
+func counterHeapDescriptorSetType(d mtl4CounterHeapDescriptor, v mtl4CounterHeapType) {
 	C.gk_v_u(o(d), selSetType, C.gk_u(v))
 }
 func counterHeapDescriptorSetCount(d mtl4CounterHeapDescriptor, v uint) {
@@ -758,10 +758,10 @@ func renderPassAttachmentDescriptorSetTexture(a mtlRenderPassAttachmentDescripto
 func renderPassAttachmentDescriptorSetResolveTexture(a mtlRenderPassAttachmentDescriptor, t mtlTexture) {
 	C.gk_v_o(o(a), selSetResolveTexture, o(t))
 }
-func renderPassAttachmentDescriptorSetLoadAction(a mtlRenderPassAttachmentDescriptor, v uint) {
+func renderPassAttachmentDescriptorSetLoadAction(a mtlRenderPassAttachmentDescriptor, v mtlLoadAction) {
 	C.gk_v_u(o(a), selSetLoadAction, C.gk_u(v))
 }
-func renderPassAttachmentDescriptorSetStoreAction(a mtlRenderPassAttachmentDescriptor, v uint) {
+func renderPassAttachmentDescriptorSetStoreAction(a mtlRenderPassAttachmentDescriptor, v mtlStoreAction) {
 	C.gk_v_u(o(a), selSetStoreAction, C.gk_u(v))
 }
 func renderPassColorAttachmentDescriptorSetClearColor(a mtlRenderPassColorAttachmentDescriptor, red, green, blue, alpha float64) {
@@ -772,7 +772,7 @@ func renderPassColorAttachmentDescriptorSetClearColor(a mtlRenderPassColorAttach
 func renderPassDepthAttachmentDescriptorSetClearDepth(a mtlRenderPassDepthAttachmentDescriptor, v float64) {
 	C.gk_v_d(o(a), selSetClearDepth, C.double(v))
 }
-func renderPassDepthAttachmentDescriptorSetDepthResolveFilter(a mtlRenderPassDepthAttachmentDescriptor, v uint) {
+func renderPassDepthAttachmentDescriptorSetDepthResolveFilter(a mtlRenderPassDepthAttachmentDescriptor, v mtlMultisampleDepthResolveFilter) {
 	C.gk_v_u(o(a), selSetDepthResolveFilter, C.gk_u(v))
 }
 
@@ -798,10 +798,10 @@ func commitFeedbackGPUEndTime(f id) float64 {
 func commandEncoderEndEncoding(e id) {
 	C.gk_v(o(e), selEndEncoding)
 }
-func commandEncoderUpdateFence(e id, fence mtlFence, stages uint) {
+func commandEncoderUpdateFence(e id, fence mtlFence, stages mtlStages) {
 	C.gk_v_ou(o(e), selUpdateFenceAfterEncoderStages, o(fence), C.gk_u(stages))
 }
-func commandEncoderWaitForFence(e id, fence mtlFence, stages uint) {
+func commandEncoderWaitForFence(e id, fence mtlFence, stages mtlStages) {
 	C.gk_v_ou(o(e), selWaitForFenceBeforeEncoderStages, o(fence), C.gk_u(stages))
 }
 
@@ -835,11 +835,11 @@ func computeCommandEncoderCopyFromTextureToTexture(e mtl4ComputeCommandEncoder, 
 	C.gk_v_ouuzsouuz(o(e), selCopyFromTextureToTexture, o(src), C.gk_u(srcSlice), C.gk_u(srcLevel),
 		mtlOrigin(srcOrigin), mtlSize(size), o(dst), C.gk_u(dstSlice), C.gk_u(dstLevel), mtlOrigin(dstOrigin))
 }
-func computeCommandEncoderWriteTimestampWithGranularity(e mtl4ComputeCommandEncoder, granularity uint, heap mtl4CounterHeap, index uint) {
+func computeCommandEncoderWriteTimestampWithGranularity(e mtl4ComputeCommandEncoder, granularity mtl4TimestampGranularity, heap mtl4CounterHeap, index uint) {
 	C.gk_v_uou(o(e), selWriteTimestampWithGranularityIntoHeap, C.gk_u(granularity), o(heap), C.gk_u(index))
 }
 
-func renderCommandEncoderSetArgumentTable(e mtl4RenderCommandEncoder, t mtl4ArgumentTable, stages uint) {
+func renderCommandEncoderSetArgumentTable(e mtl4RenderCommandEncoder, t mtl4ArgumentTable, stages mtlRenderStages) {
 	C.gk_v_ou(o(e), selSetArgumentTableAtStages, o(t), C.gk_u(stages))
 }
 func renderCommandEncoderSetViewport(e mtl4RenderCommandEncoder, x, y, width, height, znear, zfar float64) {
@@ -850,10 +850,10 @@ func renderCommandEncoderSetScissorRect(e mtl4RenderCommandEncoder, x, y, width,
 	C.gk_v_scissor(o(e), selSetScissorRect, C.MTLScissorRect{x: C.NSUInteger(x), y: C.NSUInteger(y),
 		width: C.NSUInteger(width), height: C.NSUInteger(height)})
 }
-func renderCommandEncoderSetColorStoreAction(e mtl4RenderCommandEncoder, action, index uint) {
+func renderCommandEncoderSetColorStoreAction(e mtl4RenderCommandEncoder, action mtlStoreAction, index uint) {
 	C.gk_v_uu(o(e), selSetColorStoreActionAtIndex, C.gk_u(action), C.gk_u(index))
 }
-func renderCommandEncoderSetDepthStoreAction(e mtl4RenderCommandEncoder, action uint) {
+func renderCommandEncoderSetDepthStoreAction(e mtl4RenderCommandEncoder, action mtlStoreAction) {
 	C.gk_v_u(o(e), selSetDepthStoreAction, C.gk_u(action))
 }
 func renderCommandEncoderSetRenderPipelineState(e mtl4RenderCommandEncoder, p mtlRenderPipelineState) {
@@ -862,31 +862,29 @@ func renderCommandEncoderSetRenderPipelineState(e mtl4RenderCommandEncoder, p mt
 func renderCommandEncoderSetDepthStencilState(e mtl4RenderCommandEncoder, s mtlDepthStencilState) {
 	C.gk_v_o(o(e), selSetDepthStencilState, o(s))
 }
-func renderCommandEncoderSetCullMode(e mtl4RenderCommandEncoder, v uint) {
+func renderCommandEncoderSetCullMode(e mtl4RenderCommandEncoder, v mtlCullMode) {
 	C.gk_v_u(o(e), selSetCullMode, C.gk_u(v))
 }
-func renderCommandEncoderSetFrontFacingWinding(e mtl4RenderCommandEncoder, v uint) {
+func renderCommandEncoderSetFrontFacingWinding(e mtl4RenderCommandEncoder, v mtlWinding) {
 	C.gk_v_u(o(e), selSetFrontFacingWinding, C.gk_u(v))
 }
 func renderCommandEncoderSetDepthBias(e mtl4RenderCommandEncoder, bias, slope, clamp float32) {
 	C.gk_v_fff(o(e), selSetDepthBiasSlopeScaleClamp, C.float(bias), C.float(slope), C.float(clamp))
 }
-func renderCommandEncoderDrawPrimitives(e mtl4RenderCommandEncoder, primitive, vertexStart, vertexCount, instanceCount, baseInstance uint) {
+func renderCommandEncoderDrawPrimitives(e mtl4RenderCommandEncoder, primitive mtlPrimitiveType, vertexStart, vertexCount, instanceCount, baseInstance uint) {
 	C.gk_v_uuuuu(o(e), selDrawPrimitives, C.gk_u(primitive), C.gk_u(vertexStart), C.gk_u(vertexCount),
 		C.gk_u(instanceCount), C.gk_u(baseInstance))
 }
-func renderCommandEncoderDrawIndexedPrimitivesIndexCount(e mtl4RenderCommandEncoder, primitive, indexCount, indexType uint, indexBuffer uint64,
-	indexBufferLength, instanceCount uint, baseVertex int, baseInstance uint) {
+func renderCommandEncoderDrawIndexedPrimitivesIndexCount(e mtl4RenderCommandEncoder, primitive mtlPrimitiveType, indexCount uint, indexType mtlIndexType, indexBuffer uint64, indexBufferLength, instanceCount uint, baseVertex int, baseInstance uint) {
 	C.gk_v_uuuuuuuu(o(e), selDrawIndexedPrimitivesIndexCount, C.gk_u(primitive), C.gk_u(indexCount),
 		C.gk_u(indexType), C.gk_u(indexBuffer), C.gk_u(indexBufferLength), C.gk_u(instanceCount),
 		C.NSInteger(baseVertex), C.gk_u(baseInstance))
 }
-func renderCommandEncoderDrawIndexedPrimitivesIndirectBuffer(e mtl4RenderCommandEncoder, primitive, indexType uint, indexBuffer uint64,
-	indexBufferLength uint, indirectBuffer uint64) {
+func renderCommandEncoderDrawIndexedPrimitivesIndirectBuffer(e mtl4RenderCommandEncoder, primitive mtlPrimitiveType, indexType mtlIndexType, indexBuffer uint64, indexBufferLength uint, indirectBuffer uint64) {
 	C.gk_v_uuuuu(o(e), selDrawIndexedPrimitivesIndirectBuffer, C.gk_u(primitive), C.gk_u(indexType),
 		C.gk_u(indexBuffer), C.gk_u(indexBufferLength), C.gk_u(indirectBuffer))
 }
-func renderCommandEncoderWriteTimestampWithGranularity(e mtl4RenderCommandEncoder, granularity, stage uint, heap mtl4CounterHeap, index uint) {
+func renderCommandEncoderWriteTimestampWithGranularity(e mtl4RenderCommandEncoder, granularity mtl4TimestampGranularity, stage mtlRenderStages, heap mtl4CounterHeap, index uint) {
 	C.gk_v_uuou(o(e), selWriteTimestampWithGranularityAfterStage, C.gk_u(granularity), C.gk_u(stage), o(heap),
 		C.gk_u(index))
 }

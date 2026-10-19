@@ -30,7 +30,7 @@ type query struct {
 // attachment is one attachment of the open render pass, as ending it needs.
 type attachment struct {
 	texture *resource
-	store   uint
+	store   mtlStoreAction
 }
 
 // command records into the backend's one command buffer (see Backend.allocator).
@@ -244,7 +244,7 @@ func (c *command) prepareWork() {
 	c.pending = c.pending[:0]
 }
 
-func loadAction(op gpu.LoadOp) uint {
+func loadAction(op gpu.LoadOp) mtlLoadAction {
 	switch op {
 	case gpu.LoadClear:
 		return mtlLoadActionClear
@@ -259,7 +259,7 @@ func loadAction(op gpu.LoadOp) uint {
 // its samples into resolve. Resolving never keeps the samples too (see
 // gpu.ColorAttachment.ResolveTexture). It is applied only when the pass ends (see
 // EndRenderPass); an encoder split off mid-pass stores plainly instead.
-func storeAction(store gpu.StoreOp, resolve bool) uint {
+func storeAction(store gpu.StoreOp, resolve bool) mtlStoreAction {
 	if resolve {
 		check(store == gpu.StoreDontCare, "a resolved attachment cannot also store its samples")
 		return mtlStoreActionMultisampleResolve
@@ -444,7 +444,7 @@ func (c *command) Draw(data []byte, vertexCount, instanceCount, firstVertex, fir
 	c.render.drawPrimitives(c.pipeline.topology, uint(firstVertex), uint(vertexCount), uint(instanceCount), uint(firstInstance))
 }
 
-func indexType(t gpu.IndexType) uint {
+func indexType(t gpu.IndexType) mtlIndexType {
 	if t.Size() == 2 {
 		return mtlIndexTypeUInt16
 	}

@@ -12,7 +12,7 @@ func newMTLDepthStencilDescriptor() mtlDepthStencilDescriptor {
 	return mtlDepthStencilDescriptor(newObject("MTLDepthStencilDescriptor"))
 }
 
-func (d mtlDepthStencilDescriptor) setDepthCompareFunction(v uint) {
+func (d mtlDepthStencilDescriptor) setDepthCompareFunction(v mtlCompareFunction) {
 	depthStencilDescriptorSetDepthCompareFunction(d, v)
 }
 

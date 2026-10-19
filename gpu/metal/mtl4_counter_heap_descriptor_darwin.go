@@ -12,7 +12,7 @@ func newMTL4CounterHeapDescriptor() mtl4CounterHeapDescriptor {
 	return mtl4CounterHeapDescriptor(newObject("MTL4CounterHeapDescriptor"))
 }
 
-func (d mtl4CounterHeapDescriptor) setType(v uint) {
+func (d mtl4CounterHeapDescriptor) setType(v mtl4CounterHeapType) {
 	counterHeapDescriptorSetType(d, v)
 }
 

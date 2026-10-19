@@ -20,10 +20,10 @@ func (d mtlRenderPassAttachmentDescriptor) setResolveTexture(t mtlTexture) {
 	renderPassAttachmentDescriptorSetResolveTexture(d, t)
 }
 
-func (d mtlRenderPassAttachmentDescriptor) setLoadAction(v uint) {
+func (d mtlRenderPassAttachmentDescriptor) setLoadAction(v mtlLoadAction) {
 	renderPassAttachmentDescriptorSetLoadAction(d, v)
 }
 
-func (d mtlRenderPassAttachmentDescriptor) setStoreAction(v uint) {
+func (d mtlRenderPassAttachmentDescriptor) setStoreAction(v mtlStoreAction) {
 	renderPassAttachmentDescriptorSetStoreAction(d, v)
 }

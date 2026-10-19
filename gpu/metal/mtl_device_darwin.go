@@ -10,7 +10,7 @@ func (d mtlDevice) release() {
 	release(d)
 }
 
-func (d mtlDevice) argumentBuffersSupport() uint {
+func (d mtlDevice) argumentBuffersSupport() mtlArgumentBuffersTier {
 	return deviceArgumentBuffersSupport(d)
 }
 
@@ -18,7 +18,7 @@ func (d mtlDevice) hasUnifiedMemory() bool {
 	return deviceHasUnifiedMemory(d)
 }
 
-func (d mtlDevice) supportsFamily(family uint) bool {
+func (d mtlDevice) supportsFamily(family mtlGPUFamily) bool {
 	return deviceSupportsFamily(d, family)
 }
 
@@ -93,7 +93,7 @@ func (d mtlDevice) newCounterHeapWithDescriptor(descriptor mtl4CounterHeapDescri
 	return deviceNewCounterHeapWithDescriptor(d, descriptor, err)
 }
 
-func (d mtlDevice) newBufferWithLength(length, options uint) mtlBuffer {
+func (d mtlDevice) newBufferWithLength(length uint, options mtlResourceOptions) mtlBuffer {
 	return deviceNewBufferWithLength(d, length, options)
 }
 

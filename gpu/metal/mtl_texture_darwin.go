@@ -24,10 +24,10 @@ func (t mtlTexture) height() uint {
 	return textureHeight(t)
 }
 
-func (t mtlTexture) pixelFormat() uint {
+func (t mtlTexture) pixelFormat() mtlPixelFormat {
 	return texturePixelFormat(t)
 }
 
-func (t mtlTexture) newTextureViewWithPixelFormat(format, textureType, firstLevel, levels, firstSlice, slices uint) mtlTexture {
+func (t mtlTexture) newTextureViewWithPixelFormat(format mtlPixelFormat, textureType mtlTextureType, firstLevel, levels, firstSlice, slices uint) mtlTexture {
 	return textureNewTextureViewWithPixelFormat(t, format, textureType, firstLevel, levels, firstSlice, slices)
 }

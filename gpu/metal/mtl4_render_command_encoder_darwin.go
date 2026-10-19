@@ -14,15 +14,15 @@ func (e mtl4RenderCommandEncoder) endEncoding() {
 	commandEncoderEndEncoding(id(e))
 }
 
-func (e mtl4RenderCommandEncoder) updateFence(fence mtlFence, stages uint) {
+func (e mtl4RenderCommandEncoder) updateFence(fence mtlFence, stages mtlStages) {
 	commandEncoderUpdateFence(id(e), fence, stages)
 }
 
-func (e mtl4RenderCommandEncoder) waitForFence(fence mtlFence, stages uint) {
+func (e mtl4RenderCommandEncoder) waitForFence(fence mtlFence, stages mtlStages) {
 	commandEncoderWaitForFence(id(e), fence, stages)
 }
 
-func (e mtl4RenderCommandEncoder) setArgumentTable(table mtl4ArgumentTable, stages uint) {
+func (e mtl4RenderCommandEncoder) setArgumentTable(table mtl4ArgumentTable, stages mtlRenderStages) {
 	renderCommandEncoderSetArgumentTable(e, table, stages)
 }
 
@@ -34,11 +34,11 @@ func (e mtl4RenderCommandEncoder) setScissorRect(x, y, width, height uint) {
 	renderCommandEncoderSetScissorRect(e, x, y, width, height)
 }
 
-func (e mtl4RenderCommandEncoder) setColorStoreAction(action, index uint) {
+func (e mtl4RenderCommandEncoder) setColorStoreAction(action mtlStoreAction, index uint) {
 	renderCommandEncoderSetColorStoreAction(e, action, index)
 }
 
-func (e mtl4RenderCommandEncoder) setDepthStoreAction(action uint) {
+func (e mtl4RenderCommandEncoder) setDepthStoreAction(action mtlStoreAction) {
 	renderCommandEncoderSetDepthStoreAction(e, action)
 }
 
@@ -50,11 +50,11 @@ func (e mtl4RenderCommandEncoder) setDepthStencilState(state mtlDepthStencilStat
 	renderCommandEncoderSetDepthStencilState(e, state)
 }
 
-func (e mtl4RenderCommandEncoder) setCullMode(mode uint) {
+func (e mtl4RenderCommandEncoder) setCullMode(mode mtlCullMode) {
 	renderCommandEncoderSetCullMode(e, mode)
 }
 
-func (e mtl4RenderCommandEncoder) setFrontFacingWinding(winding uint) {
+func (e mtl4RenderCommandEncoder) setFrontFacingWinding(winding mtlWinding) {
 	renderCommandEncoderSetFrontFacingWinding(e, winding)
 }
 
@@ -62,21 +62,19 @@ func (e mtl4RenderCommandEncoder) setDepthBias(bias, slope, clamp float32) {
 	renderCommandEncoderSetDepthBias(e, bias, slope, clamp)
 }
 
-func (e mtl4RenderCommandEncoder) drawPrimitives(primitive, vertexStart, vertexCount, instanceCount, baseInstance uint) {
+func (e mtl4RenderCommandEncoder) drawPrimitives(primitive mtlPrimitiveType, vertexStart, vertexCount, instanceCount, baseInstance uint) {
 	renderCommandEncoderDrawPrimitives(e, primitive, vertexStart, vertexCount, instanceCount, baseInstance)
 }
 
-func (e mtl4RenderCommandEncoder) drawIndexedPrimitivesIndexCountIndexTypeIndexBufferIndexBufferLengthInstanceCountBaseVertexBaseInstance(primitive, indexCount, indexType uint, indexBuffer uint64,
-	indexBufferLength, instanceCount uint, baseVertex int, baseInstance uint) {
+func (e mtl4RenderCommandEncoder) drawIndexedPrimitivesIndexCountIndexTypeIndexBufferIndexBufferLengthInstanceCountBaseVertexBaseInstance(primitive mtlPrimitiveType, indexCount uint, indexType mtlIndexType, indexBuffer uint64, indexBufferLength, instanceCount uint, baseVertex int, baseInstance uint) {
 	renderCommandEncoderDrawIndexedPrimitivesIndexCount(e, primitive, indexCount, indexType, indexBuffer, indexBufferLength,
 		instanceCount, baseVertex, baseInstance)
 }
 
-func (e mtl4RenderCommandEncoder) drawIndexedPrimitivesIndexTypeIndexBufferIndexBufferLengthIndirectBuffer(primitive, indexType uint, indexBuffer uint64,
-	indexBufferLength uint, indirectBuffer uint64) {
+func (e mtl4RenderCommandEncoder) drawIndexedPrimitivesIndexTypeIndexBufferIndexBufferLengthIndirectBuffer(primitive mtlPrimitiveType, indexType mtlIndexType, indexBuffer uint64, indexBufferLength uint, indirectBuffer uint64) {
 	renderCommandEncoderDrawIndexedPrimitivesIndirectBuffer(e, primitive, indexType, indexBuffer, indexBufferLength, indirectBuffer)
 }
 
-func (e mtl4RenderCommandEncoder) writeTimestampWithGranularity(granularity, stage uint, heap mtl4CounterHeap, index uint) {
+func (e mtl4RenderCommandEncoder) writeTimestampWithGranularity(granularity mtl4TimestampGranularity, stage mtlRenderStages, heap mtl4CounterHeap, index uint) {
 	renderCommandEncoderWriteTimestampWithGranularity(e, granularity, stage, heap, index)
 }

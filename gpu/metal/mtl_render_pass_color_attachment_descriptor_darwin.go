@@ -24,10 +24,10 @@ func (d mtlRenderPassColorAttachmentDescriptor) setResolveTexture(t mtlTexture) 
 	mtlRenderPassAttachmentDescriptor(d).setResolveTexture(t)
 }
 
-func (d mtlRenderPassColorAttachmentDescriptor) setLoadAction(v uint) {
+func (d mtlRenderPassColorAttachmentDescriptor) setLoadAction(v mtlLoadAction) {
 	mtlRenderPassAttachmentDescriptor(d).setLoadAction(v)
 }
 
-func (d mtlRenderPassColorAttachmentDescriptor) setStoreAction(v uint) {
+func (d mtlRenderPassColorAttachmentDescriptor) setStoreAction(v mtlStoreAction) {
 	mtlRenderPassAttachmentDescriptor(d).setStoreAction(v)
 }

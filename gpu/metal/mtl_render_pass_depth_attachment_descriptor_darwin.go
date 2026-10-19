@@ -16,7 +16,7 @@ func (d mtlRenderPassDepthAttachmentDescriptor) setClearDepth(v float64) {
 	renderPassDepthAttachmentDescriptorSetClearDepth(d, v)
 }
 
-func (d mtlRenderPassDepthAttachmentDescriptor) setDepthResolveFilter(v uint) {
+func (d mtlRenderPassDepthAttachmentDescriptor) setDepthResolveFilter(v mtlMultisampleDepthResolveFilter) {
 	renderPassDepthAttachmentDescriptorSetDepthResolveFilter(d, v)
 }
 
@@ -28,10 +28,10 @@ func (d mtlRenderPassDepthAttachmentDescriptor) setResolveTexture(t mtlTexture) 
 	mtlRenderPassAttachmentDescriptor(d).setResolveTexture(t)
 }
 
-func (d mtlRenderPassDepthAttachmentDescriptor) setLoadAction(v uint) {
+func (d mtlRenderPassDepthAttachmentDescriptor) setLoadAction(v mtlLoadAction) {
 	mtlRenderPassAttachmentDescriptor(d).setLoadAction(v)
 }
 
-func (d mtlRenderPassDepthAttachmentDescriptor) setStoreAction(v uint) {
+func (d mtlRenderPassDepthAttachmentDescriptor) setStoreAction(v mtlStoreAction) {
 	mtlRenderPassAttachmentDescriptor(d).setStoreAction(v)
 }

@@ -12,7 +12,7 @@ func newMTLTextureDescriptor() mtlTextureDescriptor {
 	return mtlTextureDescriptor(newObject("MTLTextureDescriptor"))
 }
 
-func (d mtlTextureDescriptor) setTextureType(v uint) {
+func (d mtlTextureDescriptor) setTextureType(v mtlTextureType) {
 	textureDescriptorSetTextureType(d, v)
 }
 
@@ -36,7 +36,7 @@ func (d mtlTextureDescriptor) setMipmapLevelCount(v uint) {
 	textureDescriptorSetMipmapLevelCount(d, v)
 }
 
-func (d mtlTextureDescriptor) setPixelFormat(v uint) {
+func (d mtlTextureDescriptor) setPixelFormat(v mtlPixelFormat) {
 	textureDescriptorSetPixelFormat(d, v)
 }
 
@@ -44,10 +44,10 @@ func (d mtlTextureDescriptor) setSampleCount(v uint) {
 	textureDescriptorSetSampleCount(d, v)
 }
 
-func (d mtlTextureDescriptor) setStorageMode(v uint) {
+func (d mtlTextureDescriptor) setStorageMode(v mtlStorageMode) {
 	textureDescriptorSetStorageMode(d, v)
 }
 
-func (d mtlTextureDescriptor) setUsage(v uint) {
+func (d mtlTextureDescriptor) setUsage(v mtlTextureUsage) {
 	textureDescriptorSetUsage(d, v)
 }
