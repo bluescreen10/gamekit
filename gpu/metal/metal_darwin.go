@@ -336,9 +336,9 @@ func (b *Backend) init() error {
 		return err
 	}
 
-	b.textureTable = b.device.newBufferWithLength(textureSlots*8, mtlResourceStorageModeShared)
+	b.textureTable = b.device.newBuffer(textureSlots*8, mtlResourceStorageModeShared)
 	samplers := min(samplerSlots, uint64(b.device.maxArgumentBufferSamplerCount()))
-	b.samplerTable = b.device.newBufferWithLength(samplerSlots*8, mtlResourceStorageModeShared)
+	b.samplerTable = b.device.newBuffer(samplerSlots*8, mtlResourceStorageModeShared)
 	if b.textureTable == 0 || b.samplerTable == 0 {
 		return fmt.Errorf("cannot allocate argument tables")
 	}
@@ -475,7 +475,7 @@ func (b *Backend) Alloc(size uint64, mem gpu.MemoryType, label string) gpu.Buffe
 	}
 
 	r := &resource{kind: kindBuffer, size: size, private: mem == gpu.MemoryDevice}
-	object := b.device.newBufferWithLength(uint(size), options)
+	object := b.device.newBuffer(uint(size), options)
 	r.object = id(object)
 
 	h := b.add(r)
@@ -618,7 +618,7 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	desc.setStorageMode(storage)
 	desc.setUsage(usage)
 
-	object := b.device.newTextureWithDescriptor(desc)
+	object := b.device.newTexture(desc)
 	r.object = id(object)
 
 	h := b.add(r)
@@ -731,7 +731,7 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	desc.setSupportArgumentBuffers(true)
 	desc.setLabel(d.Label)
 
-	r := &resource{kind: kindSampler, object: id(b.device.newSamplerStateWithDescriptor(desc))}
+	r := &resource{kind: kindSampler, object: id(b.device.newSamplerState(desc))}
 	h := b.add(r)
 
 	return gpu.Sampler{H: gpu.Handle(h), Index: b.slot(r)}
@@ -881,7 +881,7 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 	desc.setOptions(pipelineOptions())
 
 	var nserr id
-	ps := b.compiler.newComputePipelineStateWithDescriptor(desc, 0, &nserr)
+	ps := b.compiler.newComputePipelineState(desc, 0, &nserr)
 	check(ps != 0, errorText(nserr, "compute pipeline creation failed"))
 
 	r := &resource{kind: kindCompute, object: id(ps)}
@@ -982,7 +982,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	// lives purely on the render pass descriptor. The descriptor's depth fields still
 	// select the depth-stencil state's compare and write behavior below.
 	var nserr id
-	ps := b.compiler.newRenderPipelineStateWithDescriptor(desc, 0, &nserr)
+	ps := b.compiler.newRenderPipelineState(desc, 0, &nserr)
 	check(ps != 0, errorText(nserr, "render pipeline creation failed"))
 
 	r := &resource{kind: kindGraphics, object: id(ps), depthWrite: d.DepthWrite}
@@ -1000,7 +1000,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	depth.setDepthCompareFunction(compare)
 	depth.setDepthWriteEnabled(d.DepthWrite)
 
-	r.depthStencil = b.device.newDepthStencilStateWithDescriptor(depth)
+	r.depthStencil = b.device.newDepthStencilState(depth)
 	depth.release()
 
 	r.topology = topologies[d.Topology]
@@ -1226,7 +1226,7 @@ func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 	pool := pushPool()
 	defer pool.drain()
 
-	heap, err := newWithDescriptor(b.device.newCounterHeapWithDescriptor, newMTL4CounterHeapDescriptor, func(d mtl4CounterHeapDescriptor) {
+	heap, err := newWithDescriptor(b.device.newCounterHeap, newMTL4CounterHeapDescriptor, func(d mtl4CounterHeapDescriptor) {
 		d.setType(mtl4CounterHeapTypeTimestamp)
 		d.setCount(uint(n))
 	}, "")

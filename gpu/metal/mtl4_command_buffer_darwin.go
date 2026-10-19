@@ -22,6 +22,6 @@ func (b mtl4CommandBuffer) computeCommandEncoder() mtl4ComputeCommandEncoder {
 	return commandBufferComputeCommandEncoder(b)
 }
 
-func (b mtl4CommandBuffer) renderCommandEncoderWithDescriptor(descriptor mtl4RenderPassDescriptor) mtl4RenderCommandEncoder {
+func (b mtl4CommandBuffer) renderCommandEncoder(descriptor mtl4RenderPassDescriptor) mtl4RenderCommandEncoder {
 	return commandBufferRenderCommandEncoderWithDescriptor(b, descriptor)
 }

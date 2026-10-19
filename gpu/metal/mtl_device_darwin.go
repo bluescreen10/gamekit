@@ -90,23 +90,23 @@ func (d mtlDevice) newArgumentTableWithDescriptor(descriptor mtl4ArgumentTableDe
 	return deviceNewArgumentTableWithDescriptor(d, descriptor, err)
 }
 
-func (d mtlDevice) newCounterHeapWithDescriptor(descriptor mtl4CounterHeapDescriptor, err *id) mtl4CounterHeap {
+func (d mtlDevice) newCounterHeap(descriptor mtl4CounterHeapDescriptor, err *id) mtl4CounterHeap {
 	return deviceNewCounterHeapWithDescriptor(d, descriptor, err)
 }
 
-func (d mtlDevice) newBufferWithLength(length uint, options mtlResourceOptions) mtlBuffer {
+func (d mtlDevice) newBuffer(length uint, options mtlResourceOptions) mtlBuffer {
 	return deviceNewBufferWithLength(d, length, options)
 }
 
-func (d mtlDevice) newTextureWithDescriptor(descriptor mtlTextureDescriptor) mtlTexture {
+func (d mtlDevice) newTexture(descriptor mtlTextureDescriptor) mtlTexture {
 	return deviceNewTextureWithDescriptor(d, descriptor)
 }
 
-func (d mtlDevice) newSamplerStateWithDescriptor(descriptor mtlSamplerDescriptor) mtlSamplerState {
+func (d mtlDevice) newSamplerState(descriptor mtlSamplerDescriptor) mtlSamplerState {
 	return deviceNewSamplerStateWithDescriptor(d, descriptor)
 }
 
-func (d mtlDevice) newDepthStencilStateWithDescriptor(descriptor mtlDepthStencilDescriptor) mtlDepthStencilState {
+func (d mtlDevice) newDepthStencilState(descriptor mtlDepthStencilDescriptor) mtlDepthStencilState {
 	return deviceNewDepthStencilStateWithDescriptor(d, descriptor)
 }
 

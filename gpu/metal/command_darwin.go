@@ -153,7 +153,7 @@ func (c *command) rootSlot(data []byte) uint64 {
 		// Grow by doubling. Draws already recorded still read the old arena, so it stays
 		// resident and alive until the GPU is done with it.
 		size := max(2*b.rootArenaLen, need, 16384)
-		arena := b.device.newBufferWithLength(uint(size), mtlResourceStorageModeShared)
+		arena := b.device.newBuffer(uint(size), mtlResourceStorageModeShared)
 		check(arena != 0, "cannot allocate root scratch buffer")
 
 		if b.rootArena != 0 {
@@ -425,7 +425,7 @@ func (c *command) resumeRender(load bool) {
 		a.setStoreAction(mtlStoreActionUnknown)
 	}
 
-	c.render = c.backend.buffer.renderCommandEncoderWithDescriptor(d)
+	c.render = c.backend.buffer.renderCommandEncoder(d)
 	retain(id(c.render))
 	check(c.render != 0, "cannot resume render pass")
 
