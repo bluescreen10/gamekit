@@ -38,6 +38,7 @@ func retain(x id) id {
 	if x != 0 {
 		objectRetain(x)
 	}
+
 	return x
 }
 
@@ -47,7 +48,9 @@ func nsString(s string) id {
 	if len(s) == 0 {
 		return objectInit(str)
 	}
+
 	b := []byte(s)
+
 	return stringInitWithBytes(str, unsafe.Pointer(&b[0]), uint(len(b)), nsUTF8StringEncoding)
 }
 
@@ -56,6 +59,7 @@ func stringOf(s id) string {
 	if s == 0 {
 		return ""
 	}
+
 	return strings.GoString((*byte)(stringUTF8String(s)))
 }
 
@@ -64,6 +68,7 @@ func errorText(err id, fallback string) string {
 	if err == 0 {
 		return fallback
 	}
+
 	return stringOf(errorLocalizedDescription(err))
 }
 
@@ -72,6 +77,7 @@ func setLabel[T ~uintptr](x T, label string) {
 	if label == "" {
 		return
 	}
+
 	s := nsString(label)
 	objectSetLabel(id(x), s)
 	release(s)

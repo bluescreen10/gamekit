@@ -15,22 +15,29 @@ func CocoaViewMetalLayer(view uintptr) uintptr {
 	if view == 0 {
 		return 0
 	}
+
 	pool := pushPool()
 	defer pool.drain()
+
 	v := id(view)
-	layer := viewLayer(v)
-	if !objectIsKindOfClass(layer, class("CAMetalLayer")) {
+	layer := caMetalLayer(viewLayer(v))
+	if !objectIsKindOfClass(id(layer), class("CAMetalLayer")) {
 		viewSetWantsLayer(v, true)
-		layer = metalLayerLayer()
-		viewSetLayer(v, layer)
+
+		layer = newCAMetalLayer()
+		viewSetLayer(v, id(layer))
 	}
+
 	scale := float64(1)
 	if window := viewWindow(v); window != 0 {
 		scale = windowBackingScaleFactor(window)
 	}
-	metalLayerSetContentsScale(layer, scale)
+
+	layer.setContentsScale(scale)
+
 	_, _, width, height := viewBounds(v)
-	metalLayerSetDrawableSize(layer, width*scale, height*scale)
+	layer.setDrawableSize(width*scale, height*scale)
+
 	return uintptr(layer)
 }
 
@@ -40,6 +47,7 @@ func CocoaWindowMetalLayer(window uintptr) uintptr {
 	if window == 0 {
 		return 0
 	}
+
 	return CocoaViewMetalLayer(uintptr(windowContentView(id(window))))
 }
 
@@ -48,6 +56,7 @@ func (b *Backend) CreateSurface(target gpu.SurfaceTarget) (gpu.Surface, error) {
 	if target == nil {
 		return 0, errors.New("metal: nil surface target")
 	}
+
 	native := target.NativeSurface()
 	var layer uintptr
 	switch native.Kind {
@@ -58,8 +67,10 @@ func (b *Backend) CreateSurface(target gpu.SurfaceTarget) (gpu.Surface, error) {
 	default:
 		return 0, fmt.Errorf("metal: unsupported native surface kind %d", native.Kind)
 	}
+
 	if layer == 0 {
 		return 0, errors.New("metal: surface target is closed or invalid")
 	}
+
 	return gpu.Surface(layer), nil
 }

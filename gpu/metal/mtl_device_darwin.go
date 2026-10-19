@@ -61,6 +61,7 @@ func (d mtlDevice) newResidencySet() (mtlResidencySet, error) {
 		func(descriptor mtlResidencySetDescriptor) {
 			descriptor.setLabel("gamekit.residency")
 		}, "cannot create residency set")
+
 	return mtlResidencySet(object), err
 }
 

@@ -215,7 +215,9 @@ var supportedFormats = func() []gpu.Format {
 	for f := range pixelFormats {
 		formats = append(formats, f)
 	}
+
 	slices.Sort(formats)
+
 	return formats
 }()
 
@@ -223,6 +225,7 @@ func pixelFormat(f gpu.Format) mtlPixelFormat {
 	if p, ok := pixelFormats[f]; ok {
 		return p
 	}
+
 	return mtlPixelFormatInvalid
 }
 
@@ -251,6 +254,7 @@ func flag(v bool) uint {
 	if v {
 		return 1
 	}
+
 	return 0
 }
 
@@ -259,84 +263,110 @@ func (b *Backend) Init() error {
 		b.users++
 		return nil
 	}
+
 	if err := b.init(); err != nil {
 		b.destroy()
 		return fmt.Errorf("metal: %s", err)
 	}
+
 	b.users = 1
+
 	return nil
 }
 
 func (b *Backend) init() error {
 	pool := pushPool()
 	defer pool.drain()
+
 	b.device = mtlCreateSystemDefaultDevice()
 	if b.device == 0 {
 		return fmt.Errorf("no Metal device")
 	}
+
 	if b.device.argumentBuffersSupport() != mtlArgumentBuffersTier2 || !b.device.hasUnifiedMemory() {
 		return fmt.Errorf("requires a unified-memory GPU with Tier 2 argument buffers")
 	}
+
 	// The paravirtualized GPU of a macOS virtual machine (GitHub's hosted runners)
 	// passes the checks above but has no Metal 4: newMTL4CommandQueue returns nil.
 	if !b.device.supportsFamily(mtlGPUFamilyMetal4) {
 		return fmt.Errorf("requires a Metal 4 GPU")
 	}
+
 	b.apple1 = b.device.supportsFamily(mtlGPUFamilyApple1)
 	b.maxBufferLength = uint64(b.device.maxBufferLength())
+
 	if b.queue = b.device.newMTL4CommandQueue(); b.queue == 0 {
 		return fmt.Errorf("cannot create command queue")
 	}
+
 	var err error
+
 	if b.compiler, err = b.device.newCompiler(); err != nil {
 		return err
 	}
+
 	if b.residencySet, err = b.device.newResidencySet(); err != nil {
 		return err
 	}
+
 	b.queue.addResidencySet(b.residencySet)
+
 	b.resources = map[uint64]*resource{}
 	b.fences = map[uint64]uint64{}
 	b.feedback = make(chan feedback, 16)
+
 	if b.event = b.device.newSharedEvent(); b.event == 0 {
 		return fmt.Errorf("cannot create shared event")
 	}
+
 	if b.fence = b.device.newFence(); b.fence == 0 {
 		return fmt.Errorf("cannot create fence")
 	}
+
 	if b.allocator, err = b.device.newCommandAllocator(); err != nil {
 		return err
 	}
+
 	if b.buffer = b.device.newCommandBuffer(); b.buffer == 0 {
 		return fmt.Errorf("cannot create command buffer")
 	}
+
 	if b.argTable, err = b.device.newArgumentTable(4); err != nil {
 		return err
 	}
+
 	b.textureTable = b.device.newBufferWithLength(textureSlots*8, mtlResourceStorageModeShared)
 	samplers := min(samplerSlots, uint64(b.device.maxArgumentBufferSamplerCount()))
 	b.samplerTable = b.device.newBufferWithLength(samplerSlots*8, mtlResourceStorageModeShared)
 	if b.textureTable == 0 || b.samplerTable == 0 {
 		return fmt.Errorf("cannot allocate argument tables")
 	}
+
 	b.residencySet.enrol(id(b.textureTable))
 	b.residencySet.enrol(id(b.samplerTable))
+
 	b.textureIDs = unsafe.Slice((*uint64)(b.textureTable.contents()), textureSlots)
 	b.samplerIDs = unsafe.Slice((*uint64)(b.samplerTable.contents()), samplerSlots)
+
 	textures := b.textureTable.gpuAddress()
 	b.argTable.setAddress(textures, 1)
 	b.argTable.setAddress(b.samplerTable.gpuAddress(), 2)
+
 	// Storage images (Vulkan's binding 1) read the same table as sampled ones: a Metal
 	// texture handle does not care how it is accessed, so a texture's one index serves
 	// both, as it does on Vulkan.
 	b.argTable.setAddress(textures, 3)
+
 	// Slots are handed out lowest first.
 	for i := uint32(textureSlots - 1); i >= 1; i-- {
 		b.freeTextures = append(b.freeTextures, i)
 	}
+
 	for i := uint32(samplers - 1); i >= 1; i-- {
 		b.freeSamplers = append(b.freeSamplers, i)
 	}
+
 	return nil
 }
 
@@ -345,14 +375,17 @@ func (b *Backend) init() error {
 func newWithDescriptor[T, R ~uintptr](create func(descriptor T, err *id) R, descriptor func() T, configure func(T), failure string) (R, error) {
 	d := descriptor()
 	defer release(d)
+
 	if configure != nil {
 		configure(d)
 	}
+
 	var nserr id
 	x := create(d, &nserr)
 	if x == 0 {
 		return 0, fmt.Errorf("%s", errorText(nserr, failure))
 	}
+
 	return x, nil
 }
 
@@ -362,7 +395,9 @@ func (b *Backend) Destroy() {
 		b.users--
 		return
 	}
+
 	b.users = 0
+
 	if b.device != 0 {
 		b.WaitIdle()
 		b.destroy()
@@ -373,12 +408,14 @@ func (b *Backend) Destroy() {
 func (b *Backend) destroy() {
 	pool := pushPool()
 	defer pool.drain()
+
 	for _, r := range b.resources {
 		release(r.object)
 		r.depthStencil.release()
 		r.drawable.release()
 	}
 	b.resources = nil
+
 	b.textureTable.release()
 	b.samplerTable.release()
 	b.rootArena.release()
@@ -391,20 +428,24 @@ func (b *Backend) destroy() {
 	b.argTable.release()
 	b.queue.release()
 	b.device.release()
+
 	*b = Backend{}
 }
 
 // add registers a native object under a new handle.
 func (b *Backend) add(r *resource) uint64 {
 	check(r.object != 0, "Metal resource creation failed")
+
 	b.next++
 	b.resources[b.next] = r
+
 	return b.next
 }
 
 func (b *Backend) resource(h uint64, kind int) *resource {
 	r := b.resources[h]
 	check(r != nil && (kind == 0 || r.kind == kind), "invalid resource handle or kind")
+
 	return r
 }
 
@@ -414,6 +455,7 @@ func (b *Backend) releaseLater(o id) {
 	if o == 0 {
 		return
 	}
+
 	if b.inFlight > 0 {
 		b.released = append(b.released, o)
 		return
@@ -423,22 +465,28 @@ func (b *Backend) releaseLater(o id) {
 
 func (b *Backend) Alloc(size uint64, mem gpu.MemoryType, label string) gpu.Buffer {
 	check(size > 0 && size <= b.maxBufferLength && mem <= gpu.MemoryDevice, "invalid buffer allocation")
+
 	pool := pushPool()
 	defer pool.drain()
+
 	options := mtlResourceStorageModeShared
 	if mem == gpu.MemoryDevice {
 		options = mtlResourceStorageModePrivate
 	}
+
 	r := &resource{kind: kindBuffer, size: size, private: mem == gpu.MemoryDevice}
 	object := b.device.newBufferWithLength(uint(size), options)
 	r.object = id(object)
+
 	h := b.add(r)
 	object.setLabel(label)
 	b.residencySet.enrol(r.object)
+
 	r.addr = object.gpuAddress()
 	if !r.private {
 		r.ptr = object.contents()
 	}
+
 	return gpu.Buffer{H: gpu.Handle(h), Size: size, Addr: r.addr, Ptr: r.ptr}
 }
 
@@ -452,6 +500,7 @@ func (b *Backend) release(h gpu.Handle) {
 	if r == nil {
 		return
 	}
+
 	if r.slot != 0 {
 		if r.kind == kindSampler {
 			b.samplerIDs[r.slot] = 0
@@ -461,11 +510,14 @@ func (b *Backend) release(h gpu.Handle) {
 			b.freeTextures = append(b.freeTextures, r.slot)
 		}
 	}
+
 	if r.kind == kindBuffer || r.kind == kindTexture && !r.memoryless {
 		b.residencySet.unenrol(r.object)
 	}
+
 	b.releaseLater(r.object)
 	b.releaseLater(id(r.depthStencil))
+
 	delete(b.resources, uint64(h))
 }
 
@@ -475,14 +527,18 @@ func (b *Backend) slot(r *resource) uint32 {
 	if r.kind == kindSampler {
 		free, ids = &b.freeSamplers, b.samplerIDs
 	}
+
 	check(len(*free) > 0, "bindless heap exhausted")
+
 	r.slot = (*free)[len(*free)-1]
 	*free = (*free)[:len(*free)-1]
+
 	if r.kind == kindSampler {
 		ids[r.slot] = mtlSamplerState(r.object).gpuResourceID()
 	} else {
 		ids[r.slot] = mtlTexture(r.object).gpuResourceID()
 	}
+
 	return r.slot
 }
 
@@ -494,16 +550,19 @@ var textureTypes = [...]mtlTextureType{
 
 func textureType(k gpu.TextureKind) mtlTextureType {
 	check(int(k) < len(textureTypes), "unknown texture kind")
+
 	return textureTypes[k]
 }
 
 func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	check(d.Width > 0 && d.Height > 0, "texture dimensions must be positive")
+
 	r := &resource{
 		kind: kindTexture, textureType: textureType(d.Kind), format: pixelFormat(d.Format),
 		width: uint64(d.Width), height: uint64(d.Height), depth: uint64(max(d.Depth, 1)),
 		layers: uint64(max(d.Layers, 1)), mips: uint64(max(d.Mips, 1)), samples: uint64(max(d.Samples, 1)),
 	}
+
 	arrayLength := r.layers
 	switch d.Kind {
 	case gpu.TextureCube, gpu.TextureCubeArray:
@@ -512,10 +571,12 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	case gpu.Texture2D, gpu.Texture3D:
 		arrayLength, r.layers = 1, 1
 	}
+
 	if r.samples > 1 {
 		check(d.Kind == gpu.Texture2D && r.mips == 1, "MSAA requires a 2D texture with one mip")
 		r.textureType = mtlTextureType2DMultisample
 	}
+
 	usage := mtlTextureUsagePixelFormatView
 	if d.Usage&gpu.TextureSampled != 0 {
 		usage |= mtlTextureUsageShaderRead
@@ -526,7 +587,9 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	if d.Usage&(gpu.TextureRenderTarget|gpu.TextureDepth) != 0 {
 		usage |= mtlTextureUsageRenderTarget
 	}
+
 	storage := mtlStorageModePrivate
+
 	// gpu.TextureTransient: in tile memory alone, on the GPUs that have it.
 	if d.Usage&gpu.TextureTransient != 0 {
 		check(d.Usage&(gpu.TextureSampled|gpu.TextureStorage|gpu.TextureTransfer) == 0,
@@ -540,8 +603,10 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 
 	pool := pushPool()
 	defer pool.drain()
+
 	desc := newMTLTextureDescriptor()
 	defer desc.release()
+
 	desc.setTextureType(r.textureType)
 	desc.setWidth(uint(r.width))
 	desc.setHeight(uint(r.height))
@@ -552,27 +617,35 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	desc.setSampleCount(uint(r.samples))
 	desc.setStorageMode(storage)
 	desc.setUsage(usage)
+
 	object := b.device.newTextureWithDescriptor(desc)
 	r.object = id(object)
+
 	h := b.add(r)
 	object.setLabel(d.Label)
+
 	// Residency sets do not take memoryless textures, which have no memory to make
 	// resident.
 	if !r.memoryless {
 		b.residencySet.enrol(r.object)
 	}
+
 	var index uint32
 	if d.Usage&(gpu.TextureSampled|gpu.TextureStorage) != 0 {
 		index = b.slot(r)
 	}
+
 	if d.Usage&gpu.TextureTransient != 0 {
 		b.transientMu.Lock()
+
 		if b.transients == nil {
 			b.transients = make(map[gpu.Handle]bool)
 		}
+
 		b.transients[gpu.Handle(h)] = true
 		b.transientMu.Unlock()
 	}
+
 	return gpu.Texture{H: gpu.Handle(h), Index: index}
 }
 
@@ -580,25 +653,33 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 func (b *Backend) isTransient(t gpu.Texture) bool {
 	b.transientMu.Lock()
 	defer b.transientMu.Unlock()
+
 	return b.transients[t.H]
 }
 
 func (b *Backend) TextureView(t gpu.Texture, k gpu.TextureKind, firstMip, mipCount, firstLayer, layerCount uint32) gpu.Texture {
 	src := b.resource(uint64(t.H), kindTexture)
 	check(mipCount > 0 && layerCount > 0 && uint64(firstMip+mipCount) <= src.mips, "invalid texture view range")
+
 	pool := pushPool()
 	defer pool.drain()
+
 	v := *src
 	v.textureType = textureType(k)
 	v.mips, v.layers = uint64(mipCount), uint64(layerCount)
+
 	// A view's base level is the source's firstMip.
 	v.width, v.height, v.depth = max(src.width>>firstMip, 1), max(src.height>>firstMip, 1), max(src.depth>>firstMip, 1)
 	v.slot = 0
+
 	v.object = id(mtlTexture(src.object).newTextureViewWithPixelFormat(src.format, v.textureType, uint(firstMip), uint(mipCount), uint(firstLayer), uint(layerCount)))
+
 	h := b.add(&v)
+
 	if !v.memoryless {
 		b.residencySet.enrol(v.object)
 	}
+
 	return gpu.Texture{H: gpu.Handle(h), Index: b.slot(&v)}
 }
 
@@ -606,6 +687,7 @@ func (b *Backend) DestroyTexture(t gpu.Texture) {
 	b.transientMu.Lock()
 	delete(b.transients, t.H)
 	b.transientMu.Unlock()
+
 	b.release(t.H)
 }
 
@@ -617,22 +699,29 @@ var addressModes = [...]mtlSamplerAddressMode{
 func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	check(int(d.AddressU) < len(addressModes) && int(d.AddressV) < len(addressModes) &&
 		int(d.AddressW) < len(addressModes) && d.Compare < 8, "invalid sampler descriptor")
+
 	filter := func(linear bool) mtlSamplerMinMagFilter {
 		if linear {
 			return mtlSamplerMinMagFilterLinear
 		}
+
 		return mtlSamplerMinMagFilterNearest
 	}
+
 	pool := pushPool()
 	defer pool.drain()
+
 	desc := newMTLSamplerDescriptor()
 	defer desc.release()
+
 	desc.setMinFilter(filter(d.MinLinear))
 	desc.setMagFilter(filter(d.MagLinear))
+
 	mip := mtlSamplerMipFilterNearest
 	if d.MipLinear {
 		mip = mtlSamplerMipFilterLinear
 	}
+
 	desc.setMipFilter(mip)
 	desc.setSAddressMode(addressModes[d.AddressU])
 	desc.setTAddressMode(addressModes[d.AddressV])
@@ -641,8 +730,10 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	desc.setMaxAnisotropy(uint(max(d.MaxAnisotropy, 1)))
 	desc.setSupportArgumentBuffers(true)
 	desc.setLabel(d.Label)
+
 	r := &resource{kind: kindSampler, object: id(b.device.newSamplerStateWithDescriptor(desc))}
 	h := b.add(r)
+
 	return gpu.Sampler{H: gpu.Handle(h), Index: b.slot(r)}
 }
 
@@ -654,12 +745,14 @@ func entry(s string) string {
 	if s == "" || s == "main" {
 		return "main0"
 	}
+
 	return s
 }
 
 // shaderLibrary loads a metallib, or compiles MSL source. The library is autoreleased.
 func (b *Backend) shaderLibrary(code []byte) mtlLibrary {
 	check(len(code) > 0, "empty shader")
+
 	var lib mtlLibrary
 	var nserr id
 	if bytes.HasPrefix(code, []byte("MTLB")) {
@@ -669,15 +762,21 @@ func (b *Backend) shaderLibrary(code []byte) mtlLibrary {
 	} else {
 		check(len(code) < 4 || binary.LittleEndian.Uint32(code) != 0x07230203,
 			"SPIR-V is not supported; supply MSL source or a metallib")
+
 		source := nsString(string(code))
 		check(source != 0, "shader is not UTF-8 MSL or a metallib")
+
 		options := newObject("MTLCompileOptions")
 		compileOptionsSetLanguageVersion(options, mtlLanguageVersion3_0)
+
 		lib = b.device.newLibraryWithSource(source, options, &nserr)
+
 		release(options)
 		release(source)
 	}
+
 	check(lib != 0, errorText(nserr, "shader compilation failed"))
+
 	return mtlLibrary(objectAutorelease(id(lib)))
 }
 
@@ -686,9 +785,11 @@ func (b *Backend) shaderLibrary(code []byte) mtlLibrary {
 func (b *Backend) libraryFunction(code []byte, entryName string) mtl4LibraryFunctionDescriptor {
 	fd := newMTL4LibraryFunctionDescriptor()
 	fd.setLibrary(b.shaderLibrary(code))
+
 	name := nsString(entry(entryName))
 	fd.setName(name)
 	release(name)
+
 	return mtl4LibraryFunctionDescriptor(objectAutorelease(id(fd)))
 }
 
@@ -711,8 +812,10 @@ var constantTypes = [...]mtlDataType{
 // default. It is autoreleased.
 func specializedFunction(function mtl4LibraryFunctionDescriptor, constants []constant) mtl4SpecializedFunctionDescriptor {
 	values := newObject("MTLFunctionConstantValues")
+
 	for _, c := range constants {
 		check(int(c.kind) < len(constantTypes), "invalid constant type")
+
 		// A Metal bool is one byte; the other types take all 32 bits.
 		value := [4]byte{}
 		if c.kind == specialization.Bool {
@@ -720,12 +823,16 @@ func specializedFunction(function mtl4LibraryFunctionDescriptor, constants []con
 		} else {
 			binary.NativeEndian.PutUint32(value[:], c.bits)
 		}
+
 		functionConstantValuesSetConstantValue(values, unsafe.Pointer(&value[0]), constantTypes[c.kind], uint(c.index))
 	}
+
 	fd := newMTL4SpecializedFunctionDescriptor()
 	fd.setFunctionDescriptor(function)
 	fd.setConstantValues(values)
+
 	release(values)
+
 	return mtl4SpecializedFunctionDescriptor(objectAutorelease(id(fd)))
 }
 
@@ -734,6 +841,7 @@ func specializedFunction(function mtl4LibraryFunctionDescriptor, constants []con
 func pipelineOptions() id {
 	o := newObject("MTL4PipelineOptions")
 	pipelineOptionsSetShaderReflection(o, mtl4ShaderReflectionBindingInfo)
+
 	return objectAutorelease(o)
 }
 
@@ -742,10 +850,12 @@ func pipelineOptions() id {
 func rootBytes(bindings id) uint64 {
 	for i := range arrayCount(bindings) {
 		x := arrayObjectAtIndex(bindings, i)
+
 		if bindingIndex(x) == 0 && bindingType(x) == mtlBindingTypeBuffer && bindingIsUsed(x) {
 			return uint64(bufferBindingBufferDataSize(x))
 		}
 	}
+
 	return 0
 }
 
@@ -754,27 +864,36 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 	if group[0] == 0 || group[1] == 0 || group[2] == 0 {
 		panic(fmt.Sprintf("metal: CreateComputePipeline(%q): every WorkgroupSize dimension must be at least 1, not %v", d.Label, group))
 	}
+
 	constants, err := b.resolveConstants(d.Constants, stageShader{code: code, entry: d.Entry})
 	if err != nil {
 		panic(fmt.Sprintf("metal: CreateComputePipeline(%q): %v", d.Label, err))
 	}
+
 	pool := pushPool()
 	defer pool.drain()
+
 	desc := newMTL4ComputePipelineDescriptor()
 	defer desc.release()
+
 	desc.setLabel(d.Label)
 	desc.setComputeFunctionDescriptor(specializedFunction(b.libraryFunction(code, d.Entry), constants))
 	desc.setOptions(pipelineOptions())
+
 	var nserr id
 	ps := b.compiler.newComputePipelineStateWithDescriptor(desc, 0, &nserr)
 	check(ps != 0, errorText(nserr, "compute pipeline creation failed"))
+
 	r := &resource{kind: kindCompute, object: id(ps)}
 	r.group = [3]uint{uint(group[0]), uint(group[1]), uint(group[2])}
+
 	if uint64(group[0])*uint64(group[1])*uint64(group[2]) > uint64(ps.maxTotalThreadsPerThreadgroup()) {
 		ps.release()
 		panic("metal: workgroup too large")
 	}
+
 	r.rootSize = rootBytes(computePipelineReflectionBindings(ps.reflection()))
+
 	return gpu.Pipeline{H: gpu.Handle(b.add(r))}
 }
 
@@ -797,6 +916,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	vertex, fragment := d.VertexShader, d.FragmentShader
 	check(len(d.ColorFormats) <= 8, "at most 8 color targets")
 	check(int(d.Topology) < len(topologies) && int(d.CullMode) < len(cullModes), "invalid topology or cull mode")
+
 	constants, err := b.resolveConstants(d.Constants,
 		stageShader{code: vertex, entry: d.VertexEntry},
 		stageShader{code: fragment, entry: d.FragmentEntry})
@@ -806,38 +926,49 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 
 	pool := pushPool()
 	defer pool.drain()
+
 	desc := newMTL4RenderPipelineDescriptor()
 	defer desc.release()
+
 	desc.setLabel(d.Label)
+
 	// Both stages share one set of constants, as on Vulkan; a stage ignores any it does
 	// not declare.
 	desc.setVertexFunctionDescriptor(specializedFunction(b.libraryFunction(vertex, d.VertexEntry), constants))
 	if len(fragment) > 0 {
 		desc.setFragmentFunctionDescriptor(specializedFunction(b.libraryFunction(fragment, d.FragmentEntry), constants))
 	}
+
 	desc.setRasterSampleCount(uint(max(d.Samples, 1)))
 	desc.setOptions(pipelineOptions())
+
 	attachments := desc.colorAttachments()
 	for i, f := range d.ColorFormats {
 		t := mtl4RenderPipelineColorAttachmentDescriptor(arrayObjectAtIndexedSubscript(attachments, uint(i)))
 		t.setPixelFormat(pixelFormat(f))
+
 		var blend gpu.BlendState
 		if i < len(d.Blend) {
 			blend = d.Blend[i]
 		}
+
 		// The RHI's mask has R at bit 0, Metal's at bit 3.
 		mask := uint(blend.WriteMask & 15)
 		if mask == 0 {
 			mask = 15
 		}
+
 		t.setWriteMask(mtlColorWriteMask((mask&1)<<3 | (mask&2)<<1 | (mask&4)>>1 | (mask&8)>>3))
+
 		if !blend.Enable {
 			t.setBlendingState(mtl4BlendStateDisabled)
 			continue
 		}
+
 		for _, f := range []gpu.BlendFactor{blend.ColorOp.Src, blend.ColorOp.Dst, blend.AlphaOp.Src, blend.AlphaOp.Dst} {
 			check(int(f) < len(blendFactors), "invalid blend factor")
 		}
+
 		t.setBlendingState(mtl4BlendStateEnabled)
 		t.setSourceRGBBlendFactor(blendFactors[blend.ColorOp.Src])
 		t.setDestinationRGBBlendFactor(blendFactors[blend.ColorOp.Dst])
@@ -846,31 +977,39 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 		t.setDestinationAlphaBlendFactor(blendFactors[blend.AlphaOp.Dst])
 		t.setAlphaBlendOperation(mtlBlendOperation(blend.AlphaOp.Op))
 	}
+
 	// Metal 4 pipeline state is no longer tied to a depth/stencil attachment format; it
 	// lives purely on the render pass descriptor. The descriptor's depth fields still
 	// select the depth-stencil state's compare and write behavior below.
 	var nserr id
 	ps := b.compiler.newRenderPipelineStateWithDescriptor(desc, 0, &nserr)
 	check(ps != 0, errorText(nserr, "render pipeline creation failed"))
+
 	r := &resource{kind: kindGraphics, object: id(ps), depthWrite: d.DepthWrite}
+
 	// bindings() pushes the root to both stages, so the larger expectation governs.
 	reflection := ps.reflection()
 	r.rootSize = max(rootBytes(renderPipelineReflectionVertexBindings(reflection)), rootBytes(renderPipelineReflectionFragmentBindings(reflection)))
+
 	depth := newMTLDepthStencilDescriptor()
 	compare := mtlCompareFunctionAlways
 	if d.DepthTest {
 		compare = mtlCompareFunction(d.DepthCompare)
 	}
+
 	depth.setDepthCompareFunction(compare)
 	depth.setDepthWriteEnabled(d.DepthWrite)
+
 	r.depthStencil = b.device.newDepthStencilStateWithDescriptor(depth)
 	depth.release()
+
 	r.topology = topologies[d.Topology]
 	r.cull = cullModes[d.CullMode]
 	r.winding = mtlWindingCounterClockwise
 	if d.FrontFaceCW {
 		r.winding = mtlWindingClockwise
 	}
+
 	return gpu.Pipeline{H: gpu.Handle(b.add(r))}
 }
 
@@ -887,20 +1026,24 @@ func (b *Backend) resolveConstants(constants map[string]float64, stages ...stage
 	if len(constants) == 0 {
 		return nil, nil
 	}
+
 	var declarations [][]specialization.Declaration
 	for _, stage := range stages {
 		if len(stage.code) > 0 {
 			declarations = append(declarations, b.functionConstants(stage))
 		}
 	}
+
 	values, err := specialization.Resolve(constants, declarations...)
 	if err != nil {
 		return nil, err
 	}
+
 	var resolved []constant
 	for _, v := range values {
 		resolved = append(resolved, constant{index: v.ID, kind: v.Type, bits: v.Bits})
 	}
+
 	return resolved, nil
 }
 
@@ -910,15 +1053,19 @@ func (b *Backend) resolveConstants(constants map[string]float64, stages ...stage
 func (b *Backend) functionConstants(stage stageShader) []specialization.Declaration {
 	pool := pushPool()
 	defer pool.drain()
+
 	name := nsString(entry(stage.entry))
 	function := b.shaderLibrary(stage.code).newFunctionWithName(name)
 	release(name)
+
 	check(function != 0, "shader has no such entry point")
 	defer release(function)
+
 	values := dictionaryAllValues(functionFunctionConstantsDictionary(function))
 	var declarations []specialization.Declaration
 	for i := range arrayCount(values) {
 		c := arrayObjectAtIndex(values, i)
+
 		var kind specialization.Type
 		switch functionConstantType(c) {
 		case mtlDataTypeBool:
@@ -932,12 +1079,14 @@ func (b *Backend) functionConstants(stage stageShader) []specialization.Declarat
 		default:
 			panic(fmt.Sprintf("metal: function constant %s is not a bool, int, uint or float", stringOf(functionConstantName(c))))
 		}
+
 		declarations = append(declarations, specialization.Declaration{
 			ID:   uint32(functionConstantIndex(c)),
 			Name: strings.TrimSuffix(stringOf(functionConstantName(c)), "_tmp"),
 			Type: kind,
 		})
 	}
+
 	return declarations
 }
 
@@ -951,24 +1100,31 @@ func (b *Backend) CreateSwapchain(surface gpu.Surface, desc gpu.SwapchainDescrip
 	if format == gpu.FormatUndefined {
 		format = gpu.FormatBGRA8Unorm
 	}
+
 	if !slices.Contains(layerFormats, format) {
 		return gpu.Swapchain{}, fmt.Errorf("metal: swapchain format %v is not one a CAMetalLayer presents", format)
 	}
-	layer := id(surface)
-	check(objectIsKindOfClass(layer, class("CAMetalLayer")), "surface must be a CAMetalLayer")
-	metalLayerSetDevice(layer, b.device)
-	metalLayerSetPixelFormat(layer, pixelFormat(format))
-	metalLayerSetFramebufferOnly(layer, false)
-	metalLayerSetDrawableSize(layer, float64(desc.Width), float64(desc.Height))
-	sc := gpu.Swapchain{H: gpu.Handle(b.add(&resource{kind: kindSwapchain, object: retain(layer)}))}
+
+	layer := caMetalLayer(surface)
+	check(objectIsKindOfClass(id(layer), class("CAMetalLayer")), "surface must be a CAMetalLayer")
+
+	layer.setDevice(b.device)
+	layer.setPixelFormat(pixelFormat(format))
+	layer.setFramebufferOnly(false)
+	layer.setDrawableSize(float64(desc.Width), float64(desc.Height))
+
+	sc := gpu.Swapchain{H: gpu.Handle(b.add(&resource{kind: kindSwapchain, object: id(layer.retain())}))}
 	b.setDisplaySync(sc, desc.PresentMode)
 
 	b.swapchainMu.Lock()
 	defer b.swapchainMu.Unlock()
+
 	if b.swapchainFormats == nil {
 		b.swapchainFormats = make(map[gpu.Handle]gpu.Format)
 	}
+
 	b.swapchainFormats[sc.H] = format
+
 	return sc, nil
 }
 
@@ -982,9 +1138,11 @@ func (b *Backend) SwapchainFormats(surface gpu.Surface) []gpu.Format {
 
 func (b *Backend) ResizeSwapchain(s gpu.Swapchain, w, h uint32) {
 	b.WaitIdle()
+
 	r := b.resource(uint64(s.H), kindSwapchain)
 	check(r.drawable == 0, "cannot resize with an acquired drawable")
-	metalLayerSetDrawableSize(r.object, float64(w), float64(h))
+
+	caMetalLayer(r.object).setDrawableSize(float64(w), float64(h))
 }
 
 // SetPresentMode switches the layer's display sync. A CAMetalLayer without it presents
@@ -992,44 +1150,53 @@ func (b *Backend) ResizeSwapchain(s gpu.Swapchain, w, h uint32) {
 // keeps display sync, as PresentVSync does.
 func (b *Backend) SetPresentMode(s gpu.Swapchain, mode gpu.PresentMode) {
 	b.WaitIdle()
+
 	b.setDisplaySync(s, mode)
 }
 
 func (b *Backend) setDisplaySync(s gpu.Swapchain, mode gpu.PresentMode) {
-	metalLayerSetDisplaySyncEnabled(b.resource(uint64(s.H), kindSwapchain).object, mode != gpu.PresentImmediate)
+	caMetalLayer(b.resource(uint64(s.H), kindSwapchain).object).setDisplaySyncEnabled(mode != gpu.PresentImmediate)
 }
 
 func (b *Backend) SwapchainSize(s gpu.Swapchain) (uint32, uint32) {
-	w, h := metalLayerDrawableSize(b.resource(uint64(s.H), kindSwapchain).object)
+	w, h := caMetalLayer(b.resource(uint64(s.H), kindSwapchain).object).drawableSize()
+
 	return uint32(w), uint32(h)
 }
 
 func (b *Backend) SwapchainFormat(s gpu.Swapchain) gpu.Format {
 	b.swapchainMu.Lock()
 	defer b.swapchainMu.Unlock()
+
 	return b.swapchainFormats[s.H]
 }
 
 func (b *Backend) AcquireNext(s gpu.Swapchain) (gpu.Texture, gpu.Fence) {
 	r := b.resource(uint64(s.H), kindSwapchain)
 	check(r.drawable == 0, "drawable already acquired")
+
 	pool := pushPool()
 	defer pool.drain()
-	r.drawable = metalLayerNextDrawable(r.object).retain()
+
+	r.drawable = caMetalLayer(r.object).nextDrawable().retain()
 	check(r.drawable != 0, "no drawable available (window hidden or zero size)")
+
 	// A drawable is used only as a render attachment; it is never referenced through a
 	// bindless argument table. Keeping it out of the residency set means its
 	// acquire/release cycle costs nothing beyond this call.
 	t := r.drawable.texture()
 	retain(id(t))
+
 	tex := &resource{
 		kind: kindTexture, object: id(t), textureType: mtlTextureType2D, layers: 1, mips: 1, samples: 1,
 		width: uint64(t.width()), height: uint64(t.height()), depth: 1,
 		format: t.pixelFormat(),
 	}
+
 	b.next++
 	b.resources[b.next] = tex
 	r.drawableTexture = gpu.Handle(b.next)
+
 	return gpu.Texture{H: r.drawableTexture}, gpu.Fence{}
 }
 
@@ -1037,11 +1204,15 @@ func (b *Backend) Present(s gpu.Swapchain, c gpu.CommandBuffer) {
 	v := b.cmd(c)
 	r := b.resource(uint64(s.H), kindSwapchain)
 	check(r.drawable != 0, "no acquired drawable")
+
 	value := b.submit(v, r.drawable)
+
 	b.releaseLater(b.resources[uint64(r.drawableTexture)].object)
 	delete(b.resources, uint64(r.drawableTexture))
 	b.releaseLater(id(r.drawable))
+
 	r.drawable, r.drawableTexture = 0, 0
+
 	// Applications reuse mapped frame data and read counters immediately after Present.
 	// Match the synchronous presentation contract of the Vulkan backend.
 	b.completed(value)
@@ -1051,8 +1222,10 @@ func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 	if n == 0 {
 		return gpu.QueryPool{}
 	}
+
 	pool := pushPool()
 	defer pool.drain()
+
 	heap, err := newWithDescriptor(b.device.newCounterHeapWithDescriptor, newMTL4CounterHeapDescriptor, func(d mtl4CounterHeapDescriptor) {
 		d.setType(mtl4CounterHeapTypeTimestamp)
 		d.setCount(uint(n))
@@ -1060,10 +1233,13 @@ func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 	if err != nil {
 		return gpu.QueryPool{} // unsupported device: degrade to no timestamps.
 	}
+
 	r := &resource{kind: kindQuery, object: id(heap), count: uint64(n), written: map[uint32]bool{}, overrides: map[uint32]uint64{}}
+
 	var cpu, gpuStart uint64
 	b.device.sampleTimestamps(&cpu, &gpuStart)
 	r.cpuStart, r.gpuStart = cpu, gpuStart
+
 	return gpu.QueryPool{H: gpu.Handle(b.add(r))}
 }
 
@@ -1077,18 +1253,25 @@ func (b *Backend) ReadTimestamps(p gpu.QueryPool, n uint32) []uint64 {
 	if !p.IsValid() || n == 0 {
 		return nil
 	}
+
 	r := b.resource(uint64(p.H), kindQuery)
 	check(uint64(n) <= r.count, "query read out of bounds")
+
 	pool := pushPool()
 	defer pool.drain()
+
 	data := mtl4CounterHeap(r.object).resolveCounterRange(0, uint(n))
 	check(data != 0 && uint64(dataLength(data)) >= uint64(n)*8, "timestamp resolve failed")
+
 	values := unsafe.Slice((*uint64)(dataBytes(data)), n)
+
 	var cpu, gpuNow uint64
 	b.device.sampleTimestamps(&cpu, &gpuNow)
 	check(gpuNow > r.gpuStart, "GPU timestamp calibration unavailable")
+
 	scale := hostScale()
 	period := float64(cpu-r.cpuStart) * scale / float64(gpuNow-r.gpuStart)
+
 	out := make([]uint64, n)
 	for i := range out {
 		if v, ok := r.overrides[uint32(i)]; ok {
@@ -1097,12 +1280,14 @@ func (b *Backend) ReadTimestamps(p gpu.QueryPool, n uint32) []uint64 {
 			out[i] = uint64(float64(r.cpuStart)*scale + (float64(values[i])-float64(r.gpuStart))*period)
 		}
 	}
+
 	return out
 }
 
 // hostScale is nanoseconds per mach absolute time tick.
 func hostScale() float64 {
 	numer, denom := machTimebaseInfo()
+
 	return float64(numer) / float64(denom)
 }
 

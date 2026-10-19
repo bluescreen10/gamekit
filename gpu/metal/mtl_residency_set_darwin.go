@@ -28,12 +28,15 @@ func (s mtlResidencySet) requestResidency() {
 // enrol adds an allocation and immediately commits and requests its residency.
 func (s mtlResidencySet) enrol(allocation id) {
 	s.addAllocation(allocation)
+
 	s.commit()
+
 	s.requestResidency()
 }
 
 // unenrol removes an allocation and immediately commits the change.
 func (s mtlResidencySet) unenrol(allocation id) {
 	s.removeAllocation(allocation)
+
 	s.commit()
 }

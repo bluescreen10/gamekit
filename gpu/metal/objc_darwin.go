@@ -210,6 +210,7 @@ func b2u(v bool) C.gk_u {
 	if v {
 		return 1
 	}
+
 	return 0
 }
 
@@ -247,6 +248,7 @@ func machAbsoluteTime() uint64 {
 func machTimebaseInfo() (numer, denom uint32) {
 	var info C.mach_timebase_info_data_t
 	C.mach_timebase_info(&info)
+
 	return uint32(info.numer), uint32(info.denom)
 }
 
@@ -261,6 +263,7 @@ func gkMetalFeedback(ctx C.uintptr_t, feedback C.uintptr_t) {
 	h := cgo.Handle(ctx)
 	handler := h.Value().(func(id))
 	h.Delete()
+
 	handler(id(feedback))
 }
 
@@ -657,32 +660,33 @@ func depthStencilDescriptorSetDepthWriteEnabled(d mtlDepthStencilDescriptor, v b
 
 // CAMetalLayer, CAMetalDrawable, NSView, NSWindow.
 
-func metalLayerLayer() id {
-	return id(C.gk_o(o(objcGetClass("CAMetalLayer")), selLayer))
+func metalLayerLayer() caMetalLayer {
+	return caMetalLayer(C.gk_o(o(objcGetClass("CAMetalLayer")), selLayer))
 }
-func metalLayerSetDevice(l id, d mtlDevice) {
+func metalLayerSetDevice(l caMetalLayer, d mtlDevice) {
 	C.gk_v_o(o(l), selSetDevice, o(d))
 }
-func metalLayerSetPixelFormat(l id, v mtlPixelFormat) {
+func metalLayerSetPixelFormat(l caMetalLayer, v mtlPixelFormat) {
 	C.gk_v_u(o(l), selSetPixelFormat, C.gk_u(v))
 }
-func metalLayerSetFramebufferOnly(l id, v bool) {
+func metalLayerSetFramebufferOnly(l caMetalLayer, v bool) {
 	C.gk_v_u(o(l), selSetFramebufferOnly, b2u(v))
 }
-func metalLayerSetDisplaySyncEnabled(l id, v bool) {
+func metalLayerSetDisplaySyncEnabled(l caMetalLayer, v bool) {
 	C.gk_v_u(o(l), selSetDisplaySyncEnabled, b2u(v))
 }
-func metalLayerSetContentsScale(l id, v float64) {
+func metalLayerSetContentsScale(l caMetalLayer, v float64) {
 	C.gk_v_d(o(l), selSetContentsScale, C.double(v))
 }
-func metalLayerSetDrawableSize(l id, width, height float64) {
+func metalLayerSetDrawableSize(l caMetalLayer, width, height float64) {
 	C.gk_v_cgsize(o(l), selSetDrawableSize, C.CGSize{width: C.CGFloat(width), height: C.CGFloat(height)})
 }
-func metalLayerDrawableSize(l id) (width, height float64) {
+func metalLayerDrawableSize(l caMetalLayer) (width, height float64) {
 	s := C.gk_size(o(l), selDrawableSize)
+
 	return float64(s.width), float64(s.height)
 }
-func metalLayerNextDrawable(l id) mtlDrawable {
+func metalLayerNextDrawable(l caMetalLayer) mtlDrawable {
 	return mtlDrawable(C.gk_o(o(l), selNextDrawable))
 }
 func drawableTexture(d mtlDrawable) mtlTexture {
@@ -711,6 +715,7 @@ func windowBackingScaleFactor(w id) float64 {
 }
 func viewBounds(v id) (x, y, width, height float64) {
 	r := C.gk_rect(o(v), selBounds)
+
 	return float64(r.origin.x), float64(r.origin.y), float64(r.size.width), float64(r.size.height)
 }
 
@@ -904,6 +909,7 @@ type autoreleasePool struct{ p unsafe.Pointer }
 
 func pushPool() autoreleasePool {
 	runtime.LockOSThread()
+
 	return autoreleasePool{objcAutoreleasePoolPush()}
 }
 
