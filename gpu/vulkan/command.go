@@ -4,7 +4,6 @@ package vulkan
 
 import (
 	"fmt"
-	"math"
 	"unsafe"
 
 	"github.com/bluescreen10/gamekit/gpu"
@@ -22,23 +21,13 @@ func (b *Backend) initCommands() error {
 	if r != vkSuccess {
 		return fmt.Errorf("vulkan: command pool creation failed (%d)", int(r))
 	}
-	b.fences = map[uint64]fenceEntry{}
 	return nil
 }
 
 func (b *Backend) destroyCommands() {
-	for _, f := range b.fences {
-		vkDestroyFence(b.device, f.fence, nil)
-		vkFreeCommandBuffers(b.device, b.cmdPool, 1, &f.cb)
-	}
 	if b.cmdPool != nil {
 		vkDestroyCommandPool(b.device, b.cmdPool, nil)
 	}
-}
-
-type fenceEntry struct {
-	cb    vkCommandBuffer
-	fence vkFence
 }
 
 // cmdBuffer is the Vulkan CommandBuffer: a primary command buffer that has the
@@ -94,21 +83,14 @@ func (b *Backend) Submit(cmd gpu.CommandBuffer) gpu.Fence {
 	if r := b.submit(c.cb, nil, nil, nativeFence); r != vkSuccess {
 		panic(fmt.Sprintf("vulkan: submit failed (%d)", int(r)))
 	}
-	h := b.nextID.Add(1)
-	b.fences[h] = fenceEntry{cb: c.cb, fence: nativeFence}
-	return &fence{reference{b, h}}
+	f := &fence{reference: reference{backend: b}, cb: c.cb, native: nativeFence, pendingIndex: len(b.fences)}
+	b.fences = append(b.fences, f)
+	return f
 }
 
 // Wait blocks until the fence signals, then frees the command buffer + fence.
 func (b *Backend) Wait(f gpu.Fence) {
-	e, ok := b.fences[b.handle(f)]
-	if !ok {
-		return
-	}
-	vkWaitForFences(b.device, 1, &e.fence, vkTrue, math.MaxUint64)
-	vkDestroyFence(b.device, e.fence, nil)
-	vkFreeCommandBuffers(b.device, b.cmdPool, 1, &e.cb)
-	delete(b.fences, b.handle(f))
+	resourceOf[*fence](b, f).destroy()
 }
 
 // submit submits cb to the queue, signalling fence. A non-nil acquire is waited on
@@ -145,19 +127,22 @@ func (b *Backend) submit(cb vkCommandBuffer, acquire, renderDone vkSemaphore, fe
 // WaitIdle blocks until the device is idle.
 func (b *Backend) WaitIdle() {
 	vkDeviceWaitIdle(b.device)
+	for len(b.fences) > 0 {
+		b.fences[len(b.fences)-1].destroy()
+	}
 }
 
 // --- CommandBuffer ---
 
-func (b *Backend) tex(t gpu.Texture) *textureEntry {
-	return b.textures[b.handle(t)]
+func (b *Backend) tex(t gpu.Texture) *texture {
+	return resourceOf[*texture](b, t)
 }
 
 func (b *Backend) bufRaw(buf gpu.Buffer) vkBuffer {
-	return b.buffers[b.handle(buf)].buf
+	return resourceOf[*buffer](b, buf).buf
 }
 
-func aspectOf(e *textureEntry) vkImageAspectFlags {
+func aspectOf(e *texture) vkImageAspectFlags {
 	if e.isDepthFormat {
 		return vkImageAspectDepthBit
 	}
@@ -172,12 +157,13 @@ func (c *cmdBuffer) initializeImages() {
 	if c.inRenderPass {
 		return
 	}
-	for _, h := range c.backend.uninitialized {
-		if e, ok := c.backend.textures[h]; ok {
+	for _, e := range c.backend.uninitialized {
+		if e.IsValid() {
 			c.imageBarrier(e.img, aspectOf(e), vkPipelineStage2AllCommandsBit, vkAccess2None, vkPipelineStage2AllCommandsBit, vkAccess2MemoryReadBit|vkAccess2MemoryWriteBit,
 				vkImageLayoutUndefined, vkImageLayoutGeneral)
 		}
 	}
+	clear(c.backend.uninitialized)
 	c.backend.uninitialized = c.backend.uninitialized[:0]
 }
 
@@ -328,7 +314,7 @@ func (c *cmdBuffer) EndRenderPass() {
 // SetPipeline binds a pipeline to its own bind point (graphics or compute),
 // recorded when the pipeline was created.
 func (c *cmdBuffer) SetPipeline(p gpu.Pipeline) {
-	e := c.backend.pipelines[c.backend.handle(p)]
+	e := resourceOf[*pipeline](c.backend, p)
 	vkCmdBindPipeline(c.cb, e.bindPoint, e.pipe)
 	if e.bindPoint == vkPipelineBindPointGraphics {
 		// Depth bias is always a dynamic pipeline state (see CreateGraphicsPipeline); Vulkan
@@ -401,7 +387,7 @@ func (c *cmdBuffer) Dispatch(data []byte, x, y, z uint32) {
 
 func (c *cmdBuffer) DispatchIndirect(data []byte, args gpu.Buffer, offset uint64) {
 	// The workgroup counts are three uint32s, at a multiple of 4 inside the buffer.
-	if size := c.backend.buffers[c.backend.handle(args)].size; offset%4 != 0 || offset+12 > size {
+	if size := resourceOf[*buffer](c.backend, args).size; offset%4 != 0 || offset+12 > size {
 		panic(fmt.Sprintf("vulkan: DispatchIndirect: offset %d does not hold 12 aligned bytes in a %d-byte buffer", offset, size))
 	}
 	c.initializeImages()
@@ -489,7 +475,7 @@ func bufferImageCopy(offset uint64, w, h, d, mip, layer uint32, aspect vkImageAs
 // floored at 1 (so a 4x1 image's level 2 is 1x1, not 1x0). Copying the base extent into
 // a smaller level would overrun it. A 3D texture's copy covers its whole depth, as a
 // 2D texture's covers one layer.
-func mipExtent(e *textureEntry, level uint32) (width, height, depth uint32) {
+func mipExtent(e *texture, level uint32) (width, height, depth uint32) {
 	return max(e.width>>level, 1), max(e.height>>level, 1), max(e.depth>>level, 1)
 }
 

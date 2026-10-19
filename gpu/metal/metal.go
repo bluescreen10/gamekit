@@ -20,22 +20,10 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 	"unsafe"
 
 	"github.com/bluescreen10/gamekit/gpu"
 	"github.com/bluescreen10/gamekit/gpu/internal/specialization"
-)
-
-// Resource kinds.
-const (
-	kindBuffer = iota + 1
-	kindTexture
-	kindSampler
-	kindGraphics
-	kindCompute
-	kindSwapchain
-	kindQuery
 )
 
 // Bindless table sizes: texture and sampler slot 0 is never handed out.
@@ -43,50 +31,6 @@ const (
 	textureSlots = 65536
 	samplerSlots = 2048
 )
-
-// resource is one handle's native object and what the backend needs to know of it.
-type resource struct {
-	object id
-	kind   int
-	// slot is the bindless table slot, or 0.
-	slot uint32
-
-	// Buffers.
-	size    uint64
-	addr    uint64
-	ptr     unsafe.Pointer
-	private bool
-
-	// Textures.
-	width, height, depth  uint64
-	mips, layers, samples uint64
-	textureType           mtlTextureType
-	format                mtlPixelFormat
-	memoryless            bool
-
-	// Pipelines: the depth-stencil state, fixed-function state, and the bytes the
-	// shader's root argument occupies, from reflection. MSL rounds a struct's size up to
-	// its alignment (16 if it holds a vec4 or mat4), so a caller packing the same fields
-	// more tightly hands the argument table a short root and the shader reads past it.
-	// Zero when the shader takes no root argument.
-	depthStencil mtlDepthStencilState
-	topology     mtlPrimitiveType
-	cull         mtlCullMode
-	winding      mtlWinding
-	depthWrite   bool
-	group        [3]uint
-	rootSize     uint64
-
-	// Swapchains: the acquired drawable and its texture's handle.
-	drawable        mtlDrawable
-	drawableTexture uint64
-
-	// Timestamp pools.
-	written            map[uint32]bool
-	overrides          map[uint32]uint64
-	cpuStart, gpuStart uint64
-	count              uint64
-}
 
 // Backend owns one device and serial queue. Like command recording, resource
 // creation/destruction must be externally serialized. Wait before freeing resources.
@@ -126,15 +70,13 @@ type Backend struct {
 	maxBufferLength uint64
 	apple1          bool
 
-	resources map[uint64]*resource
-	next      uint64
-	open      *command
+	open *command
 
-	// eventValue is signaled by the queue after each submission; fences maps a
-	// submission's fence handle to it. inFlight is set from submit to its completion,
+	// eventValue is signaled by the queue after each submission. fences holds pending submissions.
+	// inFlight is set from submit to its completion,
 	// and released holds the objects released meanwhile, which the GPU may still use.
 	eventValue uint64
-	fences     map[uint64]uint64
+	fences     []*fence
 	inFlight   int
 	released   []id
 	// retired holds root arenas outgrown while recording, which the GPU may still read.
@@ -142,16 +84,6 @@ type Backend struct {
 	feedback chan feedback
 	// early holds feedback that arrived for a submission nobody waits on yet.
 	early map[uint64]feedback
-
-	// swapchainFormats is each swapchain's backbuffer format, as created.
-	swapchainMu      sync.Mutex
-	swapchainFormats map[uint64]gpu.Format
-
-	// transients holds the textures created with gpu.TextureTransient, which a render
-	// pass may only clear or not care about, and never store — checked on every device,
-	// memoryless or not, so that misuse fails alike everywhere.
-	transientMu sync.Mutex
-	transients  map[uint64]bool
 }
 
 var _ gpu.Backend = (*Backend)(nil)
@@ -312,8 +244,6 @@ func (b *Backend) init() error {
 
 	b.queue.addResidencySet(b.residencySet)
 
-	b.resources = map[uint64]*resource{}
-	b.fences = map[uint64]uint64{}
 	b.feedback = make(chan feedback, 16)
 
 	if b.event = b.device.newSharedEvent(); b.event == 0 {
@@ -403,13 +333,6 @@ func (b *Backend) destroy() {
 	pool := pushPool()
 	defer pool.drain()
 
-	for _, r := range b.resources {
-		release(r.object)
-		r.depthStencil.release()
-		r.drawable.release()
-	}
-	b.resources = nil
-
 	b.textureTable.release()
 	b.samplerTable.release()
 	b.rootArena.release()
@@ -424,23 +347,6 @@ func (b *Backend) destroy() {
 	b.device.release()
 
 	*b = Backend{}
-}
-
-// add registers a native object under a new handle.
-func (b *Backend) add(r *resource) uint64 {
-	check(r.object != 0, "Metal resource creation failed")
-
-	b.next++
-	b.resources[b.next] = r
-
-	return b.next
-}
-
-func (b *Backend) resource(h uint64, kind int) *resource {
-	r := b.resources[h]
-	check(r != nil && (kind == 0 || r.kind == kind), "invalid resource handle or kind")
-
-	return r
 }
 
 // releaseLater releases o now, or once the submission in flight completes, as the GPU
@@ -468,72 +374,34 @@ func (b *Backend) Alloc(size uint64, mem gpu.MemoryType, label string) gpu.Buffe
 		options = mtlResourceStorageModePrivate
 	}
 
-	r := &resource{kind: kindBuffer, size: size, private: mem == gpu.MemoryDevice}
 	object := b.device.newBuffer(uint(size), options)
-	r.object = id(object)
+	check(object != 0, "Metal buffer creation failed")
+	r := &buffer{mtlBuffer: object, size: size, addr: object.gpuAddress()}
 
-	h := b.add(r)
+	r.reference = reference{backend: b}
 	object.setLabel(label)
-	b.residencySet.enrol(r.object)
+	b.residencySet.enrol(id(object))
 
-	r.addr = object.gpuAddress()
-	if !r.private {
+	if mem == gpu.MemoryHost {
 		r.ptr = object.contents()
 	}
 
-	return &buffer{reference: b.reference(h), mtlBuffer: object}
+	return r
 }
 
 func (b *Backend) Free(v gpu.Buffer) {
-	b.release(b.handle(v))
+	resourceOf[*buffer](b, v).destroy()
 }
 
-// release frees a handle: its bindless slot, its residency, and its object.
-func (b *Backend) release(h uint64) {
-	r := b.resources[h]
-	if r == nil {
-		return
-	}
-
-	if r.slot != 0 {
-		if r.kind == kindSampler {
-			b.samplerIDs[r.slot] = 0
-			b.freeSamplers = append(b.freeSamplers, r.slot)
-		} else {
-			b.textureIDs[r.slot] = 0
-			b.freeTextures = append(b.freeTextures, r.slot)
-		}
-	}
-
-	if r.kind == kindBuffer || r.kind == kindTexture && !r.memoryless {
-		b.residencySet.unenrol(r.object)
-	}
-
-	b.releaseLater(r.object)
-	b.releaseLater(id(r.depthStencil))
-
-	delete(b.resources, h)
-}
-
-// slot hands out a bindless slot for a texture or sampler and records its resource ID.
-func (b *Backend) slot(r *resource) uint32 {
-	free, ids := &b.freeTextures, b.textureIDs
-	if r.kind == kindSampler {
-		free, ids = &b.freeSamplers, b.samplerIDs
-	}
-
+// slot assigns a free bindless slot to a native resource ID.
+func slot(free *[]uint32, ids []uint64, resourceID uint64) uint32 {
 	check(len(*free) > 0, "bindless heap exhausted")
 
-	r.slot = (*free)[len(*free)-1]
+	index := (*free)[len(*free)-1]
 	*free = (*free)[:len(*free)-1]
+	ids[index] = resourceID
 
-	if r.kind == kindSampler {
-		ids[r.slot] = mtlSamplerState(r.object).gpuResourceID()
-	} else {
-		ids[r.slot] = mtlTexture(r.object).gpuResourceID()
-	}
-
-	return r.slot
+	return index
 }
 
 var textureTypes = [...]mtlTextureType{
@@ -551,10 +419,11 @@ func textureType(k gpu.TextureKind) mtlTextureType {
 func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	check(d.Width > 0 && d.Height > 0, "texture dimensions must be positive")
 
-	r := &resource{
-		kind: kindTexture, textureType: textureType(d.Kind), format: pixelFormat(d.Format),
+	r := &texture{
+		textureType: textureType(d.Kind), format: pixelFormat(d.Format),
 		width: uint64(d.Width), height: uint64(d.Height), depth: uint64(max(d.Depth, 1)),
 		layers: uint64(max(d.Layers, 1)), mips: uint64(max(d.Mips, 1)), samples: uint64(max(d.Samples, 1)),
+		transient: d.Usage&gpu.TextureTransient != 0,
 	}
 
 	arrayLength := r.layers
@@ -613,51 +482,35 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	desc.setUsage(usage)
 
 	object := b.device.newTexture(desc)
-	r.object = id(object)
+	check(object != 0, "Metal texture creation failed")
+	r.mtlTexture = object
 
-	h := b.add(r)
+	r.reference = reference{backend: b}
 	object.setLabel(d.Label)
 
 	// Residency sets do not take memoryless textures, which have no memory to make
 	// resident.
 	if !r.memoryless {
-		b.residencySet.enrol(r.object)
+		b.residencySet.enrol(id(object))
+		r.resident = true
 	}
 
 	if d.Usage&(gpu.TextureSampled|gpu.TextureStorage) != 0 {
-		b.slot(r)
+		r.slot = slot(&b.freeTextures, b.textureIDs, object.gpuResourceID())
 	}
 
-	if d.Usage&gpu.TextureTransient != 0 {
-		b.transientMu.Lock()
-
-		if b.transients == nil {
-			b.transients = make(map[uint64]bool)
-		}
-
-		b.transients[h] = true
-		b.transientMu.Unlock()
-	}
-
-	return &texture{reference: b.reference(h), mtlTexture: mtlTexture(r.object)}
-}
-
-// isTransient reports whether t was created with gpu.TextureTransient.
-func (b *Backend) isTransient(t gpu.Texture) bool {
-	b.transientMu.Lock()
-	defer b.transientMu.Unlock()
-
-	return b.transients[b.handle(t)]
+	return r
 }
 
 func (b *Backend) TextureView(t gpu.Texture, k gpu.TextureKind, firstMip, mipCount, firstLayer, layerCount uint32) gpu.Texture {
-	src := b.resource(b.handle(t), kindTexture)
+	src := resourceOf[*texture](b, t)
 	check(mipCount > 0 && layerCount > 0 && uint64(firstMip+mipCount) <= src.mips, "invalid texture view range")
 
 	pool := pushPool()
 	defer pool.drain()
 
 	v := *src
+	v.reference = reference{}
 	v.textureType = textureType(k)
 	v.mips, v.layers = uint64(mipCount), uint64(layerCount)
 
@@ -665,26 +518,22 @@ func (b *Backend) TextureView(t gpu.Texture, k gpu.TextureKind, firstMip, mipCou
 	v.width, v.height, v.depth = max(src.width>>firstMip, 1), max(src.height>>firstMip, 1), max(src.depth>>firstMip, 1)
 	v.slot = 0
 
-	v.object = id(mtlTexture(src.object).newTextureViewWithPixelFormat(src.format, v.textureType, uint(firstMip), uint(mipCount), uint(firstLayer), uint(layerCount)))
+	v.mtlTexture = src.mtlTexture.newTextureViewWithPixelFormat(src.format, v.textureType, uint(firstMip), uint(mipCount), uint(firstLayer), uint(layerCount))
+	check(v.mtlTexture != 0, "Metal texture view creation failed")
 
-	h := b.add(&v)
+	v.reference = reference{backend: b}
 
 	if !v.memoryless {
-		b.residencySet.enrol(v.object)
+		b.residencySet.enrol(id(v.mtlTexture))
+		v.resident = true
 	}
 
-	b.slot(&v)
-	return &texture{reference: b.reference(h), mtlTexture: mtlTexture(v.object)}
+	v.slot = slot(&b.freeTextures, b.textureIDs, v.mtlTexture.gpuResourceID())
+	return &v
 }
 
 func (b *Backend) DestroyTexture(t gpu.Texture) {
-	h := b.handle(t)
-
-	b.transientMu.Lock()
-	delete(b.transients, h)
-	b.transientMu.Unlock()
-
-	b.release(h)
+	resourceOf[*texture](b, t).destroy()
 }
 
 var addressModes = [...]mtlSamplerAddressMode{
@@ -727,15 +576,17 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	desc.setSupportArgumentBuffers(true)
 	desc.setLabel(d.Label)
 
-	r := &resource{kind: kindSampler, object: id(b.device.newSamplerState(desc))}
-	h := b.add(r)
+	object := b.device.newSamplerState(desc)
+	check(object != 0, "Metal sampler creation failed")
+	r := &sampler{mtlSamplerState: object}
+	r.reference = reference{backend: b}
 
-	b.slot(r)
-	return &sampler{reference: b.reference(h), mtlSamplerState: mtlSamplerState(r.object)}
+	r.slot = slot(&b.freeSamplers, b.samplerIDs, object.gpuResourceID())
+	return r
 }
 
 func (b *Backend) DestroySampler(s gpu.Sampler) {
-	b.release(b.handle(s))
+	resourceOf[*sampler](b, s).destroy()
 }
 
 func entry(s string) string {
@@ -884,7 +735,7 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 		panic("metal: " + err.Error())
 	}
 
-	r := &resource{kind: kindCompute, object: id(ps)}
+	r := &pipeline{compute: ps}
 	r.group = [3]uint{uint(group[0]), uint(group[1]), uint(group[2])}
 
 	if uint64(group[0])*uint64(group[1])*uint64(group[2]) > uint64(ps.maxTotalThreadsPerThreadgroup()) {
@@ -894,7 +745,8 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 
 	r.rootSize = rootBytes(computePipelineReflectionBindings(ps.reflection()))
 
-	return &pipeline{b.reference(b.add(r))}
+	r.reference = reference{backend: b}
+	return r
 }
 
 var blendFactors = [...]mtlBlendFactor{
@@ -986,7 +838,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 		panic("metal: " + err.Error())
 	}
 
-	r := &resource{kind: kindGraphics, object: id(ps), depthWrite: d.DepthWrite}
+	r := &pipeline{render: ps, depthWrite: d.DepthWrite}
 
 	// bindings() pushes the root to both stages, so the larger expectation governs.
 	reflection := ps.reflection()
@@ -1011,7 +863,8 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 		r.winding = mtlWindingClockwise
 	}
 
-	return &pipeline{b.reference(b.add(r))}
+	r.reference = reference{backend: b}
+	return r
 }
 
 // stageShader is one stage's shader, as resolveConstants reads it.
@@ -1092,7 +945,7 @@ func (b *Backend) functionConstants(stage stageShader) []specialization.Declarat
 }
 
 func (b *Backend) DestroyPipeline(p gpu.Pipeline) {
-	b.release(b.handle(p))
+	resourceOf[*pipeline](b, p).destroy()
 }
 
 // CreateSwapchain creates a presentation chain for a CAMetalLayer surface.
@@ -1114,17 +967,9 @@ func (b *Backend) CreateSwapchain(surface gpu.Surface, desc gpu.SwapchainDescrip
 	layer.setFramebufferOnly(false)
 	layer.setDrawableSize(float64(desc.Width), float64(desc.Height))
 
-	sc := &swapchain{reference: b.reference(b.add(&resource{kind: kindSwapchain, object: id(layer.retain())})), caMetalLayer: layer}
+	sc := &swapchain{caMetalLayer: layer.retain(), format: format}
+	sc.reference = reference{backend: b}
 	b.setDisplaySync(sc, desc.PresentMode)
-
-	b.swapchainMu.Lock()
-	defer b.swapchainMu.Unlock()
-
-	if b.swapchainFormats == nil {
-		b.swapchainFormats = make(map[uint64]gpu.Format)
-	}
-
-	b.swapchainFormats[b.handle(sc)] = format
 
 	return sc, nil
 }
@@ -1137,13 +982,17 @@ func (b *Backend) SwapchainFormats(surface gpu.Surface) []gpu.Format {
 	return slices.Clone(layerFormats)
 }
 
+func (b *Backend) DestroySwapchain(s gpu.Swapchain) {
+	resourceOf[*swapchain](b, s).destroy()
+}
+
 func (b *Backend) ResizeSwapchain(s gpu.Swapchain, w, h uint32) {
 	b.WaitIdle()
 
-	r := b.resource(b.handle(s), kindSwapchain)
+	r := resourceOf[*swapchain](b, s)
 	check(r.drawable == 0, "cannot resize with an acquired drawable")
 
-	caMetalLayer(r.object).setDrawableSize(float64(w), float64(h))
+	r.caMetalLayer.setDrawableSize(float64(w), float64(h))
 }
 
 // SetPresentMode switches the layer's display sync. A CAMetalLayer without it presents
@@ -1156,30 +1005,27 @@ func (b *Backend) SetPresentMode(s gpu.Swapchain, mode gpu.PresentMode) {
 }
 
 func (b *Backend) setDisplaySync(s gpu.Swapchain, mode gpu.PresentMode) {
-	caMetalLayer(b.resource(b.handle(s), kindSwapchain).object).setDisplaySyncEnabled(mode != gpu.PresentImmediate)
+	resourceOf[*swapchain](b, s).caMetalLayer.setDisplaySyncEnabled(mode != gpu.PresentImmediate)
 }
 
 func (b *Backend) SwapchainSize(s gpu.Swapchain) (uint32, uint32) {
-	w, h := caMetalLayer(b.resource(b.handle(s), kindSwapchain).object).drawableSize()
+	w, h := resourceOf[*swapchain](b, s).caMetalLayer.drawableSize()
 
 	return uint32(w), uint32(h)
 }
 
 func (b *Backend) SwapchainFormat(s gpu.Swapchain) gpu.Format {
-	b.swapchainMu.Lock()
-	defer b.swapchainMu.Unlock()
-
-	return b.swapchainFormats[b.handle(s)]
+	return resourceOf[*swapchain](b, s).format
 }
 
 func (b *Backend) AcquireNext(s gpu.Swapchain) (gpu.Texture, gpu.Fence) {
-	r := b.resource(b.handle(s), kindSwapchain)
+	r := resourceOf[*swapchain](b, s)
 	check(r.drawable == 0, "drawable already acquired")
 
 	pool := pushPool()
 	defer pool.drain()
 
-	r.drawable = caMetalLayer(r.object).nextDrawable().retain()
+	r.drawable = r.caMetalLayer.nextDrawable().retain()
 	check(r.drawable != 0, "no drawable available (window hidden or zero size)")
 
 	// A drawable is used only as a render attachment; it is never referenced through a
@@ -1188,31 +1034,29 @@ func (b *Backend) AcquireNext(s gpu.Swapchain) (gpu.Texture, gpu.Fence) {
 	t := r.drawable.texture()
 	retain(id(t))
 
-	tex := &resource{
-		kind: kindTexture, object: id(t), textureType: mtlTextureType2D, layers: 1, mips: 1, samples: 1,
+	tex := &texture{
+		mtlTexture: t, textureType: mtlTextureType2D, layers: 1, mips: 1, samples: 1,
 		width: uint64(t.width()), height: uint64(t.height()), depth: 1,
 		format: t.pixelFormat(),
 	}
 
-	b.next++
-	b.resources[b.next] = tex
-	r.drawableTexture = b.next
+	tex.reference = reference{backend: b}
+	r.drawableTexture = tex
 
-	return &texture{reference: b.reference(r.drawableTexture), mtlTexture: t}, nil
+	return tex, nil
 }
 
 func (b *Backend) Present(s gpu.Swapchain, c gpu.CommandBuffer) {
 	v := b.cmd(c)
-	r := b.resource(b.handle(s), kindSwapchain)
+	r := resourceOf[*swapchain](b, s)
 	check(r.drawable != 0, "no acquired drawable")
 
 	value := b.submit(v, r.drawable)
 
-	b.releaseLater(b.resources[r.drawableTexture].object)
-	delete(b.resources, r.drawableTexture)
+	r.drawableTexture.destroy()
 	b.releaseLater(id(r.drawable))
 
-	r.drawable, r.drawableTexture = 0, 0
+	r.drawable, r.drawableTexture = 0, nil
 
 	// Applications reuse mapped frame data and read counters immediately after Present.
 	// Match the synchronous presentation contract of the Vulkan backend.
@@ -1235,17 +1079,18 @@ func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 		return nil // unsupported device: degrade to no timestamps.
 	}
 
-	r := &resource{kind: kindQuery, object: id(heap), count: uint64(n), written: map[uint32]bool{}, overrides: map[uint32]uint64{}}
+	r := &queryPool{mtl4CounterHeap: heap, count: uint64(n), written: map[uint32]bool{}, overrides: map[uint32]uint64{}}
 
 	var cpu, gpuStart uint64
 	b.device.sampleTimestamps(&cpu, &gpuStart)
 	r.cpuStart, r.gpuStart = cpu, gpuStart
 
-	return &queryPool{reference: b.reference(b.add(r)), mtl4CounterHeap: heap}
+	r.reference = reference{backend: b}
+	return r
 }
 
 func (b *Backend) DestroyTimestampPool(p gpu.QueryPool) {
-	b.release(b.handle(p))
+	resourceOf[*queryPool](b, p).destroy()
 }
 
 // ReadTimestamps returns host nanoseconds: GPU counter values are calibrated against
@@ -1255,13 +1100,13 @@ func (b *Backend) ReadTimestamps(p gpu.QueryPool, n uint32) []uint64 {
 		return nil
 	}
 
-	r := b.resource(b.handle(p), kindQuery)
+	r := resourceOf[*queryPool](b, p)
 	check(uint64(n) <= r.count, "query read out of bounds")
 
 	pool := pushPool()
 	defer pool.drain()
 
-	data := mtl4CounterHeap(r.object).resolveCounterRange(0, uint(n))
+	data := r.mtl4CounterHeap.resolveCounterRange(0, uint(n))
 	check(data != 0 && uint64(dataLength(data)) >= uint64(n)*8, "timestamp resolve failed")
 
 	values := unsafe.Slice((*uint64)(dataBytes(data)), n)

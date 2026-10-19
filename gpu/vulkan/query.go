@@ -23,20 +23,14 @@ func (b *Backend) CreateTimestampPool(count uint32) gpu.QueryPool {
 	if r := vkCreateQueryPool(b.device, &ci, nil, &pool); r != vkSuccess {
 		return nil
 	}
-	h := b.nextID.Add(1)
-	if b.queryPools == nil {
-		b.queryPools = map[uint64]vkQueryPool{}
-	}
-	b.queryPools[h] = pool
-	return &queryPool{reference{b, h}}
+	object := &queryPool{native: pool}
+	object.reference = reference{backend: b}
+	return object
 }
 
 // DestroyTimestampPool releases a timestamp pool.
 func (b *Backend) DestroyTimestampPool(p gpu.QueryPool) {
-	if pool, ok := b.queryPools[b.handle(p)]; ok {
-		vkDestroyQueryPool(b.device, pool, nil)
-		delete(b.queryPools, b.handle(p))
-	}
+	resourceOf[*queryPool](b, p).destroy()
 }
 
 // ReadTimestamps blocks until the pool's count results are available and returns
@@ -47,12 +41,12 @@ func (b *Backend) ReadTimestamps(p gpu.QueryPool, count uint32) []uint64 {
 		return nil
 	}
 
-	pool, ok := b.queryPools[b.handle(p)]
-	if !ok {
+	pool := resourceOf[*queryPool](b, p)
+	if !pool.IsValid() {
 		return nil
 	}
 	out := make([]uint64, count)
-	r := vkGetQueryPoolResults(b.device, pool, 0, cUint32(count), cSize(count*8), unsafe.Pointer(&out[0]), 8,
+	r := vkGetQueryPoolResults(b.device, pool.native, 0, cUint32(count), cSize(count*8), unsafe.Pointer(&out[0]), 8,
 		vkQueryResult64Bit|vkQueryResultWaitBit)
 	if r != vkSuccess {
 		return nil
@@ -75,14 +69,14 @@ func (b *Backend) TimestampValidBits() uint32 {
 }
 
 func (c *cmdBuffer) ResetTimestamps(p gpu.QueryPool, count uint32) {
-	if pool, ok := c.backend.queryPools[c.backend.handle(p)]; ok {
-		vkCmdResetQueryPool(c.cb, pool, 0, cUint32(count))
+	if pool := resourceOf[*queryPool](c.backend, p); pool != nil && pool.IsValid() {
+		vkCmdResetQueryPool(c.cb, pool.native, 0, cUint32(count))
 	}
 }
 
 func (c *cmdBuffer) WriteTimestamp(p gpu.QueryPool, index uint32, at gpu.Stage) {
-	pool, ok := c.backend.queryPools[c.backend.handle(p)]
-	if !ok {
+	pool := resourceOf[*queryPool](c.backend, p)
+	if pool == nil || !pool.IsValid() {
 		return
 	}
 	stage, _ := stageAccess(at)
@@ -90,5 +84,5 @@ func (c *cmdBuffer) WriteTimestamp(p gpu.QueryPool, index uint32, at gpu.Stage) 
 		// StageNone → the earliest point, for a frame-start timestamp.
 		stage = vkPipelineStage2TopOfPipeBit
 	}
-	vkCmdWriteTimestamp2(c.cb, stage, pool, cUint32(index))
+	vkCmdWriteTimestamp2(c.cb, stage, pool.native, cUint32(index))
 }

@@ -25,29 +25,37 @@ func TestStorageImageWrittenThenSampled(t *testing.T) {
 	const imageSize = 64
 	image := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture2D, Width: imageSize, Height: imageSize,
 		Format: gpu.FormatRGBA16F, Usage: gpu.TextureSampled | gpu.TextureStorage, Label: "storage"})
+	defer b.DestroyTexture(image)
 	samp := b.CreateSampler(gpu.SamplerDescriptor{AddressU: gpu.AddressClamp, AddressV: gpu.AddressClamp})
+	defer b.DestroySampler(samp)
 
 	const size = 128
 	color := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture2D, Width: size, Height: size,
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureRenderTarget | gpu.TextureTransfer})
+	defer b.DestroyTexture(color)
 
 	verts := []texVertex{
 		{-1, -1, 0, 0}, {1, -1, 1, 0}, {1, 1, 1, 1},
 		{-1, -1, 0, 0}, {1, 1, 1, 1}, {-1, 1, 0, 1},
 	}
 	vbuf := b.Alloc(uint64(len(verts))*16, gpu.MemoryHost, "verts")
+	defer b.Free(vbuf)
 	copy(unsafe.Slice((*texVertex)(vbuf.Ptr()), len(verts)), verts)
 	root := b.Alloc(64, gpu.MemoryHost, "root")
+	defer b.Free(root)
 	*(*texRoot)(root.Ptr()) = texRoot{verts: vbuf.Addr(), tex: image.Index(), samp: samp.Index()}
 
 	comp := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: storageWrite, WorkgroupSize: [3]uint32{8, 8, 1}, Label: "storage-write"})
+	defer b.DestroyPipeline(comp)
 	pipe := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: texturedVert, FragmentShader: texturedFrag,
 		Topology: gpu.TopologyTriangles, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 		CullMode: gpu.CullNone,
 	})
+	defer b.DestroyPipeline(pipe)
 
 	readback := b.Alloc(size*size*4, gpu.MemoryHost, "readback")
+	defer b.Free(readback)
 	cmd := b.Begin()
 	cmd.SetPipeline(comp)
 	data := storageWriteData{image: image.Index(), size: imageSize}

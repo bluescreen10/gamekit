@@ -17,11 +17,14 @@ func TestCopyTextureToTexture(t *testing.T) {
 	desc := gpu.TextureDescriptor{Kind: gpu.Texture2D, Width: 4, Height: 4, Mips: 2,
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureSampled | gpu.TextureTransfer}
 	src := b.CreateTexture(desc)
+	defer b.DestroyTexture(src)
 	dst := b.CreateTexture(desc)
+	defer b.DestroyTexture(dst)
 
 	// mip 0 is 4x4 and mip 1 2x2; every byte of each differs from every other.
 	mipBytes := [2]int{4 * 4 * 4, 2 * 2 * 4}
 	staging := b.Alloc(uint64(mipBytes[0]+mipBytes[1]), gpu.MemoryHost, "staging")
+	defer b.Free(staging)
 	texels := unsafe.Slice((*byte)(staging.Ptr()), mipBytes[0]+mipBytes[1])
 	for i := range texels {
 		texels[i] = byte(i + 1)
@@ -29,6 +32,9 @@ func TestCopyTextureToTexture(t *testing.T) {
 	readbacks := [2]gpu.Buffer{
 		b.Alloc(uint64(mipBytes[0]), gpu.MemoryHost, "readback-0"),
 		b.Alloc(uint64(mipBytes[1]), gpu.MemoryHost, "readback-1"),
+	}
+	for _, readback := range readbacks {
+		defer b.Free(readback)
 	}
 
 	for mip := range uint32(2) {

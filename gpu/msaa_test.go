@@ -15,14 +15,15 @@ const (
 
 // whiteTriangleRoot fills a root with a white triangle whose slanted edges cross
 // pixels partway, and returns the root's address.
-func whiteTriangleRoot(b gpu.Backend) uint64 {
-	vb := b.Alloc(256, gpu.MemoryHost, "verts")
+func whiteTriangleRoot(t *testing.T, b gpu.Backend) uint64 {
+	t.Helper()
+	vb := allocation(t, b, 256, gpu.MemoryHost)
 	verts := unsafe.Slice((*vertex)(vb.Ptr()), 3)
 	verts[0] = vertex{-0.9, -0.9, 1, 1, 1}
 	verts[1] = vertex{0.9, -0.7, 1, 1, 1}
 	verts[2] = vertex{-0.1, 0.9, 1, 1, 1}
 
-	rb := b.Alloc(64, gpu.MemoryHost, "root")
+	rb := allocation(t, b, 64, gpu.MemoryHost)
 	root := (*rootData)(rb.Ptr())
 	root.tint = [4]float32{1, 1, 1, 1}
 	root.verts = vb.Addr()
@@ -40,17 +41,21 @@ func TestMultisampleColorResolve(t *testing.T) {
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatRGBA8Unorm,
 		Usage: gpu.TextureRenderTarget, Samples: msaaSamples, Label: "msaa-color",
 	})
+	defer b.DestroyTexture(samples)
 	resolved := b.CreateTexture(gpu.TextureDescriptor{
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatRGBA8Unorm,
 		Usage: gpu.TextureRenderTarget | gpu.TextureTransfer, Label: "resolved-color",
 	})
+	defer b.DestroyTexture(resolved)
 	pipeline := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: triangleVert, FragmentShader: triangleFrag,
 		Topology: gpu.TopologyTriangles, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 		Samples: msaaSamples, CullMode: gpu.CullNone, Label: "msaa-triangle",
 	})
-	rootAddr := whiteTriangleRoot(b)
+	defer b.DestroyPipeline(pipeline)
+	rootAddr := whiteTriangleRoot(t, b)
 	readback := b.Alloc(msaaSize*msaaSize*4, gpu.MemoryHost, "readback")
+	defer b.Free(readback)
 
 	cmd := b.Begin()
 	cmd.BeginRenderPass(gpu.RenderTargets{
@@ -99,22 +104,27 @@ func TestMultisampleDepthResolve(t *testing.T) {
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatRGBA8Unorm,
 		Usage: gpu.TextureRenderTarget, Samples: msaaSamples, Label: "msaa-color",
 	})
+	defer b.DestroyTexture(color)
 	samples := b.CreateTexture(gpu.TextureDescriptor{
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatDepth32F,
 		Usage: gpu.TextureDepth, Samples: msaaSamples, Label: "msaa-depth",
 	})
+	defer b.DestroyTexture(samples)
 	resolved := b.CreateTexture(gpu.TextureDescriptor{
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatDepth32F,
 		Usage: gpu.TextureDepth | gpu.TextureTransfer, Label: "resolved-depth",
 	})
+	defer b.DestroyTexture(resolved)
 	pipeline := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: triangleVert, FragmentShader: triangleFrag,
 		Topology: gpu.TopologyTriangles, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 		DepthFormat: gpu.FormatDepth32F, DepthTest: true, DepthWrite: true, DepthCompare: gpu.CompareAlways,
 		Samples: msaaSamples, CullMode: gpu.CullNone, Label: "msaa-depth-triangle",
 	})
-	rootAddr := whiteTriangleRoot(b)
+	defer b.DestroyPipeline(pipeline)
+	rootAddr := whiteTriangleRoot(t, b)
 	readback := b.Alloc(msaaSize*msaaSize*4, gpu.MemoryHost, "readback")
+	defer b.Free(readback)
 
 	cmd := b.Begin()
 	cmd.BeginRenderPass(gpu.RenderTargets{
@@ -156,20 +166,26 @@ func TestMultisampleResolveInLaterPass(t *testing.T) {
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatRGBA8Unorm,
 		Usage: gpu.TextureRenderTarget, Samples: msaaSamples, Label: "msaa-color",
 	})
+	defer b.DestroyTexture(color)
 	depth := b.CreateTexture(gpu.TextureDescriptor{
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatDepth32F,
 		Usage: gpu.TextureDepth, Samples: msaaSamples, Label: "msaa-depth",
 	})
+	defer b.DestroyTexture(depth)
 	resolvedColor := b.CreateTexture(gpu.TextureDescriptor{
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatRGBA8Unorm,
 		Usage: gpu.TextureRenderTarget | gpu.TextureTransfer, Label: "resolved-color",
 	})
+	defer b.DestroyTexture(resolvedColor)
 	resolvedDepth := b.CreateTexture(gpu.TextureDescriptor{
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatDepth32F,
 		Usage: gpu.TextureDepth | gpu.TextureTransfer, Label: "resolved-depth",
 	})
+	defer b.DestroyTexture(resolvedDepth)
 	colorReadback := b.Alloc(msaaSize*msaaSize*4, gpu.MemoryHost, "color-readback")
+	defer b.Free(colorReadback)
 	depthReadback := b.Alloc(msaaSize*msaaSize*4, gpu.MemoryHost, "depth-readback")
+	defer b.Free(depthReadback)
 
 	cmd := b.Begin()
 	cmd.BeginRenderPass(gpu.RenderTargets{
@@ -217,20 +233,25 @@ func TestMultisampledTexturesReadPerSample(t *testing.T) {
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatRGBA8Unorm,
 		Usage: gpu.TextureRenderTarget | gpu.TextureSampled, Samples: msaaSamples, Label: "msaa-color",
 	})
+	defer b.DestroyTexture(color)
 	depth := b.CreateTexture(gpu.TextureDescriptor{
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatDepth32F,
 		Usage: gpu.TextureDepth | gpu.TextureSampled, Samples: msaaSamples, Label: "msaa-depth",
 	})
+	defer b.DestroyTexture(depth)
 	pipeline := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: triangleVert, FragmentShader: triangleFrag,
 		Topology: gpu.TopologyTriangles, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 		DepthFormat: gpu.FormatDepth32F, DepthTest: true, DepthWrite: true, DepthCompare: gpu.CompareAlways,
 		Samples: msaaSamples, CullMode: gpu.CullNone, Label: "msaa-depth-triangle",
 	})
+	defer b.DestroyPipeline(pipeline)
 	reader := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: readSamples, WorkgroupSize: [3]uint32{8, 8, 1}, Label: "read-samples"})
-	rootAddr := whiteTriangleRoot(b)
+	defer b.DestroyPipeline(reader)
+	rootAddr := whiteTriangleRoot(t, b)
 	const sampleBytes = 8
 	samples := b.Alloc(msaaSize*msaaSize*msaaSamples*sampleBytes, gpu.MemoryHost, "samples")
+	defer b.Free(samples)
 
 	cmd := b.Begin()
 	cmd.BeginRenderPass(gpu.RenderTargets{
@@ -290,27 +311,34 @@ func TestTransientMultisampleResolve(t *testing.T) {
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatRGBA8Unorm,
 		Usage: gpu.TextureRenderTarget | gpu.TextureTransient, Samples: msaaSamples, Label: "transient-color",
 	})
+	defer b.DestroyTexture(color)
 	depth := b.CreateTexture(gpu.TextureDescriptor{
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatDepth32F,
 		Usage: gpu.TextureDepth | gpu.TextureTransient, Samples: msaaSamples, Label: "transient-depth",
 	})
+	defer b.DestroyTexture(depth)
 	resolvedColor := b.CreateTexture(gpu.TextureDescriptor{
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatRGBA8Unorm,
 		Usage: gpu.TextureRenderTarget | gpu.TextureTransfer, Label: "resolved-color",
 	})
+	defer b.DestroyTexture(resolvedColor)
 	resolvedDepth := b.CreateTexture(gpu.TextureDescriptor{
 		Kind: gpu.Texture2D, Width: msaaSize, Height: msaaSize, Format: gpu.FormatDepth32F,
 		Usage: gpu.TextureDepth | gpu.TextureTransfer, Label: "resolved-depth",
 	})
+	defer b.DestroyTexture(resolvedDepth)
 	pipeline := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: triangleVert, FragmentShader: triangleFrag,
 		Topology: gpu.TopologyTriangles, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 		DepthFormat: gpu.FormatDepth32F, DepthTest: true, DepthWrite: true, DepthCompare: gpu.CompareAlways,
 		Samples: msaaSamples, CullMode: gpu.CullNone, Label: "transient-triangle",
 	})
-	rootAddr := whiteTriangleRoot(b)
+	defer b.DestroyPipeline(pipeline)
+	rootAddr := whiteTriangleRoot(t, b)
 	colorReadback := b.Alloc(msaaSize*msaaSize*4, gpu.MemoryHost, "color-readback")
+	defer b.Free(colorReadback)
 	depthReadback := b.Alloc(msaaSize*msaaSize*4, gpu.MemoryHost, "depth-readback")
+	defer b.Free(depthReadback)
 
 	cmd := b.Begin()
 	cmd.BeginRenderPass(gpu.RenderTargets{

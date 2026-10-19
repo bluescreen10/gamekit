@@ -8,30 +8,6 @@ import (
 	"github.com/bluescreen10/gamekit/gpu"
 )
 
-// textureEntry is the backend record for a Texture handle.
-//
-// It records no layout. With VK_KHR_unified_image_layouts every image lives in
-// VK_IMAGE_LAYOUT_GENERAL, once it has left UNDEFINED (see Backend.uninitialized), and
-// ordering its uses is the caller's, through gpu.CommandBuffer.Barrier.
-type textureEntry struct {
-	img    vkImage
-	mem    vkDeviceMemory
-	view   vkImageView
-	format vkFormat
-	// width, height and depth are the base level's extent; depth is 1 but for a 3D
-	// texture.
-	width, height, depth uint32
-	isDepthFormat        bool
-	// writable says the image has storage usage, so a view of one of its mips can be
-	// written as a storage image.
-	writable bool
-	// transient says the image was created with gpu.TextureTransient: a pass may only
-	// clear it or not care what it held, and never stores it.
-	transient bool
-	// swapchain-owned backbuffers set owned=false so Destroy skips image/mem.
-	owned bool
-}
-
 func viewType(k gpu.TextureKind) vkImageViewType {
 	switch k {
 	case gpu.Texture2DArray:
@@ -101,17 +77,16 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 		panic(fmt.Sprintf("vulkan: CreateTexture(%dx%d, %q) failed (%d)", d.Width, d.Height, d.Label, int(r)))
 	}
 
-	h := b.nextID.Add(1)
-	b.textures[h] = &textureEntry{
+	tex := &texture{
 		img: img, mem: mem, view: view, format: formatOf(d.Format),
 		width: d.Width, height: d.Height, depth: depth, isDepthFormat: isDepth,
 		writable: d.Usage&gpu.TextureStorage != 0, transient: d.Usage&gpu.TextureTransient != 0, owned: true,
 	}
-	b.uninitialized = append(b.uninitialized, h)
+	tex.reference = reference{backend: b}
+	b.uninitialized = append(b.uninitialized, tex)
 
 	// One index for both arrays: a shader samples gTextures[i] and writes gImages[i],
 	// with the same i, which is also how Metal's single texture table works.
-	tex := &texture{reference: reference{b, h}, textureEntry: b.textures[h]}
 	if d.Usage&(gpu.TextureSampled|gpu.TextureStorage) != 0 {
 		tex.index = b.nextTextureIndex(d.Usage)
 	}
@@ -209,12 +184,6 @@ func (b *Backend) createView(img vkImage, format vkFormat, aspect vkImageAspectF
 	return view, r
 }
 
-func (b *Backend) destroyImage(e *textureEntry) {
-	vkDestroyImageView(b.device, e.view, nil)
-	vkFreeMemory(b.device, e.mem, nil)
-	vkDestroyImage(b.device, e.img, nil)
-}
-
 // nextTextureIndex hands out the next index in the texture arrays, panicking when it
 // falls outside an array the texture is written into.
 func (b *Backend) nextTextureIndex(usage gpu.TextureUsage) uint32 {
@@ -234,10 +203,7 @@ func (b *Backend) nextTextureIndex(usage gpu.TextureUsage) uint32 {
 // returns a Texture whose Index is the new heap slot. The returned handle owns only
 // the view (owned=false), so DestroyTexture frees the view but not the image.
 func (b *Backend) TextureView(t gpu.Texture, kind gpu.TextureKind, baseMip, mipCount, baseLayer, layerCount uint32) gpu.Texture {
-	src, ok := b.textures[b.handle(t)]
-	if !ok {
-		panic("vulkan: TextureView of unknown texture")
-	}
+	src := resourceOf[*texture](b, t)
 	aspect := vkImageAspectFlags(vkImageAspectColorBit)
 	if src.isDepthFormat {
 		aspect = vkImageAspectDepthBit
@@ -253,9 +219,8 @@ func (b *Backend) TextureView(t gpu.Texture, kind gpu.TextureKind, baseMip, mipC
 		panic(fmt.Sprintf("vulkan: TextureView failed (%d)", int(r)))
 	}
 
-	h := b.nextID.Add(1)
-	b.textures[h] = &textureEntry{
-		view: view, format: src.format, width: src.width, height: src.height, depth: src.depth,
+	tex := &texture{
+		img: src.img, view: view, format: src.format, width: max(src.width>>baseMip, 1), height: max(src.height>>baseMip, 1), depth: max(src.depth>>baseMip, 1),
 		isDepthFormat: src.isDepthFormat, owned: false,
 	}
 	// A storage descriptor names a single mip, so only a one-mip view of a writable
@@ -264,7 +229,8 @@ func (b *Backend) TextureView(t gpu.Texture, kind gpu.TextureKind, baseMip, mipC
 	if src.writable && mipCount == 1 {
 		usage |= gpu.TextureStorage
 	}
-	tex := &texture{reference: reference{b, h}, textureEntry: b.textures[h], index: b.nextTextureIndex(usage)}
+	tex.reference = reference{backend: b}
+	tex.index = b.nextTextureIndex(usage)
 	b.writeSampledImage(tex.Index(), view)
 	if usage&gpu.TextureStorage != 0 {
 		b.writeStorageImage(tex.Index(), view)
@@ -274,26 +240,5 @@ func (b *Backend) TextureView(t gpu.Texture, kind gpu.TextureKind, baseMip, mipC
 
 // DestroyTexture releases a texture (heap slots are not reclaimed yet).
 func (b *Backend) DestroyTexture(t gpu.Texture) {
-	e, ok := b.textures[b.handle(t)]
-	if !ok {
-		return
-	}
-	if e.owned {
-		b.destroyImage(e)
-	} else {
-		vkDestroyImageView(b.device, e.view, nil)
-	}
-	delete(b.textures, b.handle(t))
-}
-
-// destroyAllTextures releases every live texture (shutdown).
-func (b *Backend) destroyAllTextures() {
-	for k, e := range b.textures {
-		if e.owned {
-			b.destroyImage(e)
-		} else {
-			vkDestroyImageView(b.device, e.view, nil)
-		}
-		delete(b.textures, k)
-	}
+	resourceOf[*texture](b, t).destroy()
 }

@@ -55,18 +55,10 @@ type texture struct {
 	offset []uint64
 }
 
-// Backend is the in-memory gpu.Backend. The zero value is not usable; construct one
-// with New (done automatically for the registered instance).
+// Backend is the in-memory gpu.Backend. Its zero value is usable.
 type Backend struct {
 	mu     sync.Mutex
-	nextID uint64
-
-	buffers    map[uint64]*buffer
-	textures   map[uint64]*texture
-	samplers   map[uint64]struct{}
-	pipelines  map[uint64]struct{}
-	swapchains map[uint64]*swapchainState
-	timestamps map[uint64][]uint64
+	fences []*fence
 
 	nextTexIndex     uint32
 	nextSamplerIndex uint32
@@ -76,19 +68,7 @@ type Backend struct {
 // New creates an unconnected Backend. Init is a no-op — there is no device to open —
 // but callers should still call it, since gpu.Backend requires it.
 func New() *Backend {
-	return &Backend{
-		buffers:    map[uint64]*buffer{},
-		textures:   map[uint64]*texture{},
-		samplers:   map[uint64]struct{}{},
-		pipelines:  map[uint64]struct{}{},
-		swapchains: map[uint64]*swapchainState{},
-		timestamps: map[uint64][]uint64{},
-	}
-}
-
-func (b *Backend) newHandleLocked() uint64 {
-	b.nextID++
-	return b.nextID
+	return &Backend{}
 }
 
 func (b *Backend) Init() error {
@@ -103,17 +83,15 @@ func (b *Backend) Alloc(size uint64, mem gpu.MemoryType, label string) gpu.Buffe
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	h := b.newHandleLocked()
-	data := make([]byte, size)
-	buf := &buffer{reference: reference{b, h}, data: data, mapped: mem == gpu.MemoryHost}
-	b.buffers[h] = buf
+	buf := &buffer{data: make([]byte, size), mapped: mem == gpu.MemoryHost}
+	buf.reference = reference{backend: b}
 	return buf
 }
 
 func (b *Backend) Free(buf gpu.Buffer) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.buffers, b.handle(buf))
+	destroyResource[*buffer](b, buf)
 }
 
 // ----------------------------------------------------------------------------
@@ -142,12 +120,10 @@ func (b *Backend) CreateTexture(desc gpu.TextureDescriptor) gpu.Texture {
 		width, height = width/2, height/2
 	}
 
-	h := b.newHandleLocked()
-	b.textures[h] = &texture{
-		reference: reference{b, h},
-		format:    desc.Format,
-		data:      make([]byte, offset[mips]),
-		offset:    offset,
+	tex := &texture{
+		format: desc.Format,
+		data:   make([]byte, offset[mips]),
+		offset: offset,
 	}
 
 	var index uint32
@@ -155,14 +131,15 @@ func (b *Backend) CreateTexture(desc gpu.TextureDescriptor) gpu.Texture {
 		b.nextTexIndex++
 		index = b.nextTexIndex
 	}
-	b.textures[h].index = index
-	return b.textures[h]
+	tex.index = index
+	tex.reference = reference{backend: b}
+	return tex
 }
 
 func (b *Backend) DestroyTexture(t gpu.Texture) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.textures, b.handle(t))
+	destroyResource[*texture](b, t)
 }
 
 // TextureView hands back another bindless index for the same underlying storage: this
@@ -172,26 +149,26 @@ func (b *Backend) TextureView(t gpu.Texture, kind gpu.TextureKind, baseMip, mipC
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.nextTexIndex++
-	view := *b.textures[b.handle(t)]
-	view.reference = reference{b, b.newHandleLocked()}
+	view := *resourceOf[*texture](b, t)
+	view.reference = reference{}
 	view.index = b.nextTexIndex
-	b.textures[view.value] = &view
+	view.reference = reference{backend: b}
 	return &view
 }
 
 func (b *Backend) CreateSampler(desc gpu.SamplerDescriptor) gpu.Sampler {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	h := b.newHandleLocked()
-	b.samplers[h] = struct{}{}
 	b.nextSamplerIndex++
-	return &sampler{reference: reference{b, h}, index: b.nextSamplerIndex}
+	s := &sampler{index: b.nextSamplerIndex}
+	s.reference = reference{backend: b}
+	return s
 }
 
 func (b *Backend) DestroySampler(s gpu.Sampler) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.samplers, b.handle(s))
+	destroyResource[*sampler](b, s)
 }
 
 // ----------------------------------------------------------------------------
@@ -204,23 +181,23 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	h := b.newHandleLocked()
-	b.pipelines[h] = struct{}{}
-	return &pipeline{reference{b, h}}
+	p := &pipeline{}
+	p.reference = reference{backend: b}
+	return p
 }
 
 func (b *Backend) CreateGraphicsPipeline(gpu.PipelineDescriptor) gpu.Pipeline {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	h := b.newHandleLocked()
-	b.pipelines[h] = struct{}{}
-	return &pipeline{reference{b, h}}
+	p := &pipeline{}
+	p.reference = reference{backend: b}
+	return p
 }
 
 func (b *Backend) DestroyPipeline(p gpu.Pipeline) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.pipelines, b.handle(p))
+	destroyResource[*pipeline](b, p)
 }
 
 // ----------------------------------------------------------------------------
@@ -234,20 +211,19 @@ type swapchainState struct {
 	width, height uint32
 	format        gpu.Format
 	presentMode   gpu.PresentMode
-	backbuffer    uint64
+	backbuffer    *texture
 }
 
-func (b *Backend) createBackbufferLocked(width, height uint32, format gpu.Format) uint64 {
+func (b *Backend) createBackbufferLocked(width, height uint32, format gpu.Format) *texture {
 	texelSize := texelSizes[format]
-	h := b.newHandleLocked()
 	size := uint64(width) * uint64(height) * uint64(texelSize)
-	b.textures[h] = &texture{
-		reference: reference{b, h},
-		format:    format,
-		data:      make([]byte, size),
-		offset:    []uint64{0, size},
+	t := &texture{
+		format: format,
+		data:   make([]byte, size),
+		offset: []uint64{0, size},
 	}
-	return h
+	t.reference = reference{backend: b}
+	return t
 }
 
 // surfaceFormats is what this backend's pretend surfaces present.
@@ -275,35 +251,47 @@ func (b *Backend) CreateSwapchain(surface gpu.Surface, desc gpu.SwapchainDescrip
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	h := b.newHandleLocked()
-	b.swapchains[h] = &swapchainState{
-		reference:   reference{b, h},
+	s := &swapchainState{
 		width:       desc.Width,
 		height:      desc.Height,
 		format:      format,
 		presentMode: desc.PresentMode,
 		backbuffer:  b.createBackbufferLocked(desc.Width, desc.Height, format),
 	}
-	return b.swapchains[h], nil
+	s.reference = reference{backend: b}
+	return s, nil
 }
 
 func (b *Backend) ResizeSwapchain(sc gpu.Swapchain, width, height uint32) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	st, ok := b.swapchains[b.handle(sc)]
-	if !ok {
+	st := resourceOf[*swapchainState](b, sc)
+	if st == nil || !st.IsValid() {
 		return
 	}
-	delete(b.textures, st.backbuffer)
+	st.backbuffer.reference.destroy()
 	st.width, st.height = width, height
 	st.backbuffer = b.createBackbufferLocked(width, height, st.format)
+}
+
+func (b *Backend) DestroySwapchain(sc gpu.Swapchain) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	s := resourceOf[*swapchainState](b, sc)
+	if s == nil || !s.IsValid() {
+		return
+	}
+
+	s.backbuffer.reference.destroy()
+	s.reference.destroy()
 }
 
 // SetPresentMode records mode; there is no display for it to change anything on.
 func (b *Backend) SetPresentMode(sc gpu.Swapchain, mode gpu.PresentMode) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if st, ok := b.swapchains[b.handle(sc)]; ok {
+	if st := resourceOf[*swapchainState](b, sc); st != nil && st.IsValid() {
 		st.presentMode = mode
 	}
 }
@@ -312,17 +300,19 @@ func (b *Backend) SetPresentMode(sc gpu.Swapchain, mode gpu.PresentMode) {
 func (b *Backend) PresentMode(sc gpu.Swapchain) gpu.PresentMode {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.swapchains[b.handle(sc)].presentMode
+	return resourceOf[*swapchainState](b, sc).presentMode
 }
 
 func (b *Backend) AcquireNext(sc gpu.Swapchain) (gpu.Texture, gpu.Fence) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	st, ok := b.swapchains[b.handle(sc)]
-	if !ok {
+	st := resourceOf[*swapchainState](b, sc)
+	if st == nil || !st.IsValid() {
 		panic("gpu/test: AcquireNext on an unknown swapchain")
 	}
-	return b.textures[st.backbuffer], &fence{reference{b, b.newHandleLocked()}}
+	f := &fence{reference: reference{backend: b}, pendingIndex: len(b.fences)}
+	b.fences = append(b.fences, f)
+	return st.backbuffer, f
 }
 
 func (b *Backend) Present(sc gpu.Swapchain, cmd gpu.CommandBuffer) {}
@@ -330,8 +320,8 @@ func (b *Backend) Present(sc gpu.Swapchain, cmd gpu.CommandBuffer) {}
 func (b *Backend) SwapchainFormat(sc gpu.Swapchain) gpu.Format {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	st, ok := b.swapchains[b.handle(sc)]
-	if !ok {
+	st := resourceOf[*swapchainState](b, sc)
+	if st == nil || !st.IsValid() {
 		panic("gpu/test: SwapchainFormat on an unknown swapchain")
 	}
 	return st.format
@@ -351,15 +341,26 @@ func (b *Backend) Begin() gpu.CommandBuffer {
 func (b *Backend) Submit(cl gpu.CommandBuffer) gpu.Fence {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return &fence{reference{b, b.newHandleLocked()}}
+	f := &fence{reference: reference{backend: b}, pendingIndex: len(b.fences)}
+	b.fences = append(b.fences, f)
+	return f
 }
 
-// Wait and WaitIdle are no-ops: every command already ran synchronously when recorded.
+// Wait retires the token. Commands already ran synchronously when recorded.
 func (b *Backend) Wait(f gpu.Fence) {
-	b.handle(f)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	resourceOf[*fence](b, f).destroy()
 }
 
 func (b *Backend) WaitIdle() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for len(b.fences) > 0 {
+		b.fences[len(b.fences)-1].destroy()
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -373,15 +374,15 @@ func (b *Backend) CreateTimestampPool(count uint32) gpu.QueryPool {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	h := b.newHandleLocked()
-	b.timestamps[h] = make([]uint64, count)
-	return &queryPool{reference{b, h}}
+	p := &queryPool{slots: make([]uint64, count)}
+	p.reference = reference{backend: b}
+	return p
 }
 
 func (b *Backend) DestroyTimestampPool(p gpu.QueryPool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.timestamps, b.handle(p))
+	destroyResource[*queryPool](b, p)
 }
 
 func (b *Backend) ReadTimestamps(pool gpu.QueryPool, count uint32) []uint64 {
@@ -391,12 +392,12 @@ func (b *Backend) ReadTimestamps(pool gpu.QueryPool, count uint32) []uint64 {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	slots, ok := b.timestamps[b.handle(pool)]
-	if !ok {
+	p := resourceOf[*queryPool](b, pool)
+	if !p.IsValid() {
 		return nil
 	}
 	out := make([]uint64, count)
-	copy(out, slots)
+	copy(out, p.slots)
 	return out
 }
 
@@ -415,10 +416,8 @@ func (b *Backend) GetMaxDataSize() int32 {
 func (b *Backend) Destroy() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.buffers = map[uint64]*buffer{}
-	b.textures = map[uint64]*texture{}
-	b.samplers = map[uint64]struct{}{}
-	b.pipelines = map[uint64]struct{}{}
-	b.swapchains = map[uint64]*swapchainState{}
-	b.timestamps = map[uint64][]uint64{}
+	for len(b.fences) > 0 {
+		b.fences[len(b.fences)-1].destroy()
+	}
+	b.fences = nil
 }

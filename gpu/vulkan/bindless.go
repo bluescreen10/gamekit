@@ -35,7 +35,6 @@ func (b *Backend) initBindless() error {
 	if r := b.createBindlessHeap(); r != vkSuccess {
 		return fmt.Errorf("vulkan: bindless heap creation failed (%d)", int(r))
 	}
-	b.samplers = map[uint64]vkSampler{}
 	return nil
 }
 
@@ -175,9 +174,6 @@ func (b *Backend) writeStorageImage(index uint32, view vkImageView) {
 }
 
 func (b *Backend) destroyBindless() {
-	for _, s := range b.samplers {
-		vkDestroySampler(b.device, s, nil)
-	}
 	if b.pipelineLayout != nil {
 		vkDestroyPipelineLayout(b.device, b.pipelineLayout, nil)
 	}
@@ -244,19 +240,14 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	b.samplerNext++
 	b.writeDescriptor(bindSampler, vkDescriptorTypeSampler, index, vkDescriptorImageInfo{sampler: s})
 
-	h := b.nextID.Add(1)
-	b.samplers[h] = s
-	return &sampler{reference: reference{b, h}, native: s, index: index}
+	object := &sampler{native: s, index: index}
+	object.reference = reference{backend: b}
+	return object
 }
 
 // DestroySampler releases a sampler (its heap slot is not reclaimed yet).
 func (b *Backend) DestroySampler(s gpu.Sampler) {
-	vs, ok := b.samplers[b.handle(s)]
-	if !ok {
-		return
-	}
-	vkDestroySampler(b.device, vs, nil)
-	delete(b.samplers, b.handle(s))
+	resourceOf[*sampler](b, s).destroy()
 }
 
 // compareOp maps an gpu compare op to Vulkan.

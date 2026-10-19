@@ -26,8 +26,11 @@ func device(t *testing.T) *metal.Backend {
 func TestMemoryAndTextureCopies(t *testing.T) {
 	b := device(t)
 	src := b.Alloc(512, gpu.MemoryHost, "upload")
+	defer b.Free(src)
 	dst := b.Alloc(512, gpu.MemoryHost, "readback")
+	defer b.Free(dst)
 	private := b.Alloc(512, gpu.MemoryDevice, "private")
+	defer b.Free(private)
 	if src.Ptr() == nil || src.Addr() == 0 || private.Ptr() != nil || private.Addr() == 0 {
 		t.Fatal("invalid mapped/private allocation")
 	}
@@ -44,7 +47,9 @@ func TestMemoryAndTextureCopies(t *testing.T) {
 	}
 	// Odd-width, multi-row, nonzero mip/layer copies exercise tight packing.
 	tex := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture2DArray, Width: 14, Height: 10, Layers: 2, Mips: 2, Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureSampled | gpu.TextureTransfer})
+	defer b.DestroyTexture(tex)
 	view := b.TextureView(tex, gpu.Texture2D, 1, 1, 1, 1)
+	defer b.DestroyTexture(view)
 	if view.Index() == 0 || view.Index() == tex.Index() {
 		t.Fatal("view did not get its own bindless slot")
 	}
@@ -60,6 +65,7 @@ func TestMemoryAndTextureCopies(t *testing.T) {
 	// A view's base level is its first mip, so the view of mip 1 is 7x5, and reads back
 	// into a buffer of exactly that size.
 	exact := b.Alloc(7*5*4, gpu.MemoryHost, "view readback")
+	defer b.Free(exact)
 	c = b.Begin()
 	c.CopyTextureToBuffer(exact, view, 0, 0)
 	b.Wait(b.Submit(c))
@@ -84,11 +90,15 @@ func TestDispatchIndirectAndEntries(t *testing.T) {
  struct Root {device atomic_uint *value;}; struct Push {device Root *root;};
  kernel void increment(constant Push &p [[buffer(0)]]) {atomic_fetch_add_explicit(p.root->value,1u,memory_order_relaxed);}`)
 	p := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: source, WorkgroupSize: [3]uint32{4, 2, 1}, Entry: "increment"})
+	defer b.DestroyPipeline(p)
 	value := b.Alloc(4, gpu.MemoryHost, "counter")
+	defer b.Free(value)
 	*(*uint32)(value.Ptr()) = 0
 	root := b.Alloc(8, gpu.MemoryHost, "root")
+	defer b.Free(root)
 	*(*uint64)(root.Ptr()) = value.Addr()
 	args := b.Alloc(16, gpu.MemoryHost, "dispatch")
+	defer b.Free(args)
 	copy(unsafe.Slice((*uint32)(args.Ptr()), 4), []uint32{99, 3, 2, 1})
 	c := b.Begin()
 	c.SetPipeline(p)
@@ -116,7 +126,9 @@ func TestTimestamps(t *testing.T) {
 	}
 	defer b.DestroyTimestampPool(p)
 	src := b.Alloc(4096, gpu.MemoryHost, "src")
+	defer b.Free(src)
 	dst := b.Alloc(4096, gpu.MemoryDevice, "dst")
+	defer b.Free(dst)
 	c := b.Begin()
 	c.ResetTimestamps(p, 3)
 	c.WriteTimestamp(p, 0, gpu.StageNone)
@@ -151,6 +163,7 @@ func TestTimestampsAroundEachDispatchMeasureIt(t *testing.T) {
 	defer b.DestroyPipeline(pipeline)
 	const groups = 1024
 	out := b.Alloc(groups*64*4, gpu.MemoryDevice, "out")
+	defer b.Free(out)
 	outAddr := out.Addr()
 
 	// Two pieces of work timed one after the other, as a profiler times consecutive
@@ -199,9 +212,13 @@ func TestRenderPassSplit(t *testing.T) {
  vertex float4 vertex_entry(uint i [[vertex_id]]) {float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};return float4(p[i],0,1);}
  fragment float4 fragment_entry(){return float4(1,0,0,1);}`)
 	pipe := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{VertexShader: source, FragmentShader: source, VertexEntry: "vertex_entry", FragmentEntry: "fragment_entry", ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm}})
+	defer b.DestroyPipeline(pipe)
 	target := b.CreateTexture(gpu.TextureDescriptor{Width: 8, Height: 8, Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureRenderTarget | gpu.TextureTransfer})
+	defer b.DestroyTexture(target)
 	read := b.Alloc(8*8*4, gpu.MemoryHost, "readback")
+	defer b.Free(read)
 	pool := b.CreateTimestampPool(1)
+	defer b.DestroyTimestampPool(pool)
 	c := b.Begin()
 	c.BeginRenderPass(gpu.RenderTargets{Color: []gpu.ColorAttachment{{Texture: target, Load: gpu.LoadClear, Store: gpu.StoreKeep, Clear: [4]float32{0, 0, 1, 1}}}})
 	c.SetPipeline(pipe)

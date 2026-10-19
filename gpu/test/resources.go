@@ -8,33 +8,54 @@ import (
 )
 
 type reference struct {
-	backend *Backend
-	value   uint64
+	backend   *Backend
+	destroyed bool
 }
 
-func (r reference) IsValid() bool {
-	return r.backend != nil && r.value != 0
+type owned interface {
+	testReference() *reference
 }
 
-func (r reference) testReference() reference {
+func (r *reference) IsValid() bool {
+	return r.backend != nil && !r.destroyed
+}
+
+func (r *reference) testReference() *reference {
 	return r
 }
 
-func (b *Backend) handle(value any) uint64 {
+func (r *reference) destroy() {
+	if r == nil || !r.IsValid() {
+		return
+	}
+
+	r.destroyed = true
+}
+
+func resourceOf[T owned](b *Backend, value any) T {
 	if value == nil {
-		return 0
+		var zero T
+		return zero
 	}
 
-	r, ok := value.(interface{ testReference() reference })
+	r, ok := value.(T)
 	if !ok || r.testReference().backend != b {
-		panic("gpu/test: resource belongs to another backend")
+		panic("gpu/test: resource belongs to another backend or has the wrong type")
 	}
 
-	return r.testReference().value
+	return r
+}
+
+func destroyResource[T owned](b *Backend, value any) {
+	if value == nil {
+		return
+	}
+
+	resourceOf[T](b, value).testReference().destroy()
 }
 
 func (b *buffer) Addr() uint64 {
-	return b.value
+	return uint64(uintptr(unsafe.Pointer(unsafe.SliceData(b.data))))
 }
 
 func (b *buffer) Ptr() unsafe.Pointer {
@@ -67,8 +88,29 @@ func (s *sampler) Index() uint32 {
 }
 
 type pipeline struct{ reference }
-type fence struct{ reference }
-type queryPool struct{ reference }
+type fence struct {
+	reference
+	pendingIndex int
+}
+
+func (f *fence) destroy() {
+	if f == nil || !f.IsValid() {
+		return
+	}
+
+	f.reference.destroy()
+	b := f.backend
+	last := len(b.fences) - 1
+	b.fences[f.pendingIndex] = b.fences[last]
+	b.fences[f.pendingIndex].pendingIndex = f.pendingIndex
+	b.fences[last] = nil
+	b.fences = b.fences[:last]
+}
+
+type queryPool struct {
+	reference
+	slots []uint64
+}
 
 var (
 	_ gpu.Buffer    = (*buffer)(nil)

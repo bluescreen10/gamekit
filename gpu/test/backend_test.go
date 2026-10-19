@@ -43,6 +43,8 @@ func TestResourcesBelongToTheirCreatingBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	defer other.DestroySwapchain(foreignSwapchain)
+
 	for _, tc := range []struct {
 		name string
 		call func()
@@ -289,6 +291,7 @@ func TestSwapchainAcquireReturnsAUsableBackbuffer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer b.DestroySwapchain(sc)
 	tex, _ := b.AcquireNext(sc)
 	if tex == nil || !tex.IsValid() {
 		t.Fatal("AcquireNext returned an invalid texture")
@@ -299,6 +302,42 @@ func TestSwapchainAcquireReturnsAUsableBackbuffer(t *testing.T) {
 	if resized == tex {
 		t.Fatal("resizing the swapchain did not replace the backbuffer")
 	}
+}
+
+func TestSwapchainDestructionReleasesBackbuffer(t *testing.T) {
+	b := newBackend(t)
+	sc, err := b.CreateSwapchain(0, gpu.SwapchainDescriptor{Width: 4, Height: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.DestroySwapchain(sc)
+
+	tex, fence := b.AcquireNext(sc)
+	b.Wait(fence)
+	b.DestroySwapchain(sc)
+	if sc.IsValid() || tex.IsValid() {
+		t.Fatal("DestroySwapchain left the swapchain or backbuffer valid")
+	}
+
+	b.DestroySwapchain(sc)
+}
+
+func TestWaitRetiresFencesInAnyOrder(t *testing.T) {
+	b := newBackend(t)
+	first := b.Submit(b.Begin())
+	middle := b.Submit(b.Begin())
+	last := b.Submit(b.Begin())
+
+	b.Wait(middle)
+	if middle.IsValid() || !first.IsValid() || !last.IsValid() {
+		t.Fatal("Wait must retire only its own fence")
+	}
+	b.Wait(first)
+	b.WaitIdle()
+	if first.IsValid() || last.IsValid() {
+		t.Fatal("WaitIdle left an outstanding fence valid")
+	}
+	b.Wait(middle)
 }
 
 // TestTimestampsAdvanceAcrossWrites: readGPU-style code (pix's Renderer.readGPU) reads
@@ -336,6 +375,7 @@ func TestSwapchainFormatIsTheOneAskedFor(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateSwapchain(%v) = %v, want a swapchain: the surface lists that format", format, err)
 		}
+		defer b.DestroySwapchain(sc)
 		if got := b.SwapchainFormat(sc); got != format {
 			t.Errorf("SwapchainFormat() = %v, want %v, the format asked for", got, format)
 		}
@@ -345,6 +385,7 @@ func TestSwapchainFormatIsTheOneAskedFor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSwapchain(default) = %v, want a swapchain", err)
 	}
+	defer b.DestroySwapchain(sc)
 	if got := b.SwapchainFormat(sc); got != gpu.FormatBGRA8Unorm {
 		t.Errorf("SwapchainFormat() with no format = %v, want the default %v", got, gpu.FormatBGRA8Unorm)
 	}
@@ -361,6 +402,7 @@ func TestSwapchainKeepsItsPresentMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer b.DestroySwapchain(sc)
 	if got := b.PresentMode(sc); got != gpu.PresentImmediate {
 		t.Errorf("PresentMode() = %v after creating with PresentImmediate, want PresentImmediate", got)
 	}

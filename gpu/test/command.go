@@ -38,13 +38,13 @@ func (c *commandBuffer) Barrier(src, dst gpu.Stage, flags gpu.BarrierFlags) {}
 func (c *commandBuffer) ResetTimestamps(pool gpu.QueryPool, count uint32) {
 	c.backend.mu.Lock()
 	defer c.backend.mu.Unlock()
-	slots, ok := c.backend.timestamps[c.backend.handle(pool)]
-	if !ok {
+	p := resourceOf[*queryPool](c.backend, pool)
+	if p == nil || !p.IsValid() {
 		return
 	}
-	for i := range slots {
+	for i := range p.slots {
 		if uint32(i) < count {
-			slots[i] = 0
+			p.slots[i] = 0
 		}
 	}
 }
@@ -56,20 +56,20 @@ func (c *commandBuffer) WriteTimestamp(pool gpu.QueryPool, index uint32, at gpu.
 	c.backend.mu.Lock()
 	defer c.backend.mu.Unlock()
 	c.backend.nextTick++
-	if slots, ok := c.backend.timestamps[c.backend.handle(pool)]; ok && index < uint32(len(slots)) {
-		slots[index] = c.backend.nextTick
+	if p := resourceOf[*queryPool](c.backend, pool); p != nil && p.IsValid() && index < uint32(len(p.slots)) {
+		p.slots[index] = c.backend.nextTick
 	}
 }
 
 func (c *commandBuffer) CopyBuffer(dst, src gpu.Buffer, dstOffset, srcOffset, size uint64) {
 	c.backend.mu.Lock()
 	defer c.backend.mu.Unlock()
-	d, ok := c.backend.buffers[c.backend.handle(dst)]
-	if !ok {
+	d := resourceOf[*buffer](c.backend, dst)
+	if d == nil || !d.IsValid() {
 		panic("gpu/test: CopyBuffer: dst is not a live buffer")
 	}
-	s, ok := c.backend.buffers[c.backend.handle(src)]
-	if !ok {
+	s := resourceOf[*buffer](c.backend, src)
+	if s == nil || !s.IsValid() {
 		panic("gpu/test: CopyBuffer: src is not a live buffer")
 	}
 	copy(d.data[dstOffset:dstOffset+size], s.data[srcOffset:srcOffset+size])
@@ -78,12 +78,12 @@ func (c *commandBuffer) CopyBuffer(dst, src gpu.Buffer, dstOffset, srcOffset, si
 func (c *commandBuffer) CopyBufferToTexture(dst gpu.Texture, mip, layer uint32, src gpu.Buffer, srcOffset uint64) {
 	c.backend.mu.Lock()
 	defer c.backend.mu.Unlock()
-	t, ok := c.backend.textures[c.backend.handle(dst)]
-	if !ok {
+	t := resourceOf[*texture](c.backend, dst)
+	if t == nil || !t.IsValid() {
 		panic("gpu/test: CopyBufferToTexture: dst is not a live texture")
 	}
-	s, ok := c.backend.buffers[c.backend.handle(src)]
-	if !ok {
+	s := resourceOf[*buffer](c.backend, src)
+	if s == nil || !s.IsValid() {
 		panic("gpu/test: CopyBufferToTexture: src is not a live buffer")
 	}
 	start, end := t.mipRange(mip)
@@ -93,12 +93,12 @@ func (c *commandBuffer) CopyBufferToTexture(dst gpu.Texture, mip, layer uint32, 
 func (c *commandBuffer) CopyTextureToBuffer(dst gpu.Buffer, src gpu.Texture, mip, layer uint32) {
 	c.backend.mu.Lock()
 	defer c.backend.mu.Unlock()
-	d, ok := c.backend.buffers[c.backend.handle(dst)]
-	if !ok {
+	d := resourceOf[*buffer](c.backend, dst)
+	if d == nil || !d.IsValid() {
 		panic("gpu/test: CopyTextureToBuffer: dst is not a live buffer")
 	}
-	t, ok := c.backend.textures[c.backend.handle(src)]
-	if !ok {
+	t := resourceOf[*texture](c.backend, src)
+	if t == nil || !t.IsValid() {
 		panic("gpu/test: CopyTextureToBuffer: src is not a live texture")
 	}
 	start, end := t.mipRange(mip)
@@ -108,12 +108,12 @@ func (c *commandBuffer) CopyTextureToBuffer(dst gpu.Buffer, src gpu.Texture, mip
 func (c *commandBuffer) CopyTextureToTexture(dst, src gpu.Texture, mip, layer uint32) {
 	c.backend.mu.Lock()
 	defer c.backend.mu.Unlock()
-	d, ok := c.backend.textures[c.backend.handle(dst)]
-	if !ok {
+	d := resourceOf[*texture](c.backend, dst)
+	if d == nil || !d.IsValid() {
 		panic("gpu/test: CopyTextureToTexture: dst is not a live texture")
 	}
-	s, ok := c.backend.textures[c.backend.handle(src)]
-	if !ok {
+	s := resourceOf[*texture](c.backend, src)
+	if s == nil || !s.IsValid() {
 		panic("gpu/test: CopyTextureToTexture: src is not a live texture")
 	}
 	start, end := s.mipRange(mip)

@@ -31,10 +31,12 @@ func TestCube(t *testing.T) {
 		Kind: gpu.Texture2D, Width: size, Height: size, Format: gpu.FormatRGBA8Unorm,
 		Usage: gpu.TextureRenderTarget | gpu.TextureTransfer, Label: "color",
 	})
+	defer b.DestroyTexture(color)
 	depth := b.CreateTexture(gpu.TextureDescriptor{
 		Kind: gpu.Texture2D, Width: size, Height: size, Format: gpu.FormatDepth32F,
 		Usage: gpu.TextureDepth, Label: "depth",
 	})
+	defer b.DestroyTexture(depth)
 
 	// Unit cube centred at origin, 8 corners, colours from position.
 	corners := [8][3]float32{
@@ -42,6 +44,7 @@ func TestCube(t *testing.T) {
 		{-0.5, -0.5, 0.5}, {0.5, -0.5, 0.5}, {0.5, 0.5, 0.5}, {-0.5, 0.5, 0.5},
 	}
 	vb := b.Alloc(uint64(len(corners))*24, gpu.MemoryHost, "verts")
+	defer b.Free(vb)
 	vs := unsafe.Slice((*vertex3D)(vb.Ptr()), len(corners))
 	for i, c := range corners {
 		vs[i] = vertex3D{c[0], c[1], c[2], c[0] + 0.5, c[1] + 0.5, c[2] + 0.5}
@@ -55,6 +58,7 @@ func TestCube(t *testing.T) {
 		1, 5, 6, 1, 6, 2, // right
 	}
 	ib := b.Alloc(uint64(len(indices))*4, gpu.MemoryHost, "indices")
+	defer b.Free(ib)
 	copy(unsafe.Slice((*uint32)(ib.Ptr()), len(indices)), indices)
 
 	// MVP = perspective * lookAt * model(identity).
@@ -63,6 +67,7 @@ func TestCube(t *testing.T) {
 	mvp := mul4x4(proj, view)
 
 	rb := b.Alloc(128, gpu.MemoryHost, "root")
+	defer b.Free(rb)
 	root := (*meshRoot)(rb.Ptr())
 	root.mvp = mvp
 	root.verts = vb.Addr()
@@ -73,8 +78,10 @@ func TestCube(t *testing.T) {
 		DepthFormat: gpu.FormatDepth32F, DepthTest: true, DepthWrite: true, DepthCompare: gpu.CompareLess,
 		CullMode: gpu.CullNone, Label: "mesh",
 	})
+	defer b.DestroyPipeline(pipe)
 
 	readback := b.Alloc(size*size*4, gpu.MemoryHost, "readback")
+	defer b.Free(readback)
 
 	cmd := b.Begin()
 	cmd.BeginRenderPass(gpu.RenderTargets{

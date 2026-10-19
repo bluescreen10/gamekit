@@ -39,6 +39,7 @@ func TestIndexTypesAgree(t *testing.T) {
 	}
 
 	vb := b.Alloc(uint64(len(corners))*24, gpu.MemoryHost, "verts")
+	defer b.Free(vb)
 	vs := unsafe.Slice((*vertex3D)(vb.Ptr()), len(corners))
 	for i, c := range corners {
 		vs[i] = vertex3D{c[0], c[1], c[2], c[0] + 0.5, c[1] + 0.5, c[2] + 0.5}
@@ -47,9 +48,11 @@ func TestIndexTypesAgree(t *testing.T) {
 	// The same indices, in both widths. Every value here fits in 16 bits, so the two
 	// buffers describe exactly the same geometry.
 	ib32 := b.Alloc(uint64(len(indices))*4, gpu.MemoryHost, "indices32")
+	defer b.Free(ib32)
 	copy(unsafe.Slice((*uint32)(ib32.Ptr()), len(indices)), indices)
 
 	ib16 := b.Alloc(uint64(len(indices))*2, gpu.MemoryHost, "indices16")
+	defer b.Free(ib16)
 	dst16 := unsafe.Slice((*uint16)(ib16.Ptr()), len(indices))
 	for i, v := range indices {
 		dst16[i] = uint16(v)
@@ -59,6 +62,7 @@ func TestIndexTypesAgree(t *testing.T) {
 	view := lookAtRH(vec3{2, 2, 3}, vec3{0, 0, 0}, vec3{0, 1, 0})
 
 	rb := b.Alloc(128, gpu.MemoryHost, "root")
+	defer b.Free(rb)
 	root := (*meshRoot)(rb.Ptr())
 	root.mvp = mul4x4(proj, view)
 	root.verts = vb.Addr()
@@ -69,17 +73,21 @@ func TestIndexTypesAgree(t *testing.T) {
 		DepthFormat: gpu.FormatDepth32F, DepthTest: true, DepthWrite: true, DepthCompare: gpu.CompareLess,
 		CullMode: gpu.CullNone, Label: "mesh",
 	})
+	defer b.DestroyPipeline(pipe)
 
 	render := func(ib gpu.Buffer, it gpu.IndexType, firstIndex, count uint32) []byte {
 		color := b.CreateTexture(gpu.TextureDescriptor{
 			Kind: gpu.Texture2D, Width: size, Height: size, Format: gpu.FormatRGBA8Unorm,
 			Usage: gpu.TextureRenderTarget | gpu.TextureTransfer, Label: "color",
 		})
+		defer b.DestroyTexture(color)
 		depth := b.CreateTexture(gpu.TextureDescriptor{
 			Kind: gpu.Texture2D, Width: size, Height: size, Format: gpu.FormatDepth32F,
 			Usage: gpu.TextureDepth, Label: "depth",
 		})
+		defer b.DestroyTexture(depth)
 		readback := b.Alloc(size*size*4, gpu.MemoryHost, "readback")
+		defer b.Free(readback)
 
 		cmd := b.Begin()
 		cmd.BeginRenderPass(gpu.RenderTargets{

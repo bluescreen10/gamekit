@@ -80,22 +80,30 @@ func cubeGeometry(b gpu.Backend) (verts, idx gpu.Buffer, indexCount int) {
 func renderInstances(b gpu.Backend, size int, offsets [][3]float32, eye vec3) (px []byte, survivors uint32) {
 	color := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture2D, Width: uint32(size), Height: uint32(size),
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureRenderTarget | gpu.TextureTransfer})
+	defer b.DestroyTexture(color)
 	depth := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture2D, Width: uint32(size), Height: uint32(size),
 		Format: gpu.FormatDepth32F, Usage: gpu.TextureDepth})
+	defer b.DestroyTexture(depth)
 	verts, idx, indexCount := cubeGeometry(b)
+	defer b.Free(verts)
+	defer b.Free(idx)
 
 	n := len(offsets)
 	models := b.Alloc(uint64(n)*64, gpu.MemoryHost, "models")
+	defer b.Free(models)
 	ms := unsafe.Slice((*mat4)(models.Ptr()), n)
 	drawables := b.Alloc(uint64(n)*20, gpu.MemoryHost, "drawables")
+	defer b.Free(drawables)
 	ds := unsafe.Slice((*gpuDrawable)(drawables.Ptr()), n)
 	for i, o := range offsets {
 		ms[i] = translate(o[0], o[1], o[2])
 		ds[i] = gpuDrawable{bounds: [4]float32{0, 0, 0, 0.55}, transformID: uint32(i)}
 	}
 	visible := b.Alloc(uint64(n)*4, gpu.MemoryHost, "visible")
+	defer b.Free(visible)
 
 	indirect := b.Alloc(64, gpu.MemoryHost, "indirect")
+	defer b.Free(indirect)
 	args := (*drawIndexedIndirect)(indirect.Ptr())
 	*args = drawIndexedIndirect{indexCount: uint32(indexCount)}
 
@@ -104,9 +112,11 @@ func renderInstances(b gpu.Backend, size int, offsets [][3]float32, eye vec3) (p
 	vp := mul4x4(proj, view)
 
 	cr := b.Alloc(256, gpu.MemoryHost, "cull-root")
+	defer b.Free(cr)
 	*(*cullRoot)(cr.Ptr()) = cullRoot{drawables: drawables.Addr(), models: models.Addr(), indirect: indirect.Addr(),
 		visible: visible.Addr(), count: uint32(n), planes: extractPlanes(vp)}
 	dr := b.Alloc(128, gpu.MemoryHost, "draw-root")
+	defer b.Free(dr)
 	*(*drawRoot)(dr.Ptr()) = drawRoot{viewProj: vp, verts: verts.Addr(), models: models.Addr(),
 		drawables: drawables.Addr(), visible: visible.Addr()}
 
@@ -114,14 +124,17 @@ func renderInstances(b gpu.Backend, size int, offsets [][3]float32, eye vec3) (p
 		Shader: instancedComp, WorkgroupSize: [3]uint32{64, 1, 1},
 		Label: "cull",
 	})
+	defer b.DestroyPipeline(cull)
 	draw := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: instancedVert, FragmentShader: meshFrag,
 		Topology: gpu.TopologyTriangles, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 		DepthFormat: gpu.FormatDepth32F, DepthTest: true, DepthWrite: true, DepthCompare: gpu.CompareLess,
 		CullMode: gpu.CullNone,
 	})
+	defer b.DestroyPipeline(draw)
 
 	readback := b.Alloc(uint64(size*size*4), gpu.MemoryHost, "readback")
+	defer b.Free(readback)
 	cmd := b.Begin()
 	cmd.SetPipeline(cull)
 	rootAddr := cr.Addr()

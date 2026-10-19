@@ -26,29 +26,35 @@ func TestComputeIndirect(t *testing.T) {
 		Kind: gpu.Texture2D, Width: size, Height: size, Format: gpu.FormatRGBA8Unorm,
 		Usage: gpu.TextureRenderTarget | gpu.TextureTransfer, Label: "target",
 	})
+	defer b.DestroyTexture(target)
 
 	// Vertices + indices (host-visible, read via BDA / index buffer).
 	vb := b.Alloc(256, gpu.MemoryHost, "verts")
+	defer b.Free(vb)
 	verts := unsafe.Slice((*vertex)(vb.Ptr()), 3)
 	verts[0] = vertex{-0.9, -0.9, 1, 0, 0}
 	verts[1] = vertex{0.9, -0.9, 0, 1, 0}
 	verts[2] = vertex{0.0, 0.9, 0, 0, 1}
 
 	ib := b.Alloc(64, gpu.MemoryHost, "indices")
+	defer b.Free(ib)
 	idx := unsafe.Slice((*uint32)(ib.Ptr()), 3)
 	idx[0], idx[1], idx[2] = 0, 1, 2
 
 	// Indirect args buffer, zeroed — compute fills it.
 	indirect := b.Alloc(64, gpu.MemoryHost, "indirect")
+	defer b.Free(indirect)
 	args := (*drawIndexedIndirect)(indirect.Ptr())
 	*args = drawIndexedIndirect{} // instanceCount = 0
 
 	// Compute root: pointer to the indirect args buffer.
 	cRoot := b.Alloc(64, gpu.MemoryHost, "comp-root")
+	defer b.Free(cRoot)
 	*(*uint64)(cRoot.Ptr()) = indirect.Addr()
 
 	// Graphics root: white tint + vertex buffer address.
 	gRoot := b.Alloc(64, gpu.MemoryHost, "gfx-root")
+	defer b.Free(gRoot)
 	root := (*rootData)(gRoot.Ptr())
 	root.tint = [4]float32{1, 1, 1, 1}
 	root.verts = vb.Addr()
@@ -57,13 +63,16 @@ func TestComputeIndirect(t *testing.T) {
 		Shader: fillIndirect, WorkgroupSize: [3]uint32{1, 1, 1},
 		Label: "fill-indirect",
 	})
+	defer b.DestroyPipeline(comp)
 	gfx := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: triangleVert, FragmentShader: triangleFrag,
 		Topology: gpu.TopologyTriangles, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 		CullMode: gpu.CullNone, Label: "triangle",
 	})
+	defer b.DestroyPipeline(gfx)
 
 	readback := b.Alloc(size*size*4, gpu.MemoryHost, "readback")
+	defer b.Free(readback)
 
 	cmd := b.Begin()
 	cmd.SetPipeline(comp)

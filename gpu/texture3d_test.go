@@ -18,12 +18,15 @@ func TestTexture3DRoundTripsThroughBufferCopies(t *testing.T) {
 	const size = width * height * depth * 4
 	tex := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture3D, Width: width, Height: height, Depth: depth,
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureSampled | gpu.TextureTransfer, Label: "volume"})
+	defer b.DestroyTexture(tex)
 	upload := b.Alloc(size, gpu.MemoryHost, "upload")
+	defer b.Free(upload)
 	want := unsafe.Slice((*byte)(upload.Ptr()), size)
 	for i := range want {
 		want[i] = byte(i)
 	}
 	readback := b.Alloc(size, gpu.MemoryHost, "readback")
+	defer b.Free(readback)
 
 	cmd := b.Begin()
 	cmd.CopyBufferToTexture(tex, 0, 0, upload, 0)
@@ -60,24 +63,30 @@ func TestTexture3DSampledInShader(t *testing.T) {
 	}
 	tex := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture3D, Width: 2, Height: 2, Depth: 2,
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureSampled | gpu.TextureTransfer, Label: "volume"})
+	defer b.DestroyTexture(tex)
 	staging := b.Alloc(uint64(len(voxels)), gpu.MemoryHost, "staging")
+	defer b.Free(staging)
 	copy(unsafe.Slice((*byte)(staging.Ptr()), len(voxels)), voxels)
 	samp := b.CreateSampler(gpu.SamplerDescriptor{AddressU: gpu.AddressClamp, AddressV: gpu.AddressClamp, AddressW: gpu.AddressClamp})
+	defer b.DestroySampler(samp)
 
 	const size = 128
 	color := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture2D, Width: size, Height: size,
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureRenderTarget | gpu.TextureTransfer})
+	defer b.DestroyTexture(color)
 	verts := []texVertex{
 		{-1, -1, 0, 0}, {1, -1, 1, 0}, {1, 1, 1, 1},
 		{-1, -1, 0, 0}, {1, 1, 1, 1}, {-1, 1, 0, 1},
 	}
 	vbuf := b.Alloc(uint64(len(verts))*16, gpu.MemoryHost, "verts")
+	defer b.Free(vbuf)
 	copy(unsafe.Slice((*texVertex)(vbuf.Ptr()), len(verts)), verts)
 	pipe := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
 		VertexShader: texturedVert, FragmentShader: sampled3DFrag,
 		Topology: gpu.TopologyTriangles, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 		CullMode: gpu.CullNone,
 	})
+	defer b.DestroyPipeline(pipe)
 
 	q := size / 4
 	for _, depth := range []struct {
@@ -88,8 +97,10 @@ func TestTexture3DSampledInShader(t *testing.T) {
 		{0.75, [4][3]byte{{0, 255, 255}, {255, 0, 255}, {255, 255, 0}, {0, 0, 0}}},
 	} {
 		root := b.Alloc(64, gpu.MemoryHost, "root")
+		defer b.Free(root)
 		*(*sampled3DRoot)(root.Ptr()) = sampled3DRoot{verts: vbuf.Addr(), tex: tex.Index(), samp: samp.Index(), w: depth.w}
 		readback := b.Alloc(size*size*4, gpu.MemoryHost, "readback")
+		defer b.Free(readback)
 
 		cmd := b.Begin()
 		cmd.CopyBufferToTexture(tex, 0, 0, staging, 0)
@@ -125,8 +136,11 @@ func TestStorageImage3DWrittenByCompute(t *testing.T) {
 	const n = 4
 	tex := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture3D, Width: n, Height: n, Depth: n,
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureStorage | gpu.TextureTransfer, Label: "volume"})
+	defer b.DestroyTexture(tex)
 	readback := b.Alloc(n*n*n*4, gpu.MemoryHost, "readback")
+	defer b.Free(readback)
 	comp := b.CreateComputePipeline(gpu.ComputePipelineDescriptor{Shader: storageWrite3D, WorkgroupSize: [3]uint32{4, 4, 4}, Label: "storage-write-3d"})
+	defer b.DestroyPipeline(comp)
 
 	cmd := b.Begin()
 	cmd.SetPipeline(comp)

@@ -5,7 +5,6 @@ package vulkan
 import (
 	"fmt"
 	"runtime"
-	"sync/atomic"
 	"unsafe"
 
 	"github.com/bluescreen10/gamekit/gpu"
@@ -61,27 +60,13 @@ type Backend struct {
 
 	// Transient command recording.
 	cmdPool vkCommandPool
-	fences  map[uint64]fenceEntry
-
-	// Resource registries, keyed by backend-private IDs.
-	buffers    map[uint64]bufferEntry
-	textures   map[uint64]*textureEntry
-	samplers   map[uint64]vkSampler
-	pipelines  map[uint64]pipelineEntry
-	swapchains map[uint64]*swapchainState
-	queryPools map[uint64]vkQueryPool
-	activeSwap *swapchainState // set between AcquireNext and Present
+	fences  []*fence
 
 	// uninitialized holds the textures still in VK_IMAGE_LAYOUT_UNDEFINED: created, or
 	// a backbuffer just acquired. The next command buffer to record a pass, dispatch,
 	// copy or barrier moves them to GENERAL first — at the latest the next one begun,
 	// which is what covers a texture whose first use is a compute shader writing it.
-	uninitialized []uint64
-
-	// nextID hands out backend-private handle ids. Atomic so resources can be
-	// created from multiple goroutines without a lock on the counter itself.
-	// (The registry maps above are not yet guarded — that's a separate step.)
-	nextID atomic.Uint64
+	uninitialized []*texture
 
 	instanceExts []string
 
@@ -98,10 +83,6 @@ type Backend struct {
 // instance extensions (e.g. surface extensions) are stored for Init to enable.
 func New(instanceExtensions ...string) *Backend {
 	return &Backend{
-		buffers:      map[uint64]bufferEntry{},
-		textures:     map[uint64]*textureEntry{},
-		pipelines:    map[uint64]pipelineEntry{},
-		swapchains:   map[uint64]*swapchainState{},
 		instanceExts: instanceExtensions,
 	}
 }
@@ -366,21 +347,8 @@ func (b *Backend) Destroy() {
 	}
 	b.users = 0
 	if b.device != nil {
-		vkDeviceWaitIdle(b.device)
-		for _, p := range b.pipelines {
-			vkDestroyPipeline(b.device, p.pipe, nil)
-		}
-		for _, qp := range b.queryPools {
-			vkDestroyQueryPool(b.device, qp, nil)
-		}
-		// The backend is a shared singleton (gpu.Instance); a later renderer re-inits
-		// the device. Reset the handle registries so they don't retain dead handles
-		// from this device (a subsequent Destroy would double-free them).
-		b.pipelines = map[uint64]pipelineEntry{}
-		b.queryPools = map[uint64]vkQueryPool{}
-		b.destroyAllSwapchains()
-		b.destroyAllTextures()
-		b.destroyAllBuffers()
+		b.WaitIdle()
+		b.uninitialized = nil
 		b.destroyCommands()
 		b.destroyBindless()
 		vkDestroyDevice(b.device, nil)

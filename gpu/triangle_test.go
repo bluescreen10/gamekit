@@ -30,9 +30,11 @@ func TestTriangle(t *testing.T) {
 		Kind: gpu.Texture2D, Width: size, Height: size, Format: gpu.FormatRGBA8Unorm,
 		Usage: gpu.TextureRenderTarget | gpu.TextureTransfer, Label: "target",
 	})
+	defer b.DestroyTexture(target)
 
 	// Vertex buffer (host-visible; GPU reads via BDA).
 	vb := b.Alloc(256, gpu.MemoryHost, "verts")
+	defer b.Free(vb)
 	verts := unsafe.Slice((*vertex)(vb.Ptr()), 3)
 	verts[0] = vertex{-0.9, -0.9, 1, 0, 0} // red
 	verts[1] = vertex{0.9, -0.9, 0, 1, 0}  // green
@@ -40,6 +42,7 @@ func TestTriangle(t *testing.T) {
 
 	// Root struct: white tint + address of the vertex buffer.
 	rb := b.Alloc(64, gpu.MemoryHost, "root")
+	defer b.Free(rb)
 	root := (*rootData)(rb.Ptr())
 	root.tint = [4]float32{1, 1, 1, 1}
 	root.verts = vb.Addr()
@@ -49,8 +52,10 @@ func TestTriangle(t *testing.T) {
 		Topology: gpu.TopologyTriangles, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 		CullMode: gpu.CullNone, Label: "triangle",
 	})
+	defer b.DestroyPipeline(pipe)
 
 	readback := b.Alloc(size*size*4, gpu.MemoryHost, "readback")
+	defer b.Free(readback)
 
 	cmd := b.Begin()
 	cmd.BeginRenderPass(gpu.RenderTargets{

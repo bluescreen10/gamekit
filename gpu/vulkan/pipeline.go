@@ -351,25 +351,13 @@ func blendOp(op gpu.BlendOp) vkBlendOp {
 	}
 }
 
-// pipelineEntry records a pipeline and the bind point it was created for, so
-// SetPipeline can bind it without the caller distinguishing compute vs graphics.
-type pipelineEntry struct {
-	pipe      vkPipeline
-	bindPoint vkPipelineBindPoint
-}
-
 func (b *Backend) registerPipeline(p vkPipeline, bindPoint vkPipelineBindPoint) gpu.Pipeline {
-	h := b.nextID.Add(1)
-	b.pipelines[h] = pipelineEntry{pipe: p, bindPoint: bindPoint}
-	return &pipeline{reference{b, h}}
+	object := &pipeline{pipe: p, bindPoint: bindPoint}
+	object.reference = reference{backend: b}
+	return object
 }
 
 // DestroyPipeline releases a pipeline.
 func (b *Backend) DestroyPipeline(p gpu.Pipeline) {
-	e, ok := b.pipelines[b.handle(p)]
-	if !ok {
-		return
-	}
-	vkDestroyPipeline(b.device, e.pipe, nil)
-	delete(b.pipelines, b.handle(p))
+	resourceOf[*pipeline](b, p).destroy()
 }

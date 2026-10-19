@@ -31,14 +31,18 @@ func TestBindlessTexture(t *testing.T) {
 	}
 	tex := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture2D, Width: 2, Height: 2,
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureSampled | gpu.TextureTransfer, Label: "checker"})
+	defer b.DestroyTexture(tex)
 	staging := b.Alloc(uint64(len(texels)), gpu.MemoryHost, "staging")
+	defer b.Free(staging)
 	copy(unsafe.Slice((*byte)(staging.Ptr()), len(texels)), texels)
 
 	samp := b.CreateSampler(gpu.SamplerDescriptor{AddressU: gpu.AddressClamp, AddressV: gpu.AddressClamp})
+	defer b.DestroySampler(samp)
 
 	const size = 128
 	color := b.CreateTexture(gpu.TextureDescriptor{Kind: gpu.Texture2D, Width: size, Height: size,
 		Format: gpu.FormatRGBA8Unorm, Usage: gpu.TextureRenderTarget | gpu.TextureTransfer})
+	defer b.DestroyTexture(color)
 
 	// Fullscreen quad (two triangles). UV origin top-left to match texel row order;
 	// Vulkan clip y is down, so pos.y and uv.y run the same direction.
@@ -47,9 +51,11 @@ func TestBindlessTexture(t *testing.T) {
 		{-1, -1, 0, 0}, {1, 1, 1, 1}, {-1, 1, 0, 1},
 	}
 	vbuf := b.Alloc(uint64(len(verts))*16, gpu.MemoryHost, "verts")
+	defer b.Free(vbuf)
 	copy(unsafe.Slice((*texVertex)(vbuf.Ptr()), len(verts)), verts)
 
 	root := b.Alloc(64, gpu.MemoryHost, "root")
+	defer b.Free(root)
 	*(*texRoot)(root.Ptr()) = texRoot{verts: vbuf.Addr(), tex: tex.Index(), samp: samp.Index()}
 
 	pipe := b.CreateGraphicsPipeline(gpu.PipelineDescriptor{
@@ -57,8 +63,10 @@ func TestBindlessTexture(t *testing.T) {
 		Topology: gpu.TopologyTriangles, ColorFormats: []gpu.Format{gpu.FormatRGBA8Unorm},
 		CullMode: gpu.CullNone,
 	})
+	defer b.DestroyPipeline(pipe)
 
 	readback := b.Alloc(size*size*4, gpu.MemoryHost, "readback")
+	defer b.Free(readback)
 	cmd := b.Begin()
 	cmd.CopyBufferToTexture(tex, 0, 0, staging, 0)
 	cmd.Barrier(gpu.StageTransfer, gpu.StageFragment, 0)

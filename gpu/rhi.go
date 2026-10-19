@@ -28,10 +28,11 @@ import "unsafe"
 // ----------------------------------------------------------------------------
 
 // Resource interfaces hide native handles. Nil means no resource; check for nil
-// before calling a method. Use each resource only with its creating backend and
-// never use it after destruction.
+// before calling a method. Use each resource only with its creating backend.
+// After destruction, only IsValid and repeated destruction calls are permitted.
+// IsValid returns false after destruction or after a fence is consumed by a wait.
 
-// Buffer is a backend-owned GPU allocation. Pass it only to its creating backend.
+// Buffer is a GPU allocation. Pass it only to its creating backend.
 // A nil Buffer represents no allocation.
 type Buffer interface {
 	IsValid() bool
@@ -45,25 +46,25 @@ type Buffer interface {
 	Write(data []byte, byteOffset uint64)
 }
 
-// Texture is a backend-owned texture or view. Index is its bindless shader slot.
+// Texture is a texture or view. Index is its bindless shader slot.
 // A nil Texture represents no texture, including an absent resolve attachment.
 type Texture interface {
 	IsValid() bool
 	Index() uint32
 }
 
-// Sampler is a backend-owned sampler. Index is its bindless shader slot.
+// Sampler selects texture sample behavior. Index is its bindless shader slot.
 type Sampler interface {
 	IsValid() bool
 	Index() uint32
 }
 
-// Pipeline is a backend-owned compute or graphics pipeline.
+// Pipeline is a compute or graphics pipeline.
 type Pipeline interface {
 	IsValid() bool
 }
 
-// Swapchain is a backend-owned presentation chain. AcquireNext returns its backbuffer.
+// Swapchain is a presentation chain. AcquireNext returns its backbuffer.
 type Swapchain interface {
 	IsValid() bool
 }
@@ -135,7 +136,7 @@ const (
 	PresentMailbox
 )
 
-// Fence is a backend-owned submission completion token. A nil Fence needs no wait.
+// Fence is a submission completion token. A nil Fence needs no wait.
 type Fence interface {
 	IsValid() bool
 }
@@ -606,6 +607,8 @@ type DepthAttachment struct {
 // Backend is a device implementation (Vulkan or Metal). All
 // creation is immediate; there are no descriptor sets or pipeline layouts to
 // manage — resources are reached through addresses and the bindless heap.
+// Callers own resource destruction. Wait for GPU completion, then destroy each
+// resource before its final Backend.Destroy call. Destroy does not release caller-owned resources.
 type Backend interface {
 	// Init obtains the device, its queues and the bindless heap. A backend is one
 	// instance per process (see Instance), shared by everything that uses it: each Init
@@ -645,6 +648,9 @@ type Backend interface {
 	SwapchainFormats(surface Surface) []Format
 	// CreateSwapchain fails when desc.Format is not one of SwapchainFormats.
 	CreateSwapchain(surface Surface, desc SwapchainDescriptor) (Swapchain, error)
+	// DestroySwapchain releases the swapchain and its backbuffers. Accepts nil.
+	// Wait for GPU completion before calling it. Do not destroy backbuffers separately.
+	DestroySwapchain(Swapchain)
 	// ResizeSwapchain recreates the backbuffers at a new size, keeping the rest of the
 	// swapchain's descriptor.
 	ResizeSwapchain(sc Swapchain, width, height uint32)
@@ -653,6 +659,7 @@ type Backend interface {
 	SetPresentMode(sc Swapchain, mode PresentMode)
 	// AcquireNext returns the next backbuffer as a render-target Texture plus a
 	// fence that signals when it's safe to reuse.
+	// The swapchain owns the returned texture. Present, resize, or destruction may invalidate it.
 	AcquireNext(sc Swapchain) (Texture, Fence)
 	// Present ends+submits the recorded command list (synced to the acquire) and
 	// presents the backbuffer. Use this instead of Submit for on-screen frames.
