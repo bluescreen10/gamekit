@@ -22,7 +22,6 @@ func TestDeviceOutlivesAnotherUser(t *testing.T) {
 
 func TestBackendReinitializes(t *testing.T) {
 	b := testBackend(t)
-	b.WaitIdle()
 	b.Destroy()
 	if err := b.Init(); err != nil {
 		backendErr = err

@@ -26,7 +26,7 @@ func TestCallerDestroysResourcesBeforeShutdown(t *testing.T) {
 	defer b.DestroyTimestampPool(pool)
 	fence := b.Submit(b.Begin())
 
-	b.WaitIdle()
+	b.Wait(fence)
 	b.DestroyTimestampPool(pool)
 	b.DestroySampler(sampler)
 	b.DestroyTexture(view)

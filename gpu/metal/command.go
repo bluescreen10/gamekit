@@ -701,26 +701,19 @@ func (c *command) WriteTimestamp(p gpu.QueryPool, index uint32, stage gpu.Stage)
 	r.written[index] = true
 }
 
-// submission is what a commit's feedback handler needs: the queries it resolves.
-type submission struct {
-	value        uint64
-	starts, ends []query
-}
-
 // feedback is a completed submission's outcome, as its feedback handler reported it.
 type feedback struct {
-	submission *submission
 	err        string
 	start, end uint64
 }
 
 // submit commits the recording, signalling the device's event with a new value, and
-// presents drawable if there is one. It returns the value.
+// presents drawable if there is one. It returns the submission's completion fence.
 //
 // MTL4 command buffers carry no waitUntilCompleted, status or error of their own:
 // completion is reported through the shared event the queue signals, and errors and GPU
 // times through a commit feedback handler.
-func (b *Backend) submit(c *command, drawable mtlDrawable) uint64 {
+func (b *Backend) submit(c *command, drawable mtlDrawable) *fence {
 	c.outside()
 
 	c.ends = append(c.ends, c.pending...)
@@ -729,14 +722,17 @@ func (b *Backend) submit(c *command, drawable mtlDrawable) uint64 {
 	b.buffer.endCommandBuffer()
 
 	b.eventValue++
-	s := &submission{value: b.eventValue, starts: c.starts, ends: c.ends}
+	f := &fence{
+		reference: reference{backend: b}, value: b.eventValue,
+		starts: c.starts, ends: c.ends, feedback: make(chan feedback, 1),
+	}
 
 	pool := pushPool()
 	defer pool.drain()
 
 	options := newObject("MTL4CommitOptions")
 	commitOptionsAddFeedbackHandler(options, func(fb id) {
-		b.feedback <- feedbackOf(s, fb)
+		f.feedback <- feedbackOf(f, fb)
 	})
 
 	buffers := [1]mtl4CommandBuffer{b.buffer}
@@ -750,7 +746,7 @@ func (b *Backend) submit(c *command, drawable mtlDrawable) uint64 {
 	if drawable != 0 {
 		b.queue.signalDrawable(drawable)
 	}
-	b.queue.signalEvent(b.event, s.value)
+	b.queue.signalEvent(b.event, f.value)
 
 	if drawable != 0 {
 		drawable.present()
@@ -760,12 +756,12 @@ func (b *Backend) submit(c *command, drawable mtlDrawable) uint64 {
 	c.submitted = true
 	b.open = nil
 
-	return s.value
+	return f
 }
 
 // feedbackOf reads a commit's feedback, on the thread Metal reports it from.
-func feedbackOf(s *submission, fb id) feedback {
-	f := feedback{submission: s}
+func feedbackOf(s *fence, fb id) feedback {
+	f := feedback{}
 	if err := commitFeedbackError(fb); err != 0 {
 		f.err = errorText(err, "GPU command failed")
 	}
@@ -789,41 +785,32 @@ func feedbackOf(s *submission, fb id) feedback {
 	return f
 }
 
-// completed waits for the submission that signals value, and for its feedback: the
-// event and the feedback handler are independent notifications, and Metal guarantees
-// both follow GPU completion, not that one precedes the other.
-func (b *Backend) completed(value uint64) {
-	check(b.event.waitUntilSignaledValue(value, 30000), "GPU command timed out")
-
-	f, ok := b.early[value]
-	delete(b.early, value)
-
-	timeout := time.After(30 * time.Second)
-	for !ok {
-		select {
-		case f = <-b.feedback:
-			if f.submission.value != value {
-				if b.early == nil {
-					b.early = map[uint64]feedback{}
-				}
-
-				b.early[f.submission.value] = f
-				continue
-			}
-
-			ok = true
-		case <-timeout:
-			panic("metal: GPU completion feedback timed out")
-		}
+// wait consumes the fence after its GPU signal and completion feedback arrive.
+// Metal can deliver these notifications in either order.
+func (f *fence) wait() {
+	if f == nil || !f.invalidate() {
+		return
 	}
 
-	for _, q := range f.submission.starts {
-		q.pool.overrides[q.index] = f.start
+	b := f.backend
+	check(b.event.waitUntilSignaledValue(f.value, 30000), "GPU command timed out")
+
+	var result feedback
+	select {
+	case result = <-f.feedback:
+	case <-time.After(30 * time.Second):
+		panic("metal: GPU completion feedback timed out")
 	}
 
-	for _, q := range f.submission.ends {
-		q.pool.overrides[q.index] = f.end
+	for _, q := range f.starts {
+		q.pool.overrides[q.index] = result.start
 	}
+
+	for _, q := range f.ends {
+		q.pool.overrides[q.index] = result.end
+	}
+
+	f.starts, f.ends = nil, nil
 
 	if b.inFlight--; b.inFlight == 0 {
 		for _, o := range b.released {
@@ -838,23 +825,13 @@ func (b *Backend) completed(value uint64) {
 		b.released, b.retired = b.released[:0], b.retired[:0]
 	}
 
-	check(f.err == "", f.err)
+	check(result.err == "", result.err)
 }
 
 func (b *Backend) Submit(c gpu.CommandBuffer) gpu.Fence {
-	value := b.submit(b.cmd(c), 0)
-
-	f := &fence{reference: reference{backend: b}, value: value, pendingIndex: len(b.fences)}
-	b.fences = append(b.fences, f)
-	return f
+	return b.submit(b.cmd(c), 0)
 }
 
 func (b *Backend) Wait(f gpu.Fence) {
-	resourceOf[*fence](b, f).destroy()
-}
-
-func (b *Backend) WaitIdle() {
-	for len(b.fences) > 0 {
-		b.fences[len(b.fences)-1].destroy()
-	}
+	resourceOf[*fence](b, f).wait()
 }

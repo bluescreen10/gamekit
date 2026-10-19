@@ -88,23 +88,14 @@ func (s *sampler) Index() uint32 {
 }
 
 type pipeline struct{ reference }
-type fence struct {
-	reference
-	pendingIndex int
-}
+type fence struct{ reference }
 
-func (f *fence) destroy() {
+func (f *fence) wait() {
 	if f == nil || !f.IsValid() {
 		return
 	}
 
 	f.reference.destroy()
-	b := f.backend
-	last := len(b.fences) - 1
-	b.fences[f.pendingIndex] = b.fences[last]
-	b.fences[f.pendingIndex].pendingIndex = f.pendingIndex
-	b.fences[last] = nil
-	b.fences = b.fences[:last]
 }
 
 type queryPool struct {

@@ -137,40 +137,31 @@ func TestComputeBarrierOrdersBufferWrites(t *testing.T) {
 
 func TestSubmissionCompletion(t *testing.T) {
 	b := testBackend(t)
-	for _, completion := range []string{"fence", "idle"} {
-		t.Run(completion, func(t *testing.T) {
-			upload := allocation(t, b, 64, gpu.MemoryHost)
-			device := allocation(t, b, 64, gpu.MemoryDevice)
-			readback := allocation(t, b, 64, gpu.MemoryHost)
-			for round := range 3 {
-				want := bytes.Repeat([]byte{byte(round + 41)}, 64)
-				upload.Write(want, 0)
-				first := b.Begin()
-				first.CopyBuffer(device, upload, 0, 0, 64)
-				fence := b.Submit(first)
-				if completion == "fence" {
-					b.Wait(fence)
-				} else {
-					b.WaitIdle()
-					b.Wait(fence)
-				}
+	upload := allocation(t, b, 64, gpu.MemoryHost)
+	device := allocation(t, b, 64, gpu.MemoryDevice)
+	readback := allocation(t, b, 64, gpu.MemoryHost)
 
-				second := b.Begin()
-				second.Barrier(gpu.StageTransfer, gpu.StageTransfer, 0)
-				second.CopyBuffer(readback, device, 0, 0, 64)
-				b.Wait(b.Submit(second))
-				if got := unsafe.Slice((*byte)(readback.Ptr()), 64); !bytes.Equal(got, want) {
-					t.Fatalf("round %d readback = %v, want %v", round, got, want)
-				}
-			}
-		})
+	for round := range 3 {
+		want := bytes.Repeat([]byte{byte(round + 41)}, 64)
+		upload.Write(want, 0)
+		first := b.Begin()
+		first.CopyBuffer(device, upload, 0, 0, 64)
+		fence := b.Submit(first)
+		b.Wait(fence)
+
+		second := b.Begin()
+		second.Barrier(gpu.StageTransfer, gpu.StageTransfer, 0)
+		second.CopyBuffer(readback, device, 0, 0, 64)
+		b.Wait(b.Submit(second))
+		if got := unsafe.Slice((*byte)(readback.Ptr()), 64); !bytes.Equal(got, want) {
+			t.Fatalf("round %d readback = %v, want %v", round, got, want)
+		}
 	}
 }
 
 func TestEmptySubmission(t *testing.T) {
 	b := testBackend(t)
 	b.Wait(b.Submit(b.Begin()))
-	b.WaitIdle()
 }
 
 func TestTimestampPoolReuse(t *testing.T) {

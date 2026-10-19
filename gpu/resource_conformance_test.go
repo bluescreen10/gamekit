@@ -60,18 +60,26 @@ func TestDestroyedResourcesAreInvalid(t *testing.T) {
 	}
 }
 
-func TestWaitIdleRetiresFence(t *testing.T) {
+func TestWaitRetiresFence(t *testing.T) {
 	b := testBackend(t)
 	fence := b.Submit(b.Begin())
 	if fence == nil || !fence.IsValid() {
 		t.Fatal("Submit returned no valid fence")
 	}
 
-	b.WaitIdle()
+	b.Wait(fence)
 	if fence.IsValid() {
-		t.Fatal("WaitIdle left the completion fence valid")
+		t.Fatal("Wait left the completion fence valid")
 	}
 	b.Wait(fence)
+
+	next := b.Submit(b.Begin())
+	defer b.Wait(next)
+	b.Wait(fence)
+	if next == nil || !next.IsValid() {
+		t.Fatal("a repeated wait consumed another submission's fence")
+	}
+	b.Wait(next)
 }
 
 func TestForeignTextureIsRejected(t *testing.T) {
@@ -123,7 +131,6 @@ func TestNilResourcesAreOptional(t *testing.T) {
 	cmd.CopyBuffer(dst, src, 0, 0, 4)
 	fence := b.Submit(cmd)
 	if fence == nil || !fence.IsValid() {
-		b.WaitIdle()
 		t.Fatal("Submit returned no completion fence")
 	}
 	b.Wait(fence)

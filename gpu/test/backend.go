@@ -57,8 +57,7 @@ type texture struct {
 
 // Backend is the in-memory gpu.Backend. Its zero value is usable.
 type Backend struct {
-	mu     sync.Mutex
-	fences []*fence
+	mu sync.Mutex
 
 	nextTexIndex     uint32
 	nextSamplerIndex uint32
@@ -310,9 +309,7 @@ func (b *Backend) AcquireNext(sc gpu.Swapchain) (gpu.Texture, gpu.Fence) {
 	if st == nil || !st.IsValid() {
 		panic("gpu/test: AcquireNext on an unknown swapchain")
 	}
-	f := &fence{reference: reference{backend: b}, pendingIndex: len(b.fences)}
-	b.fences = append(b.fences, f)
-	return st.backbuffer, f
+	return st.backbuffer, &fence{reference{backend: b}}
 }
 
 func (b *Backend) Present(sc gpu.Swapchain, cmd gpu.CommandBuffer) {}
@@ -341,9 +338,7 @@ func (b *Backend) Begin() gpu.CommandBuffer {
 func (b *Backend) Submit(cl gpu.CommandBuffer) gpu.Fence {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	f := &fence{reference: reference{backend: b}, pendingIndex: len(b.fences)}
-	b.fences = append(b.fences, f)
-	return f
+	return &fence{reference{backend: b}}
 }
 
 // Wait retires the token. Commands already ran synchronously when recorded.
@@ -351,16 +346,7 @@ func (b *Backend) Wait(f gpu.Fence) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	resourceOf[*fence](b, f).destroy()
-}
-
-func (b *Backend) WaitIdle() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	for len(b.fences) > 0 {
-		b.fences[len(b.fences)-1].destroy()
-	}
+	resourceOf[*fence](b, f).wait()
 }
 
 // ----------------------------------------------------------------------------
@@ -414,10 +400,4 @@ func (b *Backend) GetMaxDataSize() int32 {
 }
 
 func (b *Backend) Destroy() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for len(b.fences) > 0 {
-		b.fences[len(b.fences)-1].destroy()
-	}
-	b.fences = nil
 }

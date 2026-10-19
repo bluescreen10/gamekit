@@ -333,9 +333,12 @@ func TestWaitRetiresFencesInAnyOrder(t *testing.T) {
 		t.Fatal("Wait must retire only its own fence")
 	}
 	b.Wait(first)
-	b.WaitIdle()
-	if first.IsValid() || last.IsValid() {
-		t.Fatal("WaitIdle left an outstanding fence valid")
+	if first.IsValid() || !last.IsValid() {
+		t.Fatal("Wait must not retire another submission's fence")
+	}
+	b.Wait(last)
+	if last.IsValid() {
+		t.Fatal("Wait left the last fence valid")
 	}
 	b.Wait(middle)
 }

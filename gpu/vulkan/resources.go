@@ -158,33 +158,21 @@ func (s *swapchain) destroy() {
 
 type fence struct {
 	reference
-	native       vkFence
-	cb           vkCommandBuffer
-	pendingIndex int
+	native vkFence
+	cb     vkCommandBuffer
 }
 
-func (f *fence) destroy() {
+func (f *fence) wait() {
 	if f == nil || !f.invalidate() {
 		return
 	}
 
 	b := f.backend
-	f.removePending()
 	// Pass local handles to C. The fence also contains a Go-owned backend pointer.
 	native, cb := f.native, f.cb
 	vkWaitForFences(b.device, 1, &native, vkTrue, math.MaxUint64)
 	vkDestroyFence(b.device, native, nil)
 	vkFreeCommandBuffers(b.device, b.cmdPool, 1, &cb)
-}
-
-// removePending removes a completed submission without a resource registry.
-func (f *fence) removePending() {
-	b := f.backend
-	last := len(b.fences) - 1
-	b.fences[f.pendingIndex] = b.fences[last]
-	b.fences[f.pendingIndex].pendingIndex = f.pendingIndex
-	b.fences[last] = nil
-	b.fences = b.fences[:last]
 }
 
 type queryPool struct {

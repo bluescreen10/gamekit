@@ -190,8 +190,7 @@ func (b *Backend) buildSwapchain(s *swapchain, width, height uint32, old vkSwapc
 }
 
 // AcquireNext acquires the next backbuffer and returns it as a render-target
-// Texture. The returned Fence is unused (present sync is via internal semaphores;
-// CPU throttling is via WaitIdle for now).
+// Texture. The returned Fence is nil. Present uses internal semaphores and waits for completion.
 func (b *Backend) AcquireNext(sc gpu.Swapchain) (gpu.Texture, gpu.Fence) {
 	s := resourceOf[*swapchain](b, sc)
 	s.frame = (s.frame + 1) % uint32(len(s.acquire))
@@ -260,6 +259,7 @@ func (b *Backend) SwapchainSize(sc gpu.Swapchain) (width, height uint32) {
 func (b *Backend) ResizeSwapchain(sc gpu.Swapchain, width, height uint32) {
 	s := resourceOf[*swapchain](b, sc)
 	vkDeviceWaitIdle(b.device)
+
 	b.destroySwapchainResources(s)
 	b.buildSwapchain(s, width, height, s.swap)
 }
@@ -282,7 +282,9 @@ func (b *Backend) SetPresentMode(sc gpu.Swapchain, mode gpu.PresentMode) {
 	if s.mode == mode {
 		return
 	}
+
 	vkDeviceWaitIdle(b.device)
+
 	s.mode = mode
 	b.destroySwapchainResources(s)
 	b.buildSwapchain(s, s.w, s.h, s.swap)

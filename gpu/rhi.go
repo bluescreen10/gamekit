@@ -652,10 +652,10 @@ type Backend interface {
 	// Wait for GPU completion before calling it. Do not destroy backbuffers separately.
 	DestroySwapchain(Swapchain)
 	// ResizeSwapchain recreates the backbuffers at a new size, keeping the rest of the
-	// swapchain's descriptor.
+	// swapchain's descriptor. Wait for all submissions that use it before this call.
 	ResizeSwapchain(sc Swapchain, width, height uint32)
 	// SetPresentMode changes when the swapchain's frames reach the display, keeping the
-	// rest of its descriptor. It waits for the GPU to go idle first.
+	// rest of its descriptor. Wait for all submissions that use it before this call.
 	SetPresentMode(sc Swapchain, mode PresentMode)
 	// AcquireNext returns the next backbuffer as a render-target Texture plus a
 	// fence that signals when it's safe to reuse.
@@ -670,13 +670,13 @@ type Backend interface {
 	Begin() CommandBuffer
 	Submit(cl CommandBuffer) Fence
 
-	// Synchronization.
+	// Wait blocks until the submission completes, then consumes its fence.
+	// Wait accepts nil and consumed fences. Wait on every fence before backend shutdown.
 	Wait(Fence)
-	WaitIdle()
 
 	// GPU timing. CreateTimestampPool makes a pool of count timestamp slots;
 	// ReadTimestamps reads them back (call after the writes have completed, e.g.
-	// after Present/WaitIdle). Convert a tick delta to nanoseconds with
+	// after Present or Wait). Convert a tick delta to nanoseconds with
 	// TimestampPeriod. Record writes with CommandBuffer.WriteTimestamp.
 	CreateTimestampPool(count uint32) QueryPool
 	DestroyTimestampPool(QueryPool)

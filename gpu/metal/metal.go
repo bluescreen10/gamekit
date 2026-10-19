@@ -72,18 +72,14 @@ type Backend struct {
 
 	open *command
 
-	// eventValue is signaled by the queue after each submission. fences holds pending submissions.
-	// inFlight is set from submit to its completion,
+	// eventValue is signaled by the queue after each submission.
+	// inFlight counts submissions whose fences have not been waited on,
 	// and released holds the objects released meanwhile, which the GPU may still use.
 	eventValue uint64
-	fences     []*fence
 	inFlight   int
 	released   []id
 	// retired holds root arenas outgrown while recording, which the GPU may still read.
-	retired  []mtlBuffer
-	feedback chan feedback
-	// early holds feedback that arrived for a submission nobody waits on yet.
-	early map[uint64]feedback
+	retired []mtlBuffer
 }
 
 var _ gpu.Backend = (*Backend)(nil)
@@ -244,8 +240,6 @@ func (b *Backend) init() error {
 
 	b.queue.addResidencySet(b.residencySet)
 
-	b.feedback = make(chan feedback, 16)
-
 	if b.event = b.device.newSharedEvent(); b.event == 0 {
 		return fmt.Errorf("cannot create shared event")
 	}
@@ -323,7 +317,6 @@ func (b *Backend) Destroy() {
 	b.users = 0
 
 	if b.device != 0 {
-		b.WaitIdle()
 		b.destroy()
 	}
 }
@@ -987,8 +980,6 @@ func (b *Backend) DestroySwapchain(s gpu.Swapchain) {
 }
 
 func (b *Backend) ResizeSwapchain(s gpu.Swapchain, w, h uint32) {
-	b.WaitIdle()
-
 	r := resourceOf[*swapchain](b, s)
 	check(r.drawable == 0, "cannot resize with an acquired drawable")
 
@@ -999,8 +990,6 @@ func (b *Backend) ResizeSwapchain(s gpu.Swapchain, w, h uint32) {
 // as soon as it can, which is PresentImmediate; it has no mailbox, so PresentMailbox
 // keeps display sync, as PresentVSync does.
 func (b *Backend) SetPresentMode(s gpu.Swapchain, mode gpu.PresentMode) {
-	b.WaitIdle()
-
 	b.setDisplaySync(s, mode)
 }
 
@@ -1051,7 +1040,7 @@ func (b *Backend) Present(s gpu.Swapchain, c gpu.CommandBuffer) {
 	r := resourceOf[*swapchain](b, s)
 	check(r.drawable != 0, "no acquired drawable")
 
-	value := b.submit(v, r.drawable)
+	fence := b.submit(v, r.drawable)
 
 	r.drawableTexture.destroy()
 	b.releaseLater(id(r.drawable))
@@ -1060,7 +1049,7 @@ func (b *Backend) Present(s gpu.Swapchain, c gpu.CommandBuffer) {
 
 	// Applications reuse mapped frame data and read counters immediately after Present.
 	// Match the synchronous presentation contract of the Vulkan backend.
-	b.completed(value)
+	fence.wait()
 }
 
 func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {

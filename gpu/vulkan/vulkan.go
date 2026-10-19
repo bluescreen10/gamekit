@@ -60,7 +60,6 @@ type Backend struct {
 
 	// Transient command recording.
 	cmdPool vkCommandPool
-	fences  []*fence
 
 	// uninitialized holds the textures still in VK_IMAGE_LAYOUT_UNDEFINED: created, or
 	// a backbuffer just acquired. The next command buffer to record a pass, dispatch,
@@ -347,7 +346,6 @@ func (b *Backend) Destroy() {
 	}
 	b.users = 0
 	if b.device != nil {
-		b.WaitIdle()
 		b.uninitialized = nil
 		b.destroyCommands()
 		b.destroyBindless()

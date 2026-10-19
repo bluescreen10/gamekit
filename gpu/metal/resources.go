@@ -182,26 +182,8 @@ func (s *swapchain) destroy() {
 type fence struct {
 	reference
 	value        uint64
-	pendingIndex int
-}
-
-func (f *fence) destroy() {
-	if f == nil || !f.invalidate() {
-		return
-	}
-
-	f.removePending()
-	f.backend.completed(f.value)
-}
-
-// removePending removes a completed submission without a resource registry.
-func (f *fence) removePending() {
-	b := f.backend
-	last := len(b.fences) - 1
-	b.fences[f.pendingIndex] = b.fences[last]
-	b.fences[f.pendingIndex].pendingIndex = f.pendingIndex
-	b.fences[last] = nil
-	b.fences = b.fences[:last]
+	starts, ends []query
+	feedback     chan feedback
 }
 
 type queryPool struct {

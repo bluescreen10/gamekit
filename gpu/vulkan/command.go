@@ -83,14 +83,12 @@ func (b *Backend) Submit(cmd gpu.CommandBuffer) gpu.Fence {
 	if r := b.submit(c.cb, nil, nil, nativeFence); r != vkSuccess {
 		panic(fmt.Sprintf("vulkan: submit failed (%d)", int(r)))
 	}
-	f := &fence{reference: reference{backend: b}, cb: c.cb, native: nativeFence, pendingIndex: len(b.fences)}
-	b.fences = append(b.fences, f)
-	return f
+	return &fence{reference: reference{backend: b}, cb: c.cb, native: nativeFence}
 }
 
 // Wait blocks until the fence signals, then frees the command buffer + fence.
 func (b *Backend) Wait(f gpu.Fence) {
-	resourceOf[*fence](b, f).destroy()
+	resourceOf[*fence](b, f).wait()
 }
 
 // submit submits cb to the queue, signalling fence. A non-nil acquire is waited on
@@ -122,14 +120,6 @@ func (b *Backend) submit(cb vkCommandBuffer, acquire, renderDone vkSemaphore, fe
 		s.submit.pSignalSemaphoreInfos = &s.signal
 	}
 	return vkQueueSubmit2(b.queue, 1, &s.submit, fence)
-}
-
-// WaitIdle blocks until the device is idle.
-func (b *Backend) WaitIdle() {
-	vkDeviceWaitIdle(b.device)
-	for len(b.fences) > 0 {
-		b.fences[len(b.fences)-1].destroy()
-	}
 }
 
 // --- CommandBuffer ---

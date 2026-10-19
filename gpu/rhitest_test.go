@@ -145,7 +145,6 @@ func testBackend(t *testing.T) gpu.Backend {
 func TestMain(m *testing.M) {
 	code := m.Run()
 	if backendInst != nil && backendErr == nil {
-		backendInst.WaitIdle()
 		backendInst.Destroy()
 	}
 
