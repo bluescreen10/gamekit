@@ -181,7 +181,7 @@ func (c *command) draw(data []byte) {
 	check(c.render != 0 && p != nil && p.kind == kindGraphics, "draw requires a graphics pipeline and render pass")
 	check(!c.readOnlyDepth || !p.depthWrite, "depth-writing pipeline in read-only depth pass")
 	if c.graphics != p {
-		c.render.setRenderPipelineState(p.object)
+		c.render.setRenderPipelineState(renderPipelineState(p.object))
 		c.render.setDepthStencilState(p.depthStencil)
 		c.render.setCullMode(p.cull)
 		c.render.setFrontFacingWinding(p.winding)
@@ -199,7 +199,7 @@ func (c *command) dispatch(data []byte) {
 		c.computeTable = true
 	}
 	if c.kernel != p {
-		e.setComputePipelineState(p.object)
+		e.setComputePipelineState(computePipelineState(p.object))
 		c.kernel = p
 	}
 	c.bindings(data)
@@ -217,14 +217,14 @@ func (c *command) dispatch(data []byte) {
 func (c *command) sampleQuery(q query) {
 	switch {
 	case c.render != 0:
-		c.render.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, mtlRenderStageFragment, q.pool.object, uint(q.index))
+		c.render.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, mtlRenderStageFragment, counterHeap(q.pool.object), uint(q.index))
 	case c.compute != 0:
-		c.compute.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, q.pool.object, uint(q.index))
+		c.compute.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, counterHeap(q.pool.object), uint(q.index))
 	default:
 		// No encoder open: a throwaway compute encoder places the timestamp at this exact
 		// point in the command buffer's GPU timeline.
 		e := c.computeEncoder()
-		e.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, q.pool.object, uint(q.index))
+		e.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, counterHeap(q.pool.object), uint(q.index))
 		c.endCompute()
 	}
 }
@@ -591,7 +591,7 @@ func (c *command) ResetTimestamps(p gpu.QueryPool, n uint32) {
 	c.outside()
 	r := c.backend.resource(uint64(p.H), kindQuery)
 	check(uint64(n) <= r.count, "query reset out of bounds")
-	counterHeapInvalidateCounterRange(r.object, 0, uint(n))
+	counterHeap(r.object).invalidateCounterRange(0, uint(n))
 	for i := range n {
 		delete(r.written, i)
 		delete(r.overrides, i)
@@ -628,7 +628,7 @@ type feedback struct {
 // MTL4 command buffers carry no waitUntilCompleted, status or error of their own:
 // completion is reported through the shared event the queue signals, and errors and GPU
 // times through a commit feedback handler.
-func (b *Backend) submit(c *command, drawable id) uint64 {
+func (b *Backend) submit(c *command, drawable drawable) uint64 {
 	c.outside()
 	c.ends = append(c.ends, c.pending...)
 	c.pending = nil
@@ -654,7 +654,7 @@ func (b *Backend) submit(c *command, drawable id) uint64 {
 	}
 	b.queue.signalEvent(b.event, s.value)
 	if drawable != 0 {
-		drawablePresent(drawable)
+		drawable.present()
 	}
 	b.inFlight++
 	c.submitted = true

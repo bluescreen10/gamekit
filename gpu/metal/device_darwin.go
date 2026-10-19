@@ -85,7 +85,7 @@ func (d device) newArgumentTableWithDescriptor(descriptor argumentTableDescripto
 	return deviceNewArgumentTableWithDescriptor(d, descriptor, err)
 }
 
-func (d device) newCounterHeapWithDescriptor(descriptor counterHeapDescriptor, err *id) id {
+func (d device) newCounterHeapWithDescriptor(descriptor counterHeapDescriptor, err *id) counterHeap {
 	return deviceNewCounterHeapWithDescriptor(d, descriptor, err)
 }
 
@@ -97,19 +97,19 @@ func (d device) newTextureWithDescriptor(descriptor textureDescriptor) texture {
 	return deviceNewTextureWithDescriptor(d, descriptor)
 }
 
-func (d device) newSamplerStateWithDescriptor(descriptor samplerDescriptor) sampler {
+func (d device) newSamplerStateWithDescriptor(descriptor samplerDescriptor) samplerState {
 	return deviceNewSamplerStateWithDescriptor(d, descriptor)
 }
 
-func (d device) newDepthStencilStateWithDescriptor(descriptor depthStencilDescriptor) id {
+func (d device) newDepthStencilStateWithDescriptor(descriptor depthStencilDescriptor) depthStencilState {
 	return deviceNewDepthStencilStateWithDescriptor(d, descriptor)
 }
 
-func (d device) newLibraryWithData(data id, err *id) id {
+func (d device) newLibraryWithData(data id, err *id) library {
 	return deviceNewLibraryWithData(d, data, err)
 }
 
-func (d device) newLibraryWithSource(source, options id, err *id) id {
+func (d device) newLibraryWithSource(source, options id, err *id) library {
 	return deviceNewLibraryWithSource(d, source, options, err)
 }
 

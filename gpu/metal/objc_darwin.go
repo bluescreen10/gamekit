@@ -365,8 +365,8 @@ func deviceNewCommandAllocatorWithDescriptor(d device, desc commandAllocatorDesc
 func deviceNewArgumentTableWithDescriptor(d device, desc argumentTableDescriptor, err *id) argumentTable {
 	return argumentTable(C.gk_o_op(o(d), selNewArgumentTableWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewCounterHeapWithDescriptor(d device, desc counterHeapDescriptor, err *id) id {
-	return id(C.gk_o_op(o(d), selNewCounterHeapWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
+func deviceNewCounterHeapWithDescriptor(d device, desc counterHeapDescriptor, err *id) counterHeap {
+	return counterHeap(C.gk_o_op(o(d), selNewCounterHeapWithDescriptor, o(desc), (*C.gk_obj)(unsafe.Pointer(err))))
 }
 func deviceNewBufferWithLength(d device, length, options uint) buffer {
 	return buffer(C.gk_o_uu(o(d), selNewBufferWithLength, C.gk_u(length), C.gk_u(options)))
@@ -374,17 +374,17 @@ func deviceNewBufferWithLength(d device, length, options uint) buffer {
 func deviceNewTextureWithDescriptor(d device, desc textureDescriptor) texture {
 	return texture(C.gk_o_o(o(d), selNewTextureWithDescriptor, o(desc)))
 }
-func deviceNewSamplerStateWithDescriptor(d device, desc samplerDescriptor) sampler {
-	return sampler(C.gk_o_o(o(d), selNewSamplerStateWithDescriptor, o(desc)))
+func deviceNewSamplerStateWithDescriptor(d device, desc samplerDescriptor) samplerState {
+	return samplerState(C.gk_o_o(o(d), selNewSamplerStateWithDescriptor, o(desc)))
 }
-func deviceNewDepthStencilStateWithDescriptor(d device, desc depthStencilDescriptor) id {
-	return id(C.gk_o_o(o(d), selNewDepthStencilStateWithDescriptor, o(desc)))
+func deviceNewDepthStencilStateWithDescriptor(d device, desc depthStencilDescriptor) depthStencilState {
+	return depthStencilState(C.gk_o_o(o(d), selNewDepthStencilStateWithDescriptor, o(desc)))
 }
-func deviceNewLibraryWithData(d device, data id, err *id) id {
-	return id(C.gk_o_op(o(d), selNewLibraryWithData, o(data), (*C.gk_obj)(unsafe.Pointer(err))))
+func deviceNewLibraryWithData(d device, data id, err *id) library {
+	return library(C.gk_o_op(o(d), selNewLibraryWithData, o(data), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func deviceNewLibraryWithSource(d device, source, options id, err *id) id {
-	return id(C.gk_o_oop(o(d), selNewLibraryWithSource, o(source), o(options), (*C.gk_obj)(unsafe.Pointer(err))))
+func deviceNewLibraryWithSource(d device, source, options id, err *id) library {
+	return library(C.gk_o_oop(o(d), selNewLibraryWithSource, o(source), o(options), (*C.gk_obj)(unsafe.Pointer(err))))
 }
 func deviceSampleTimestamps(d device, cpu, gpu *uint64) {
 	C.gk_v_pp(o(d), selSampleTimestamps, unsafe.Pointer(cpu), unsafe.Pointer(gpu))
@@ -398,7 +398,7 @@ func commandQueueAddResidencySet(q queue, set residencySet) {
 func commandQueueCommit(q queue, buffers *commandBuffer, count uint, options id) {
 	C.gk_v_puo(o(q), selCommitCountOptions, (*C.gk_obj)(unsafe.Pointer(buffers)), C.gk_u(count), o(options))
 }
-func commandQueueSignalDrawable(q queue, drawable id) {
+func commandQueueSignalDrawable(q queue, drawable drawable) {
 	C.gk_v_o(o(q), selSignalDrawable, o(drawable))
 }
 func commandQueueSignalEvent(q queue, event sharedEvent, value uint64) {
@@ -440,7 +440,7 @@ func bufferGPUAddress(b buffer) uint64 {
 func textureGPUResourceID(t texture) uint64 {
 	return uint64(C.gk_rid(o(t), selGPUResourceID))
 }
-func samplerStateGPUResourceID(s sampler) uint64 {
+func samplerStateGPUResourceID(s samplerState) uint64 {
 	return uint64(C.gk_rid(o(s), selGPUResourceID))
 }
 func textureWidth(t texture) uint {
@@ -527,7 +527,7 @@ func samplerDescriptorSetSupportArgumentBuffers(d samplerDescriptor, v bool) {
 func compileOptionsSetLanguageVersion(c id, v uint) {
 	C.gk_v_u(o(c), selSetLanguageVersion, C.gk_u(v))
 }
-func libraryNewFunctionWithName(l, name id) id {
+func libraryNewFunctionWithName(l library, name id) id {
 	return id(C.gk_o_o(o(l), selNewFunctionWithName, o(name)))
 }
 func functionFunctionConstantsDictionary(f id) id {
@@ -542,7 +542,7 @@ func functionConstantIndex(c id) uint {
 func functionConstantName(c id) id {
 	return id(C.gk_o(o(c), selName))
 }
-func libraryFunctionDescriptorSetLibrary(d libraryFunctionDescriptor, l id) {
+func libraryFunctionDescriptorSetLibrary(d libraryFunctionDescriptor, l library) {
 	C.gk_v_o(o(d), selSetLibrary, o(l))
 }
 func libraryFunctionDescriptorSetName(d libraryFunctionDescriptor, name id) {
@@ -612,19 +612,19 @@ func renderPipelineColorAttachmentDescriptorSetDestinationAlphaBlendFactor(a ren
 func renderPipelineColorAttachmentDescriptorSetAlphaBlendOperation(a renderPipelineColorAttachmentDescriptor, v uint) {
 	C.gk_v_u(o(a), selSetAlphaBlendOperation, C.gk_u(v))
 }
-func compilerNewComputePipelineStateWithDescriptor(c compiler, d computePipelineDescriptor, options id, err *id) id {
-	return id(C.gk_o_oop(o(c), selNewComputePipelineStateWithDescriptor, o(d), o(options), (*C.gk_obj)(unsafe.Pointer(err))))
+func compilerNewComputePipelineStateWithDescriptor(c compiler, d computePipelineDescriptor, options id, err *id) computePipelineState {
+	return computePipelineState(C.gk_o_oop(o(c), selNewComputePipelineStateWithDescriptor, o(d), o(options), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func compilerNewRenderPipelineStateWithDescriptor(c compiler, d renderPipelineDescriptor, options id, err *id) id {
-	return id(C.gk_o_oop(o(c), selNewRenderPipelineStateWithDescriptor, o(d), o(options), (*C.gk_obj)(unsafe.Pointer(err))))
+func compilerNewRenderPipelineStateWithDescriptor(c compiler, d renderPipelineDescriptor, options id, err *id) renderPipelineState {
+	return renderPipelineState(C.gk_o_oop(o(c), selNewRenderPipelineStateWithDescriptor, o(d), o(options), (*C.gk_obj)(unsafe.Pointer(err))))
 }
-func computePipelineStateMaxTotalThreadsPerThreadgroup(p id) uint {
+func computePipelineStateMaxTotalThreadsPerThreadgroup(p computePipelineState) uint {
 	return uint(C.gk_u_(o(p), selMaxTotalThreadsPerThreadgroup))
 }
-func computePipelineStateReflection(p id) id {
+func computePipelineStateReflection(p computePipelineState) id {
 	return id(C.gk_o(o(p), selReflection))
 }
-func renderPipelineStateReflection(p id) id {
+func renderPipelineStateReflection(p renderPipelineState) id {
 	return id(C.gk_o(o(p), selReflection))
 }
 func computePipelineReflectionBindings(r id) id {
@@ -682,13 +682,13 @@ func metalLayerDrawableSize(l id) (width, height float64) {
 	s := C.gk_size(o(l), selDrawableSize)
 	return float64(s.width), float64(s.height)
 }
-func metalLayerNextDrawable(l id) id {
-	return id(C.gk_o(o(l), selNextDrawable))
+func metalLayerNextDrawable(l id) drawable {
+	return drawable(C.gk_o(o(l), selNextDrawable))
 }
-func drawableTexture(d id) texture {
+func drawableTexture(d drawable) texture {
 	return texture(C.gk_o(o(d), selTexture))
 }
-func drawablePresent(d id) {
+func drawablePresent(d drawable) {
 	C.gk_v(o(d), selPresent)
 }
 func viewLayer(v id) id {
@@ -722,10 +722,10 @@ func counterHeapDescriptorSetType(d counterHeapDescriptor, v uint) {
 func counterHeapDescriptorSetCount(d counterHeapDescriptor, v uint) {
 	C.gk_v_u(o(d), selSetCount, C.gk_u(v))
 }
-func counterHeapInvalidateCounterRange(h id, location, length uint) {
+func counterHeapInvalidateCounterRange(h counterHeap, location, length uint) {
 	C.gk_v_r(o(h), selInvalidateCounterRange, C.NSRange{location: C.NSUInteger(location), length: C.NSUInteger(length)})
 }
-func counterHeapResolveCounterRange(h id, location, length uint) id {
+func counterHeapResolveCounterRange(h counterHeap, location, length uint) id {
 	return id(C.gk_o_r(o(h), selResolveCounterRange, C.NSRange{location: C.NSUInteger(location), length: C.NSUInteger(length)}))
 }
 
@@ -808,7 +808,7 @@ func commandEncoderWaitForFence(e id, fence fence, stages uint) {
 func computeCommandEncoderSetArgumentTable(e computeCommandEncoder, t argumentTable) {
 	C.gk_v_o(o(e), selSetArgumentTable, o(t))
 }
-func computeCommandEncoderSetComputePipelineState(e computeCommandEncoder, p id) {
+func computeCommandEncoderSetComputePipelineState(e computeCommandEncoder, p computePipelineState) {
 	C.gk_v_o(o(e), selSetComputePipelineState, o(p))
 }
 func computeCommandEncoderDispatchThreadgroups(e computeCommandEncoder, groups, threads [3]uint) {
@@ -835,7 +835,7 @@ func computeCommandEncoderCopyFromTextureToTexture(e computeCommandEncoder, src 
 	C.gk_v_ouuzsouuz(o(e), selCopyFromTextureToTexture, o(src), C.gk_u(srcSlice), C.gk_u(srcLevel),
 		mtlOrigin(srcOrigin), mtlSize(size), o(dst), C.gk_u(dstSlice), C.gk_u(dstLevel), mtlOrigin(dstOrigin))
 }
-func computeCommandEncoderWriteTimestampWithGranularity(e computeCommandEncoder, granularity uint, heap id, index uint) {
+func computeCommandEncoderWriteTimestampWithGranularity(e computeCommandEncoder, granularity uint, heap counterHeap, index uint) {
 	C.gk_v_uou(o(e), selWriteTimestampWithGranularityIntoHeap, C.gk_u(granularity), o(heap), C.gk_u(index))
 }
 
@@ -856,10 +856,10 @@ func renderCommandEncoderSetColorStoreAction(e renderCommandEncoder, action, ind
 func renderCommandEncoderSetDepthStoreAction(e renderCommandEncoder, action uint) {
 	C.gk_v_u(o(e), selSetDepthStoreAction, C.gk_u(action))
 }
-func renderCommandEncoderSetRenderPipelineState(e renderCommandEncoder, p id) {
+func renderCommandEncoderSetRenderPipelineState(e renderCommandEncoder, p renderPipelineState) {
 	C.gk_v_o(o(e), selSetRenderPipelineState, o(p))
 }
-func renderCommandEncoderSetDepthStencilState(e renderCommandEncoder, s id) {
+func renderCommandEncoderSetDepthStencilState(e renderCommandEncoder, s depthStencilState) {
 	C.gk_v_o(o(e), selSetDepthStencilState, o(s))
 }
 func renderCommandEncoderSetCullMode(e renderCommandEncoder, v uint) {
@@ -886,7 +886,7 @@ func renderCommandEncoderDrawIndexedPrimitivesIndirectBuffer(e renderCommandEnco
 	C.gk_v_uuuuu(o(e), selDrawIndexedPrimitivesIndirectBuffer, C.gk_u(primitive), C.gk_u(indexType),
 		C.gk_u(indexBuffer), C.gk_u(indexBufferLength), C.gk_u(indirectBuffer))
 }
-func renderCommandEncoderWriteTimestampWithGranularity(e renderCommandEncoder, granularity, stage uint, heap id, index uint) {
+func renderCommandEncoderWriteTimestampWithGranularity(e renderCommandEncoder, granularity, stage uint, heap counterHeap, index uint) {
 	C.gk_v_uuou(o(e), selWriteTimestampWithGranularityAfterStage, C.gk_u(granularity), C.gk_u(stage), o(heap),
 		C.gk_u(index))
 }

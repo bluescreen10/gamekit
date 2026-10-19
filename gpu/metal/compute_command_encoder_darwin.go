@@ -26,7 +26,7 @@ func (e computeCommandEncoder) setArgumentTable(table argumentTable) {
 	computeCommandEncoderSetArgumentTable(e, table)
 }
 
-func (e computeCommandEncoder) setComputePipelineState(pipeline id) {
+func (e computeCommandEncoder) setComputePipelineState(pipeline computePipelineState) {
 	computeCommandEncoderSetComputePipelineState(e, pipeline)
 }
 
@@ -57,6 +57,6 @@ func (e computeCommandEncoder) copyFromTextureToTexture(src texture, srcSlice, s
 	computeCommandEncoderCopyFromTextureToTexture(e, src, srcSlice, srcLevel, srcOrigin, size, dst, dstSlice, dstLevel, dstOrigin)
 }
 
-func (e computeCommandEncoder) writeTimestampWithGranularity(granularity uint, heap id, index uint) {
+func (e computeCommandEncoder) writeTimestampWithGranularity(granularity uint, heap counterHeap, index uint) {
 	computeCommandEncoderWriteTimestampWithGranularity(e, granularity, heap, index)
 }

@@ -18,7 +18,7 @@ func (q queue) commit(buffers *commandBuffer, count uint, options id) {
 	commandQueueCommit(q, buffers, count, options)
 }
 
-func (q queue) signalDrawable(drawable id) {
+func (q queue) signalDrawable(drawable drawable) {
 	commandQueueSignalDrawable(q, drawable)
 }
 

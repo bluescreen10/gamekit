@@ -12,7 +12,7 @@ func newLibraryFunctionDescriptor() libraryFunctionDescriptor {
 	return libraryFunctionDescriptor(newObject("MTL4LibraryFunctionDescriptor"))
 }
 
-func (d libraryFunctionDescriptor) setLibrary(l id) {
+func (d libraryFunctionDescriptor) setLibrary(l library) {
 	libraryFunctionDescriptorSetLibrary(d, l)
 }
 

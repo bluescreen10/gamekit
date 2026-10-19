@@ -8,10 +8,10 @@ func (c compiler) release() {
 	release(c)
 }
 
-func (c compiler) newComputePipelineStateWithDescriptor(descriptor computePipelineDescriptor, options id, err *id) id {
+func (c compiler) newComputePipelineStateWithDescriptor(descriptor computePipelineDescriptor, options id, err *id) computePipelineState {
 	return compilerNewComputePipelineStateWithDescriptor(c, descriptor, options, err)
 }
 
-func (c compiler) newRenderPipelineStateWithDescriptor(descriptor renderPipelineDescriptor, options id, err *id) id {
+func (c compiler) newRenderPipelineStateWithDescriptor(descriptor renderPipelineDescriptor, options id, err *id) renderPipelineState {
 	return compilerNewRenderPipelineStateWithDescriptor(c, descriptor, options, err)
 }

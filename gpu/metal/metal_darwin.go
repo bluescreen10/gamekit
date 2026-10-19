@@ -69,7 +69,7 @@ type resource struct {
 	// its alignment (16 if it holds a vec4 or mat4), so a caller packing the same fields
 	// more tightly hands the argument table a short root and the shader reads past it.
 	// Zero when the shader takes no root argument.
-	depthStencil id
+	depthStencil depthStencilState
 	topology     uint
 	cull         uint
 	winding      uint
@@ -78,7 +78,7 @@ type resource struct {
 	rootSize     uint64
 
 	// Swapchains: the acquired drawable and its texture's handle.
-	drawable        id
+	drawable        drawable
 	drawableTexture gpu.Handle
 
 	// Timestamp pools.
@@ -375,8 +375,8 @@ func (b *Backend) destroy() {
 	defer pool.drain()
 	for _, r := range b.resources {
 		release(r.object)
-		release(r.depthStencil)
-		release(r.drawable)
+		r.depthStencil.release()
+		r.drawable.release()
 	}
 	b.resources = nil
 	b.textureTable.release()
@@ -465,7 +465,7 @@ func (b *Backend) release(h gpu.Handle) {
 		b.residencySet.unenrol(r.object)
 	}
 	b.releaseLater(r.object)
-	b.releaseLater(r.depthStencil)
+	b.releaseLater(id(r.depthStencil))
 	delete(b.resources, uint64(h))
 }
 
@@ -479,7 +479,7 @@ func (b *Backend) slot(r *resource) uint32 {
 	r.slot = (*free)[len(*free)-1]
 	*free = (*free)[:len(*free)-1]
 	if r.kind == kindSampler {
-		ids[r.slot] = sampler(r.object).gpuResourceID()
+		ids[r.slot] = samplerState(r.object).gpuResourceID()
 	} else {
 		ids[r.slot] = texture(r.object).gpuResourceID()
 	}
@@ -658,12 +658,13 @@ func entry(s string) string {
 }
 
 // shaderLibrary loads a metallib, or compiles MSL source. The library is autoreleased.
-func (b *Backend) shaderLibrary(code []byte) id {
+func (b *Backend) shaderLibrary(code []byte) library {
 	check(len(code) > 0, "empty shader")
-	var library, nserr id
+	var lib library
+	var nserr id
 	if bytes.HasPrefix(code, []byte("MTLB")) {
 		data := dispatchDataCreate(unsafe.Pointer(&code[0]), len(code))
-		library = b.device.newLibraryWithData(data, &nserr)
+		lib = b.device.newLibraryWithData(data, &nserr)
 		release(data)
 	} else {
 		check(len(code) < 4 || binary.LittleEndian.Uint32(code) != 0x07230203,
@@ -672,12 +673,12 @@ func (b *Backend) shaderLibrary(code []byte) id {
 		check(source != 0, "shader is not UTF-8 MSL or a metallib")
 		options := newObject("MTLCompileOptions")
 		compileOptionsSetLanguageVersion(options, mtlLanguageVersion3_0)
-		library = b.device.newLibraryWithSource(source, options, &nserr)
+		lib = b.device.newLibraryWithSource(source, options, &nserr)
 		release(options)
 		release(source)
 	}
-	check(library != 0, errorText(nserr, "shader compilation failed"))
-	return objectAutorelease(library)
+	check(lib != 0, errorText(nserr, "shader compilation failed"))
+	return library(objectAutorelease(id(lib)))
 }
 
 // libraryFunction names an entry of a shader for MTL4's descriptor-based pipeline
@@ -767,13 +768,13 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 	var nserr id
 	ps := b.compiler.newComputePipelineStateWithDescriptor(desc, 0, &nserr)
 	check(ps != 0, errorText(nserr, "compute pipeline creation failed"))
-	r := &resource{kind: kindCompute, object: ps}
+	r := &resource{kind: kindCompute, object: id(ps)}
 	r.group = [3]uint{uint(group[0]), uint(group[1]), uint(group[2])}
-	if uint64(group[0])*uint64(group[1])*uint64(group[2]) > uint64(computePipelineStateMaxTotalThreadsPerThreadgroup(ps)) {
-		release(ps)
+	if uint64(group[0])*uint64(group[1])*uint64(group[2]) > uint64(ps.maxTotalThreadsPerThreadgroup()) {
+		ps.release()
 		panic("metal: workgroup too large")
 	}
-	r.rootSize = rootBytes(computePipelineReflectionBindings(computePipelineStateReflection(ps)))
+	r.rootSize = rootBytes(computePipelineReflectionBindings(ps.reflection()))
 	return gpu.Pipeline{H: gpu.Handle(b.add(r))}
 }
 
@@ -851,9 +852,9 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	var nserr id
 	ps := b.compiler.newRenderPipelineStateWithDescriptor(desc, 0, &nserr)
 	check(ps != 0, errorText(nserr, "render pipeline creation failed"))
-	r := &resource{kind: kindGraphics, object: ps, depthWrite: d.DepthWrite}
+	r := &resource{kind: kindGraphics, object: id(ps), depthWrite: d.DepthWrite}
 	// bindings() pushes the root to both stages, so the larger expectation governs.
-	reflection := computePipelineStateReflection(ps)
+	reflection := ps.reflection()
 	r.rootSize = max(rootBytes(renderPipelineReflectionVertexBindings(reflection)), rootBytes(renderPipelineReflectionFragmentBindings(reflection)))
 	depth := newDepthStencilDescriptor()
 	compare := uint(mtlCompareFunctionAlways)
@@ -910,7 +911,7 @@ func (b *Backend) functionConstants(stage stageShader) []specialization.Declarat
 	pool := pushPool()
 	defer pool.drain()
 	name := nsString(entry(stage.entry))
-	function := libraryNewFunctionWithName(b.shaderLibrary(stage.code), name)
+	function := b.shaderLibrary(stage.code).newFunctionWithName(name)
 	release(name)
 	check(function != 0, "shader has no such entry point")
 	defer release(function)
@@ -1014,12 +1015,12 @@ func (b *Backend) AcquireNext(s gpu.Swapchain) (gpu.Texture, gpu.Fence) {
 	check(r.drawable == 0, "drawable already acquired")
 	pool := pushPool()
 	defer pool.drain()
-	r.drawable = retain(metalLayerNextDrawable(r.object))
+	r.drawable = metalLayerNextDrawable(r.object).retain()
 	check(r.drawable != 0, "no drawable available (window hidden or zero size)")
 	// A drawable is used only as a render attachment; it is never referenced through a
 	// bindless argument table. Keeping it out of the residency set means its
 	// acquire/release cycle costs nothing beyond this call.
-	t := drawableTexture(r.drawable)
+	t := r.drawable.texture()
 	retain(id(t))
 	tex := &resource{
 		kind: kindTexture, object: id(t), textureType: mtlTextureType2D, layers: 1, mips: 1, samples: 1,
@@ -1039,7 +1040,7 @@ func (b *Backend) Present(s gpu.Swapchain, c gpu.CommandBuffer) {
 	value := b.submit(v, r.drawable)
 	b.releaseLater(b.resources[uint64(r.drawableTexture)].object)
 	delete(b.resources, uint64(r.drawableTexture))
-	b.releaseLater(r.drawable)
+	b.releaseLater(id(r.drawable))
 	r.drawable, r.drawableTexture = 0, 0
 	// Applications reuse mapped frame data and read counters immediately after Present.
 	// Match the synchronous presentation contract of the Vulkan backend.
@@ -1059,7 +1060,7 @@ func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 	if err != nil {
 		return gpu.QueryPool{} // unsupported device: degrade to no timestamps.
 	}
-	r := &resource{kind: kindQuery, object: heap, count: uint64(n), written: map[uint32]bool{}, overrides: map[uint32]uint64{}}
+	r := &resource{kind: kindQuery, object: id(heap), count: uint64(n), written: map[uint32]bool{}, overrides: map[uint32]uint64{}}
 	var cpu, gpuStart uint64
 	b.device.sampleTimestamps(&cpu, &gpuStart)
 	r.cpuStart, r.gpuStart = cpu, gpuStart
@@ -1080,7 +1081,7 @@ func (b *Backend) ReadTimestamps(p gpu.QueryPool, n uint32) []uint64 {
 	check(uint64(n) <= r.count, "query read out of bounds")
 	pool := pushPool()
 	defer pool.drain()
-	data := counterHeapResolveCounterRange(r.object, 0, uint(n))
+	data := counterHeap(r.object).resolveCounterRange(0, uint(n))
 	check(data != 0 && uint64(dataLength(data)) >= uint64(n)*8, "timestamp resolve failed")
 	values := unsafe.Slice((*uint64)(dataBytes(data)), n)
 	var cpu, gpuNow uint64

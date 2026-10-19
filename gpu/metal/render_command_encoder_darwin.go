@@ -42,11 +42,11 @@ func (e renderCommandEncoder) setDepthStoreAction(action uint) {
 	renderCommandEncoderSetDepthStoreAction(e, action)
 }
 
-func (e renderCommandEncoder) setRenderPipelineState(pipeline id) {
+func (e renderCommandEncoder) setRenderPipelineState(pipeline renderPipelineState) {
 	renderCommandEncoderSetRenderPipelineState(e, pipeline)
 }
 
-func (e renderCommandEncoder) setDepthStencilState(state id) {
+func (e renderCommandEncoder) setDepthStencilState(state depthStencilState) {
 	renderCommandEncoderSetDepthStencilState(e, state)
 }
 
@@ -77,6 +77,6 @@ func (e renderCommandEncoder) drawIndexedPrimitivesIndirectBuffer(primitive, ind
 	renderCommandEncoderDrawIndexedPrimitivesIndirectBuffer(e, primitive, indexType, indexBuffer, indexBufferLength, indirectBuffer)
 }
 
-func (e renderCommandEncoder) writeTimestampWithGranularity(granularity, stage uint, heap id, index uint) {
+func (e renderCommandEncoder) writeTimestampWithGranularity(granularity, stage uint, heap counterHeap, index uint) {
 	renderCommandEncoderWriteTimestampWithGranularity(e, granularity, stage, heap, index)
 }
