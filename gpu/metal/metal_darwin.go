@@ -69,7 +69,7 @@ type resource struct {
 	// its alignment (16 if it holds a vec4 or mat4), so a caller packing the same fields
 	// more tightly hands the argument table a short root and the shader reads past it.
 	// Zero when the shader takes no root argument.
-	depthStencil depthStencilState
+	depthStencil mtlDepthStencilState
 	topology     uint
 	cull         uint
 	winding      uint
@@ -78,7 +78,7 @@ type resource struct {
 	rootSize     uint64
 
 	// Swapchains: the acquired drawable and its texture's handle.
-	drawable        drawable
+	drawable        mtlDrawable
 	drawableTexture gpu.Handle
 
 	// Timestamp pools.
@@ -94,12 +94,12 @@ type Backend struct {
 	// users is how many Inits have no Destroy yet: the device lives while any do.
 	users int
 
-	device       device
-	queue        queue
-	compiler     compiler
-	residencySet residencySet
-	event        sharedEvent
-	fence        fence
+	device       mtlDevice
+	queue        mtl4CommandQueue
+	compiler     mtl4Compiler
+	residencySet mtlResidencySet
+	event        mtlSharedEvent
+	fence        mtlFence
 	// The command allocator, command buffer and argument table are created once and
 	// reused every frame rather than recreated each Begin. That reuse is exactly what
 	// MTL4's allocator model exists to make cheap — recreating them per frame was
@@ -107,18 +107,18 @@ type Backend struct {
 	// is safe because every submission is fully synchronized: by the time the next
 	// Begin resets the allocator, the previous frame's GPU work has completed, which is
 	// the allocator's documented precondition for reset.
-	allocator allocator
-	argTable  argumentTable
-	buffer    commandBuffer
+	allocator mtl4CommandAllocator
+	argTable  mtl4ArgumentTable
+	buffer    mtl4CommandBuffer
 
 	// The bindless tables: texture and sampler resource IDs, indexed by slot.
-	textureTable, samplerTable buffer
+	textureTable, samplerTable mtlBuffer
 	textureIDs                 []uint64
 	samplerIDs                 []uint64
 	freeTextures, freeSamplers []uint32
 
 	// rootArena holds draw and dispatch data (see rootSlot), reused across frames.
-	rootArena     buffer
+	rootArena     mtlBuffer
 	rootArenaPtr  unsafe.Pointer
 	rootArenaAddr uint64
 	rootArenaLen  uint64
@@ -138,7 +138,7 @@ type Backend struct {
 	inFlight   int
 	released   []id
 	// retired holds root arenas outgrown while recording, which the GPU may still read.
-	retired  []buffer
+	retired  []mtlBuffer
 	feedback chan feedback
 	// early holds feedback that arrived for a submission nobody waits on yet.
 	early map[uint64]feedback
@@ -304,7 +304,7 @@ func (b *Backend) init() error {
 	if b.fence = b.device.newFence(); b.fence == 0 {
 		return fmt.Errorf("cannot create fence")
 	}
-	if b.allocator, err = b.device.newAllocator(); err != nil {
+	if b.allocator, err = b.device.newCommandAllocator(); err != nil {
 		return err
 	}
 	if b.buffer = b.device.newCommandBuffer(); b.buffer == 0 {
@@ -479,9 +479,9 @@ func (b *Backend) slot(r *resource) uint32 {
 	r.slot = (*free)[len(*free)-1]
 	*free = (*free)[:len(*free)-1]
 	if r.kind == kindSampler {
-		ids[r.slot] = samplerState(r.object).gpuResourceID()
+		ids[r.slot] = mtlSamplerState(r.object).gpuResourceID()
 	} else {
-		ids[r.slot] = texture(r.object).gpuResourceID()
+		ids[r.slot] = mtlTexture(r.object).gpuResourceID()
 	}
 	return r.slot
 }
@@ -540,7 +540,7 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 
 	pool := pushPool()
 	defer pool.drain()
-	desc := newTextureDescriptor()
+	desc := newMTLTextureDescriptor()
 	defer desc.release()
 	desc.setTextureType(uint(r.textureType))
 	desc.setWidth(uint(r.width))
@@ -594,7 +594,7 @@ func (b *Backend) TextureView(t gpu.Texture, k gpu.TextureKind, firstMip, mipCou
 	// A view's base level is the source's firstMip.
 	v.width, v.height, v.depth = max(src.width>>firstMip, 1), max(src.height>>firstMip, 1), max(src.depth>>firstMip, 1)
 	v.slot = 0
-	v.object = id(texture(src.object).newTextureViewWithPixelFormat(src.format, v.textureType, uint(firstMip), uint(mipCount), uint(firstLayer), uint(layerCount)))
+	v.object = id(mtlTexture(src.object).newTextureViewWithPixelFormat(src.format, v.textureType, uint(firstMip), uint(mipCount), uint(firstLayer), uint(layerCount)))
 	h := b.add(&v)
 	if !v.memoryless {
 		b.residencySet.enrol(v.object)
@@ -625,7 +625,7 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	}
 	pool := pushPool()
 	defer pool.drain()
-	desc := newSamplerDescriptor()
+	desc := newMTLSamplerDescriptor()
 	defer desc.release()
 	desc.setMinFilter(filter(d.MinLinear))
 	desc.setMagFilter(filter(d.MagLinear))
@@ -658,9 +658,9 @@ func entry(s string) string {
 }
 
 // shaderLibrary loads a metallib, or compiles MSL source. The library is autoreleased.
-func (b *Backend) shaderLibrary(code []byte) library {
+func (b *Backend) shaderLibrary(code []byte) mtlLibrary {
 	check(len(code) > 0, "empty shader")
-	var lib library
+	var lib mtlLibrary
 	var nserr id
 	if bytes.HasPrefix(code, []byte("MTLB")) {
 		data := dispatchDataCreate(unsafe.Pointer(&code[0]), len(code))
@@ -678,18 +678,18 @@ func (b *Backend) shaderLibrary(code []byte) library {
 		release(source)
 	}
 	check(lib != 0, errorText(nserr, "shader compilation failed"))
-	return library(objectAutorelease(id(lib)))
+	return mtlLibrary(objectAutorelease(id(lib)))
 }
 
 // libraryFunction names an entry of a shader for MTL4's descriptor-based pipeline
 // creation. It is autoreleased.
-func (b *Backend) libraryFunction(code []byte, entryName string) libraryFunctionDescriptor {
-	fd := newLibraryFunctionDescriptor()
+func (b *Backend) libraryFunction(code []byte, entryName string) mtl4LibraryFunctionDescriptor {
+	fd := newMTL4LibraryFunctionDescriptor()
 	fd.setLibrary(b.shaderLibrary(code))
 	name := nsString(entry(entryName))
 	fd.setName(name)
 	release(name)
-	return libraryFunctionDescriptor(objectAutorelease(id(fd)))
+	return mtl4LibraryFunctionDescriptor(objectAutorelease(id(fd)))
 }
 
 // constant is one resolved function constant.
@@ -709,7 +709,7 @@ var constantTypes = [...]uint{
 // no constants: Metal refuses to build a pipeline from a function that declares
 // function constants and was never specialized, however every one of them has a
 // default. It is autoreleased.
-func specializedFunction(function libraryFunctionDescriptor, constants []constant) specializedFunctionDescriptor {
+func specializedFunction(function mtl4LibraryFunctionDescriptor, constants []constant) mtl4SpecializedFunctionDescriptor {
 	values := newObject("MTLFunctionConstantValues")
 	for _, c := range constants {
 		check(int(c.kind) < len(constantTypes), "invalid constant type")
@@ -722,11 +722,11 @@ func specializedFunction(function libraryFunctionDescriptor, constants []constan
 		}
 		functionConstantValuesSetConstantValue(values, unsafe.Pointer(&value[0]), constantTypes[c.kind], uint(c.index))
 	}
-	fd := newSpecializedFunctionDescriptor()
+	fd := newMTL4SpecializedFunctionDescriptor()
 	fd.setFunctionDescriptor(function)
 	fd.setConstantValues(values)
 	release(values)
-	return specializedFunctionDescriptor(objectAutorelease(id(fd)))
+	return mtl4SpecializedFunctionDescriptor(objectAutorelease(id(fd)))
 }
 
 // pipelineOptions asks for binding reflection, which rootBytes reads. It is
@@ -760,7 +760,7 @@ func (b *Backend) CreateComputePipeline(d gpu.ComputePipelineDescriptor) gpu.Pip
 	}
 	pool := pushPool()
 	defer pool.drain()
-	desc := newComputePipelineDescriptor()
+	desc := newMTL4ComputePipelineDescriptor()
 	defer desc.release()
 	desc.setLabel(d.Label)
 	desc.setComputeFunctionDescriptor(specializedFunction(b.libraryFunction(code, d.Entry), constants))
@@ -806,7 +806,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 
 	pool := pushPool()
 	defer pool.drain()
-	desc := newRenderPipelineDescriptor()
+	desc := newMTL4RenderPipelineDescriptor()
 	defer desc.release()
 	desc.setLabel(d.Label)
 	// Both stages share one set of constants, as on Vulkan; a stage ignores any it does
@@ -819,7 +819,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	desc.setOptions(pipelineOptions())
 	attachments := desc.colorAttachments()
 	for i, f := range d.ColorFormats {
-		t := renderPipelineColorAttachmentDescriptor(arrayObjectAtIndexedSubscript(attachments, uint(i)))
+		t := mtl4RenderPipelineColorAttachmentDescriptor(arrayObjectAtIndexedSubscript(attachments, uint(i)))
 		t.setPixelFormat(uint(pixelFormat(f)))
 		var blend gpu.BlendState
 		if i < len(d.Blend) {
@@ -841,7 +841,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 		t.setBlendingState(mtl4BlendStateEnabled)
 		t.setSourceRGBBlendFactor(blendFactors[blend.ColorOp.Src])
 		t.setDestinationRGBBlendFactor(blendFactors[blend.ColorOp.Dst])
-		t.setRGBBlendOperation(uint(blend.ColorOp.Op))
+		t.setRgbBlendOperation(uint(blend.ColorOp.Op))
 		t.setSourceAlphaBlendFactor(blendFactors[blend.AlphaOp.Src])
 		t.setDestinationAlphaBlendFactor(blendFactors[blend.AlphaOp.Dst])
 		t.setAlphaBlendOperation(uint(blend.AlphaOp.Op))
@@ -856,7 +856,7 @@ func (b *Backend) CreateGraphicsPipeline(d gpu.PipelineDescriptor) gpu.Pipeline 
 	// bindings() pushes the root to both stages, so the larger expectation governs.
 	reflection := ps.reflection()
 	r.rootSize = max(rootBytes(renderPipelineReflectionVertexBindings(reflection)), rootBytes(renderPipelineReflectionFragmentBindings(reflection)))
-	depth := newDepthStencilDescriptor()
+	depth := newMTLDepthStencilDescriptor()
 	compare := uint(mtlCompareFunctionAlways)
 	if d.DepthTest {
 		compare = uint(d.DepthCompare)
@@ -1053,7 +1053,7 @@ func (b *Backend) CreateTimestampPool(n uint32) gpu.QueryPool {
 	}
 	pool := pushPool()
 	defer pool.drain()
-	heap, err := newWithDescriptor(b.device.newCounterHeapWithDescriptor, newCounterHeapDescriptor, func(d counterHeapDescriptor) {
+	heap, err := newWithDescriptor(b.device.newCounterHeapWithDescriptor, newMTL4CounterHeapDescriptor, func(d mtl4CounterHeapDescriptor) {
 		d.setType(mtl4CounterHeapTypeTimestamp)
 		d.setCount(uint(n))
 	}, "")
@@ -1081,7 +1081,7 @@ func (b *Backend) ReadTimestamps(p gpu.QueryPool, n uint32) []uint64 {
 	check(uint64(n) <= r.count, "query read out of bounds")
 	pool := pushPool()
 	defer pool.drain()
-	data := counterHeap(r.object).resolveCounterRange(0, uint(n))
+	data := mtl4CounterHeap(r.object).resolveCounterRange(0, uint(n))
 	check(data != 0 && uint64(dataLength(data)) >= uint64(n)*8, "timestamp resolve failed")
 	values := unsafe.Slice((*uint64)(dataBytes(data)), n)
 	var cpu, gpuNow uint64

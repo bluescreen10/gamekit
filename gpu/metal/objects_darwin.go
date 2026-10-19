@@ -8,6 +8,11 @@ import (
 	"github.com/bluescreen10/gamekit/strings"
 )
 
+// Metal wrapper types keep the SDK's MTL or MTL4 name with a lowercase mtl prefix.
+// Direct methods use the selector's first component. Overloaded methods join all
+// selector components in order, without colons. Helpers such as clone and enrol
+// perform additional work.
+
 // Helpers over the messages in objc_darwin.go.
 
 func class(name string) id {

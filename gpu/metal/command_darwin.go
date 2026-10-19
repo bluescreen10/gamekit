@@ -48,10 +48,10 @@ type command struct {
 	// render and compute are the open encoders, at most one of them. compute also
 	// records copies: MTL4 has no separate blit encoder. computeTable says the
 	// argument table is bound to it.
-	render        renderCommandEncoder
-	compute       computeCommandEncoder
+	render        mtl4RenderCommandEncoder
+	compute       mtl4ComputeCommandEncoder
 	computeTable  bool
-	pass          renderPassDescriptor
+	pass          mtl4RenderPassDescriptor
 	colors        []attachment
 	depth         *attachment
 	readOnlyDepth bool
@@ -118,7 +118,7 @@ func (c *command) outside() {
 }
 
 // computeEncoder opens a compute encoder, unless one is open.
-func (c *command) computeEncoder() computeCommandEncoder {
+func (c *command) computeEncoder() mtl4ComputeCommandEncoder {
 	if c.compute == 0 {
 		pool := pushPool()
 		c.compute = c.backend.buffer.computeCommandEncoder()
@@ -181,7 +181,7 @@ func (c *command) draw(data []byte) {
 	check(c.render != 0 && p != nil && p.kind == kindGraphics, "draw requires a graphics pipeline and render pass")
 	check(!c.readOnlyDepth || !p.depthWrite, "depth-writing pipeline in read-only depth pass")
 	if c.graphics != p {
-		c.render.setRenderPipelineState(renderPipelineState(p.object))
+		c.render.setRenderPipelineState(mtlRenderPipelineState(p.object))
 		c.render.setDepthStencilState(p.depthStencil)
 		c.render.setCullMode(p.cull)
 		c.render.setFrontFacingWinding(p.winding)
@@ -199,7 +199,7 @@ func (c *command) dispatch(data []byte) {
 		c.computeTable = true
 	}
 	if c.kernel != p {
-		e.setComputePipelineState(computePipelineState(p.object))
+		e.setComputePipelineState(mtlComputePipelineState(p.object))
 		c.kernel = p
 	}
 	c.bindings(data)
@@ -217,14 +217,14 @@ func (c *command) dispatch(data []byte) {
 func (c *command) sampleQuery(q query) {
 	switch {
 	case c.render != 0:
-		c.render.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, mtlRenderStageFragment, counterHeap(q.pool.object), uint(q.index))
+		c.render.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, mtlRenderStageFragment, mtl4CounterHeap(q.pool.object), uint(q.index))
 	case c.compute != 0:
-		c.compute.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, counterHeap(q.pool.object), uint(q.index))
+		c.compute.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, mtl4CounterHeap(q.pool.object), uint(q.index))
 	default:
 		// No encoder open: a throwaway compute encoder places the timestamp at this exact
 		// point in the command buffer's GPU timeline.
 		e := c.computeEncoder()
-		e.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, counterHeap(q.pool.object), uint(q.index))
+		e.writeTimestampWithGranularity(mtl4TimestampGranularityPrecise, mtl4CounterHeap(q.pool.object), uint(q.index))
 		c.endCompute()
 	}
 }
@@ -285,17 +285,17 @@ func (c *command) BeginRenderPass(r gpu.RenderTargets) {
 
 	pool := pushPool()
 	defer pool.drain()
-	c.pass = newRenderPassDescriptor()
+	c.pass = newMTL4RenderPassDescriptor()
 	colors := c.pass.colorAttachments()
 	c.colors = c.colors[:0]
 	for i, x := range r.Color {
 		t := b.resource(uint64(x.Texture.H), kindTexture)
-		a := renderPassColorAttachmentDescriptor(arrayObjectAtIndexedSubscript(colors, uint(i)))
-		a.setTexture(texture(t.object))
+		a := mtlRenderPassColorAttachmentDescriptor(arrayObjectAtIndexedSubscript(colors, uint(i)))
+		a.setTexture(mtlTexture(t.object))
 		a.setLoadAction(loadAction(x.Load))
 		resolve := x.ResolveTexture.IsValid()
 		if resolve {
-			a.setResolveTexture(texture(b.resource(uint64(x.ResolveTexture.H), kindTexture).object))
+			a.setResolveTexture(mtlTexture(b.resource(uint64(x.ResolveTexture.H), kindTexture).object))
 		}
 		store := storeAction(x.Store, resolve)
 		a.setStoreAction(store)
@@ -306,11 +306,11 @@ func (c *command) BeginRenderPass(r gpu.RenderTargets) {
 	if x := r.Depth; x != nil {
 		t := b.resource(uint64(x.Texture.H), kindTexture)
 		a := c.pass.depthAttachment()
-		a.setTexture(texture(t.object))
+		a.setTexture(mtlTexture(t.object))
 		a.setLoadAction(loadAction(x.Load))
 		resolve := x.ResolveTexture.IsValid()
 		if resolve {
-			a.setResolveTexture(texture(b.resource(uint64(x.ResolveTexture.H), kindTexture).object))
+			a.setResolveTexture(mtlTexture(b.resource(uint64(x.ResolveTexture.H), kindTexture).object))
 			a.setDepthResolveFilter(mtlMultisampleDepthResolveFilterSample0)
 		}
 		store := storeAction(x.Store, resolve)
@@ -362,7 +362,7 @@ func (c *command) resumeRender(load bool) {
 	defer d.release()
 	colors := d.colorAttachments()
 	for i := range c.colors {
-		a := renderPassColorAttachmentDescriptor(arrayObjectAtIndexedSubscript(colors, uint(i)))
+		a := mtlRenderPassColorAttachmentDescriptor(arrayObjectAtIndexedSubscript(colors, uint(i)))
 		if load {
 			a.setLoadAction(mtlLoadActionLoad)
 		}
@@ -461,7 +461,7 @@ func (c *command) DrawIndexed(data []byte, buf gpu.Buffer, it gpu.IndexType, ind
 	ib := c.backend.resource(uint64(buf.H), kindBuffer)
 	off := uint64(firstIndex) * uint64(it.Size())
 	check(off <= ib.size, "index offset out of bounds")
-	c.render.drawIndexedPrimitivesIndexCount(c.pipeline.topology, uint(indexCount), indexType(it), ib.addr+off, uint(ib.size-off), uint(instanceCount), int(vertexOffset), uint(firstInstance))
+	c.render.drawIndexedPrimitivesIndexCountIndexTypeIndexBufferIndexBufferLengthInstanceCountBaseVertexBaseInstance(c.pipeline.topology, uint(indexCount), indexType(it), ib.addr+off, uint(ib.size-off), uint(instanceCount), int(vertexOffset), uint(firstInstance))
 }
 
 func (c *command) DrawIndexedIndirect(data []byte, buf gpu.Buffer, it gpu.IndexType, args gpu.Buffer, offset uint64, drawCount, stride uint32) {
@@ -474,7 +474,7 @@ func (c *command) DrawIndexedIndirect(data []byte, buf gpu.Buffer, it gpu.IndexT
 	ib := c.backend.resource(uint64(buf.H), kindBuffer)
 	// Metal has no multi-draw-indirect, so one draw per command is the only option.
 	for i := range uint64(drawCount) {
-		c.render.drawIndexedPrimitivesIndirectBuffer(c.pipeline.topology, indexType(it), ib.addr, uint(ib.size), a.addr+offset+i*uint64(stride))
+		c.render.drawIndexedPrimitivesIndexTypeIndexBufferIndexBufferLengthIndirectBuffer(c.pipeline.topology, indexType(it), ib.addr, uint(ib.size), a.addr+offset+i*uint64(stride))
 	}
 }
 
@@ -516,7 +516,7 @@ func (c *command) CopyBuffer(dst, src gpu.Buffer, dstOffset, srcOffset, size uin
 	d, s := c.backend.resource(uint64(dst.H), kindBuffer), c.backend.resource(uint64(src.H), kindBuffer)
 	check(dstOffset <= d.size && size <= d.size-dstOffset && srcOffset <= s.size && size <= s.size-srcOffset,
 		"buffer copy out of bounds")
-	c.computeEncoder().copyFromBufferToBuffer(buffer(s.object), uint(srcOffset), buffer(d.object), uint(dstOffset), uint(size))
+	c.computeEncoder().copyFromBufferSourceOffsetToBufferDestinationOffsetSize(mtlBuffer(s.object), uint(srcOffset), mtlBuffer(d.object), uint(dstOffset), uint(size))
 }
 
 func (c *command) copyTexture(image gpu.Texture, mip, layer uint32, transferBuffer gpu.Buffer, offset uint64, upload bool) {
@@ -552,9 +552,9 @@ func (c *command) copyTexture(image gpu.Texture, mip, layer uint32, transferBuff
 			at := uint(offset + z*img + y*row)
 			origin := [3]uint{0, uint(y), uint(z)}
 			if upload {
-				e.copyFromBufferToTexture(buffer(buf.object), at, uint(row), uint(row), line, texture(t.object), uint(layer), uint(mip), origin)
+				e.copyFromBufferSourceOffsetSourceBytesPerRowSourceBytesPerImageSourceSizeToTextureDestinationSliceDestinationLevelDestinationOrigin(mtlBuffer(buf.object), at, uint(row), uint(row), line, mtlTexture(t.object), uint(layer), uint(mip), origin)
 			} else {
-				e.copyFromTextureToBuffer(texture(t.object), uint(layer), uint(mip), origin, line, buffer(buf.object), at, uint(row), uint(row))
+				e.copyFromTextureSourceSliceSourceLevelSourceOriginSourceSizeToBufferDestinationOffsetDestinationBytesPerRowDestinationBytesPerImage(mtlTexture(t.object), uint(layer), uint(mip), origin, line, mtlBuffer(buf.object), at, uint(row), uint(row))
 			}
 		}
 	}
@@ -580,7 +580,7 @@ func (c *command) CopyTextureToTexture(dst, src gpu.Texture, mip, layer uint32) 
 	check(uint64(layer) < s.layers, "copy layer out of bounds")
 	size := [3]uint{uint(max(s.width>>mip, 1)), uint(max(s.height>>mip, 1)), uint(max(s.depth>>mip, 1))}
 	var origin [3]uint
-	c.computeEncoder().copyFromTextureToTexture(texture(s.object), uint(layer), uint(mip), origin, size, texture(d.object), uint(layer), uint(mip), origin)
+	c.computeEncoder().copyFromTextureSourceSliceSourceLevelSourceOriginSourceSizeToTextureDestinationSliceDestinationLevelDestinationOrigin(mtlTexture(s.object), uint(layer), uint(mip), origin, size, mtlTexture(d.object), uint(layer), uint(mip), origin)
 }
 
 func (c *command) ResetTimestamps(p gpu.QueryPool, n uint32) {
@@ -591,7 +591,7 @@ func (c *command) ResetTimestamps(p gpu.QueryPool, n uint32) {
 	c.outside()
 	r := c.backend.resource(uint64(p.H), kindQuery)
 	check(uint64(n) <= r.count, "query reset out of bounds")
-	counterHeap(r.object).invalidateCounterRange(0, uint(n))
+	mtl4CounterHeap(r.object).invalidateCounterRange(0, uint(n))
 	for i := range n {
 		delete(r.written, i)
 		delete(r.overrides, i)
@@ -628,7 +628,7 @@ type feedback struct {
 // MTL4 command buffers carry no waitUntilCompleted, status or error of their own:
 // completion is reported through the shared event the queue signals, and errors and GPU
 // times through a commit feedback handler.
-func (b *Backend) submit(c *command, drawable drawable) uint64 {
+func (b *Backend) submit(c *command, drawable mtlDrawable) uint64 {
 	c.outside()
 	c.ends = append(c.ends, c.pending...)
 	c.pending = nil
@@ -642,7 +642,7 @@ func (b *Backend) submit(c *command, drawable drawable) uint64 {
 	commitOptionsAddFeedbackHandler(options, func(fb id) {
 		b.feedback <- feedbackOf(s, fb)
 	})
-	buffers := [1]commandBuffer{b.buffer}
+	buffers := [1]mtl4CommandBuffer{b.buffer}
 	b.queue.commit(&buffers[0], 1, options)
 	release(options)
 	// signalDrawable MUST follow the commit it is meant to cover. The queue is an ordered
