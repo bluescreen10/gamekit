@@ -12,11 +12,11 @@ func newRenderPassAttachmentDescriptor() renderPassAttachmentDescriptor {
 	return renderPassAttachmentDescriptor(newObject("MTLRenderPassAttachmentDescriptor"))
 }
 
-func (d renderPassAttachmentDescriptor) setTexture(t id) {
+func (d renderPassAttachmentDescriptor) setTexture(t texture) {
 	renderPassAttachmentDescriptorSetTexture(d, t)
 }
 
-func (d renderPassAttachmentDescriptor) setResolveTexture(t id) {
+func (d renderPassAttachmentDescriptor) setResolveTexture(t texture) {
 	renderPassAttachmentDescriptorSetResolveTexture(d, t)
 }
 

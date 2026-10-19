@@ -371,11 +371,11 @@ func deviceNewCounterHeapWithDescriptor(d device, desc counterHeapDescriptor, er
 func deviceNewBufferWithLength(d device, length, options uint) buffer {
 	return buffer(C.gk_o_uu(o(d), selNewBufferWithLength, C.gk_u(length), C.gk_u(options)))
 }
-func deviceNewTextureWithDescriptor(d device, desc textureDescriptor) id {
-	return id(C.gk_o_o(o(d), selNewTextureWithDescriptor, o(desc)))
+func deviceNewTextureWithDescriptor(d device, desc textureDescriptor) texture {
+	return texture(C.gk_o_o(o(d), selNewTextureWithDescriptor, o(desc)))
 }
-func deviceNewSamplerStateWithDescriptor(d device, desc samplerDescriptor) id {
-	return id(C.gk_o_o(o(d), selNewSamplerStateWithDescriptor, o(desc)))
+func deviceNewSamplerStateWithDescriptor(d device, desc samplerDescriptor) sampler {
+	return sampler(C.gk_o_o(o(d), selNewSamplerStateWithDescriptor, o(desc)))
 }
 func deviceNewDepthStencilStateWithDescriptor(d device, desc depthStencilDescriptor) id {
 	return id(C.gk_o_o(o(d), selNewDepthStencilStateWithDescriptor, o(desc)))
@@ -437,23 +437,23 @@ func bufferContents(b buffer) unsafe.Pointer {
 func bufferGPUAddress(b buffer) uint64 {
 	return uint64(C.gk_u_(o(b), selGPUAddress))
 }
-func textureGPUResourceID(t id) uint64 {
+func textureGPUResourceID(t texture) uint64 {
 	return uint64(C.gk_rid(o(t), selGPUResourceID))
 }
-func samplerStateGPUResourceID(s id) uint64 {
+func samplerStateGPUResourceID(s sampler) uint64 {
 	return uint64(C.gk_rid(o(s), selGPUResourceID))
 }
-func textureWidth(t id) uint {
+func textureWidth(t texture) uint {
 	return uint(C.gk_u_(o(t), selWidth))
 }
-func textureHeight(t id) uint {
+func textureHeight(t texture) uint {
 	return uint(C.gk_u_(o(t), selHeight))
 }
-func texturePixelFormat(t id) uint {
+func texturePixelFormat(t texture) uint {
 	return uint(C.gk_u_(o(t), selPixelFormat))
 }
-func textureNewTextureViewWithPixelFormat(t id, format, textureType, firstLevel, levels, firstSlice, slices uint) id {
-	return id(C.gk_o_uurr(o(t), selNewTextureViewWithPixelFormat, C.gk_u(format), C.gk_u(textureType),
+func textureNewTextureViewWithPixelFormat(t texture, format, textureType, firstLevel, levels, firstSlice, slices uint) texture {
+	return texture(C.gk_o_uurr(o(t), selNewTextureViewWithPixelFormat, C.gk_u(format), C.gk_u(textureType),
 		C.NSRange{location: C.NSUInteger(firstLevel), length: C.NSUInteger(levels)},
 		C.NSRange{location: C.NSUInteger(firstSlice), length: C.NSUInteger(slices)}))
 }
@@ -685,8 +685,8 @@ func metalLayerDrawableSize(l id) (width, height float64) {
 func metalLayerNextDrawable(l id) id {
 	return id(C.gk_o(o(l), selNextDrawable))
 }
-func drawableTexture(d id) id {
-	return id(C.gk_o(o(d), selTexture))
+func drawableTexture(d id) texture {
+	return texture(C.gk_o(o(d), selTexture))
 }
 func drawablePresent(d id) {
 	C.gk_v(o(d), selPresent)
@@ -752,10 +752,10 @@ func renderPassDescriptorColorAttachments(d renderPassDescriptor) id {
 func renderPassDescriptorDepthAttachment(d renderPassDescriptor) renderPassDepthAttachmentDescriptor {
 	return renderPassDepthAttachmentDescriptor(C.gk_o(o(d), selDepthAttachment))
 }
-func renderPassAttachmentDescriptorSetTexture(a renderPassAttachmentDescriptor, t id) {
+func renderPassAttachmentDescriptorSetTexture(a renderPassAttachmentDescriptor, t texture) {
 	C.gk_v_o(o(a), selSetTexture, o(t))
 }
-func renderPassAttachmentDescriptorSetResolveTexture(a renderPassAttachmentDescriptor, t id) {
+func renderPassAttachmentDescriptorSetResolveTexture(a renderPassAttachmentDescriptor, t texture) {
 	C.gk_v_o(o(a), selSetResolveTexture, o(t))
 }
 func renderPassAttachmentDescriptorSetLoadAction(a renderPassAttachmentDescriptor, v uint) {
@@ -821,17 +821,17 @@ func computeCommandEncoderCopyFromBufferToBuffer(e computeCommandEncoder, src bu
 	C.gk_v_ououu(o(e), selCopyFromBufferToBuffer, o(src), C.gk_u(srcOffset), o(dst), C.gk_u(dstOffset), C.gk_u(size))
 }
 func computeCommandEncoderCopyFromBufferToTexture(e computeCommandEncoder, src buffer, srcOffset, bytesPerRow, bytesPerImage uint, size [3]uint,
-	dst id, slice, level uint, origin [3]uint) {
+	dst texture, slice, level uint, origin [3]uint) {
 	C.gk_v_ouuusouuz(o(e), selCopyFromBufferToTexture, o(src), C.gk_u(srcOffset), C.gk_u(bytesPerRow),
 		C.gk_u(bytesPerImage), mtlSize(size), o(dst), C.gk_u(slice), C.gk_u(level), mtlOrigin(origin))
 }
-func computeCommandEncoderCopyFromTextureToBuffer(e computeCommandEncoder, src id, slice, level uint, origin, size [3]uint,
+func computeCommandEncoderCopyFromTextureToBuffer(e computeCommandEncoder, src texture, slice, level uint, origin, size [3]uint,
 	dst buffer, dstOffset, bytesPerRow, bytesPerImage uint) {
 	C.gk_v_ouuzsouuu(o(e), selCopyFromTextureToBuffer, o(src), C.gk_u(slice), C.gk_u(level), mtlOrigin(origin),
 		mtlSize(size), o(dst), C.gk_u(dstOffset), C.gk_u(bytesPerRow), C.gk_u(bytesPerImage))
 }
-func computeCommandEncoderCopyFromTextureToTexture(e computeCommandEncoder, src id, srcSlice, srcLevel uint, srcOrigin, size [3]uint,
-	dst id, dstSlice, dstLevel uint, dstOrigin [3]uint) {
+func computeCommandEncoderCopyFromTextureToTexture(e computeCommandEncoder, src texture, srcSlice, srcLevel uint, srcOrigin, size [3]uint,
+	dst texture, dstSlice, dstLevel uint, dstOrigin [3]uint) {
 	C.gk_v_ouuzsouuz(o(e), selCopyFromTextureToTexture, o(src), C.gk_u(srcSlice), C.gk_u(srcLevel),
 		mtlOrigin(srcOrigin), mtlSize(size), o(dst), C.gk_u(dstSlice), C.gk_u(dstLevel), mtlOrigin(dstOrigin))
 }

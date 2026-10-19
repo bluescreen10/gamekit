@@ -93,11 +93,11 @@ func (d device) newBufferWithLength(length, options uint) buffer {
 	return deviceNewBufferWithLength(d, length, options)
 }
 
-func (d device) newTextureWithDescriptor(descriptor textureDescriptor) id {
+func (d device) newTextureWithDescriptor(descriptor textureDescriptor) texture {
 	return deviceNewTextureWithDescriptor(d, descriptor)
 }
 
-func (d device) newSamplerStateWithDescriptor(descriptor samplerDescriptor) id {
+func (d device) newSamplerStateWithDescriptor(descriptor samplerDescriptor) sampler {
 	return deviceNewSamplerStateWithDescriptor(d, descriptor)
 }
 

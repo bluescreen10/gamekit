@@ -291,11 +291,11 @@ func (c *command) BeginRenderPass(r gpu.RenderTargets) {
 	for i, x := range r.Color {
 		t := b.resource(uint64(x.Texture.H), kindTexture)
 		a := renderPassColorAttachmentDescriptor(arrayObjectAtIndexedSubscript(colors, uint(i)))
-		a.setTexture(t.object)
+		a.setTexture(texture(t.object))
 		a.setLoadAction(loadAction(x.Load))
 		resolve := x.ResolveTexture.IsValid()
 		if resolve {
-			a.setResolveTexture(b.resource(uint64(x.ResolveTexture.H), kindTexture).object)
+			a.setResolveTexture(texture(b.resource(uint64(x.ResolveTexture.H), kindTexture).object))
 		}
 		store := storeAction(x.Store, resolve)
 		a.setStoreAction(store)
@@ -306,11 +306,11 @@ func (c *command) BeginRenderPass(r gpu.RenderTargets) {
 	if x := r.Depth; x != nil {
 		t := b.resource(uint64(x.Texture.H), kindTexture)
 		a := c.pass.depthAttachment()
-		a.setTexture(t.object)
+		a.setTexture(texture(t.object))
 		a.setLoadAction(loadAction(x.Load))
 		resolve := x.ResolveTexture.IsValid()
 		if resolve {
-			a.setResolveTexture(b.resource(uint64(x.ResolveTexture.H), kindTexture).object)
+			a.setResolveTexture(texture(b.resource(uint64(x.ResolveTexture.H), kindTexture).object))
 			a.setDepthResolveFilter(mtlMultisampleDepthResolveFilterSample0)
 		}
 		store := storeAction(x.Store, resolve)
@@ -519,11 +519,11 @@ func (c *command) CopyBuffer(dst, src gpu.Buffer, dstOffset, srcOffset, size uin
 	c.computeEncoder().copyFromBufferToBuffer(buffer(s.object), uint(srcOffset), buffer(d.object), uint(dstOffset), uint(size))
 }
 
-func (c *command) copyTexture(texture gpu.Texture, mip, layer uint32, transferBuffer gpu.Buffer, offset uint64, upload bool) {
+func (c *command) copyTexture(image gpu.Texture, mip, layer uint32, transferBuffer gpu.Buffer, offset uint64, upload bool) {
 	c.ready()
 	c.outside()
 	c.prepareWork()
-	t := c.backend.resource(uint64(texture.H), kindTexture)
+	t := c.backend.resource(uint64(image.H), kindTexture)
 	buf := c.backend.resource(uint64(transferBuffer.H), kindBuffer)
 	check(uint64(mip) < t.mips && t.samples == 1, "invalid copy mip or multisampled texture")
 	check(uint64(layer) < t.layers, "copy layer out of bounds")
@@ -552,9 +552,9 @@ func (c *command) copyTexture(texture gpu.Texture, mip, layer uint32, transferBu
 			at := uint(offset + z*img + y*row)
 			origin := [3]uint{0, uint(y), uint(z)}
 			if upload {
-				e.copyFromBufferToTexture(buffer(buf.object), at, uint(row), uint(row), line, t.object, uint(layer), uint(mip), origin)
+				e.copyFromBufferToTexture(buffer(buf.object), at, uint(row), uint(row), line, texture(t.object), uint(layer), uint(mip), origin)
 			} else {
-				e.copyFromTextureToBuffer(t.object, uint(layer), uint(mip), origin, line, buffer(buf.object), at, uint(row), uint(row))
+				e.copyFromTextureToBuffer(texture(t.object), uint(layer), uint(mip), origin, line, buffer(buf.object), at, uint(row), uint(row))
 			}
 		}
 	}
@@ -580,7 +580,7 @@ func (c *command) CopyTextureToTexture(dst, src gpu.Texture, mip, layer uint32) 
 	check(uint64(layer) < s.layers, "copy layer out of bounds")
 	size := [3]uint{uint(max(s.width>>mip, 1)), uint(max(s.height>>mip, 1)), uint(max(s.depth>>mip, 1))}
 	var origin [3]uint
-	c.computeEncoder().copyFromTextureToTexture(s.object, uint(layer), uint(mip), origin, size, d.object, uint(layer), uint(mip), origin)
+	c.computeEncoder().copyFromTextureToTexture(texture(s.object), uint(layer), uint(mip), origin, size, texture(d.object), uint(layer), uint(mip), origin)
 }
 
 func (c *command) ResetTimestamps(p gpu.QueryPool, n uint32) {

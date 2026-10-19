@@ -478,9 +478,9 @@ func (b *Backend) slot(r *resource) uint32 {
 	r.slot = (*free)[len(*free)-1]
 	*free = (*free)[:len(*free)-1]
 	if r.kind == kindSampler {
-		ids[r.slot] = samplerStateGPUResourceID(r.object)
+		ids[r.slot] = sampler(r.object).gpuResourceID()
 	} else {
-		ids[r.slot] = textureGPUResourceID(r.object)
+		ids[r.slot] = texture(r.object).gpuResourceID()
 	}
 	return r.slot
 }
@@ -551,9 +551,10 @@ func (b *Backend) CreateTexture(d gpu.TextureDescriptor) gpu.Texture {
 	desc.setSampleCount(uint(r.samples))
 	desc.setStorageMode(storage)
 	desc.setUsage(usage)
-	r.object = b.device.newTextureWithDescriptor(desc)
+	object := b.device.newTextureWithDescriptor(desc)
+	r.object = id(object)
 	h := b.add(r)
-	r.object.setLabel(d.Label)
+	object.setLabel(d.Label)
 	// Residency sets do not take memoryless textures, which have no memory to make
 	// resident.
 	if !r.memoryless {
@@ -592,7 +593,7 @@ func (b *Backend) TextureView(t gpu.Texture, k gpu.TextureKind, firstMip, mipCou
 	// A view's base level is the source's firstMip.
 	v.width, v.height, v.depth = max(src.width>>firstMip, 1), max(src.height>>firstMip, 1), max(src.depth>>firstMip, 1)
 	v.slot = 0
-	v.object = textureNewTextureViewWithPixelFormat(src.object, src.format, v.textureType, uint(firstMip), uint(mipCount), uint(firstLayer), uint(layerCount))
+	v.object = id(texture(src.object).newTextureViewWithPixelFormat(src.format, v.textureType, uint(firstMip), uint(mipCount), uint(firstLayer), uint(layerCount)))
 	h := b.add(&v)
 	if !v.memoryless {
 		b.residencySet.enrol(v.object)
@@ -639,7 +640,7 @@ func (b *Backend) CreateSampler(d gpu.SamplerDescriptor) gpu.Sampler {
 	desc.setMaxAnisotropy(uint(max(d.MaxAnisotropy, 1)))
 	desc.setSupportArgumentBuffers(true)
 	desc.setLabel(d.Label)
-	r := &resource{kind: kindSampler, object: b.device.newSamplerStateWithDescriptor(desc)}
+	r := &resource{kind: kindSampler, object: id(b.device.newSamplerStateWithDescriptor(desc))}
 	h := b.add(r)
 	return gpu.Sampler{H: gpu.Handle(h), Index: b.slot(r)}
 }
@@ -1017,11 +1018,12 @@ func (b *Backend) AcquireNext(s gpu.Swapchain) (gpu.Texture, gpu.Fence) {
 	// A drawable is used only as a render attachment; it is never referenced through a
 	// bindless argument table. Keeping it out of the residency set means its
 	// acquire/release cycle costs nothing beyond this call.
-	t := retain(drawableTexture(r.drawable))
+	t := drawableTexture(r.drawable)
+	retain(id(t))
 	tex := &resource{
-		kind: kindTexture, object: t, textureType: mtlTextureType2D, layers: 1, mips: 1, samples: 1,
-		width: uint64(textureWidth(t)), height: uint64(textureHeight(t)), depth: 1,
-		format: uint(texturePixelFormat(t)),
+		kind: kindTexture, object: id(t), textureType: mtlTextureType2D, layers: 1, mips: 1, samples: 1,
+		width: uint64(t.width()), height: uint64(t.height()), depth: 1,
+		format: t.pixelFormat(),
 	}
 	b.next++
 	b.resources[b.next] = tex

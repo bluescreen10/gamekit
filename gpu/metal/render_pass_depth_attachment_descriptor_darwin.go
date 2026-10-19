@@ -20,11 +20,11 @@ func (d renderPassDepthAttachmentDescriptor) setDepthResolveFilter(v uint) {
 	renderPassDepthAttachmentDescriptorSetDepthResolveFilter(d, v)
 }
 
-func (d renderPassDepthAttachmentDescriptor) setTexture(t id) {
+func (d renderPassDepthAttachmentDescriptor) setTexture(t texture) {
 	renderPassAttachmentDescriptor(d).setTexture(t)
 }
 
-func (d renderPassDepthAttachmentDescriptor) setResolveTexture(t id) {
+func (d renderPassDepthAttachmentDescriptor) setResolveTexture(t texture) {
 	renderPassAttachmentDescriptor(d).setResolveTexture(t)
 }
 

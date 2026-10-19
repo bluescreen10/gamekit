@@ -16,11 +16,11 @@ func (d renderPassColorAttachmentDescriptor) setClearColor(red, green, blue, alp
 	renderPassColorAttachmentDescriptorSetClearColor(d, red, green, blue, alpha)
 }
 
-func (d renderPassColorAttachmentDescriptor) setTexture(t id) {
+func (d renderPassColorAttachmentDescriptor) setTexture(t texture) {
 	renderPassAttachmentDescriptor(d).setTexture(t)
 }
 
-func (d renderPassColorAttachmentDescriptor) setResolveTexture(t id) {
+func (d renderPassColorAttachmentDescriptor) setResolveTexture(t texture) {
 	renderPassAttachmentDescriptor(d).setResolveTexture(t)
 }
 

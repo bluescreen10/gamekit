@@ -43,17 +43,17 @@ func (e computeCommandEncoder) copyFromBufferToBuffer(src buffer, srcOffset uint
 }
 
 func (e computeCommandEncoder) copyFromBufferToTexture(src buffer, srcOffset, bytesPerRow, bytesPerImage uint, size [3]uint,
-	dst id, slice, level uint, origin [3]uint) {
+	dst texture, slice, level uint, origin [3]uint) {
 	computeCommandEncoderCopyFromBufferToTexture(e, src, srcOffset, bytesPerRow, bytesPerImage, size, dst, slice, level, origin)
 }
 
-func (e computeCommandEncoder) copyFromTextureToBuffer(src id, slice, level uint, origin, size [3]uint,
+func (e computeCommandEncoder) copyFromTextureToBuffer(src texture, slice, level uint, origin, size [3]uint,
 	dst buffer, dstOffset, bytesPerRow, bytesPerImage uint) {
 	computeCommandEncoderCopyFromTextureToBuffer(e, src, slice, level, origin, size, dst, dstOffset, bytesPerRow, bytesPerImage)
 }
 
-func (e computeCommandEncoder) copyFromTextureToTexture(src id, srcSlice, srcLevel uint, srcOrigin, size [3]uint,
-	dst id, dstSlice, dstLevel uint, dstOrigin [3]uint) {
+func (e computeCommandEncoder) copyFromTextureToTexture(src texture, srcSlice, srcLevel uint, srcOrigin, size [3]uint,
+	dst texture, dstSlice, dstLevel uint, dstOrigin [3]uint) {
 	computeCommandEncoderCopyFromTextureToTexture(e, src, srcSlice, srcLevel, srcOrigin, size, dst, dstSlice, dstLevel, dstOrigin)
 }
 
