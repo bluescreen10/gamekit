@@ -1,47 +1,14 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
-
-/*
-#include "win32_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
 
 import (
 	"errors"
 	"slices"
 	"strings"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
-
-// iconArray holds retained native icons for one call.
-type iconArray struct {
-	pointer unsafe.Pointer
-	icons   []unsafe.Pointer
-}
-
-func newIconArray(sources []ui.IconSource, size float64) *iconArray {
-	array := &iconArray{pointer: C.malloc(C.size_t(max(1, len(sources))) * C.size_t(unsafe.Sizeof(uintptr(0))))}
-	array.icons = unsafe.Slice((*unsafe.Pointer)(array.pointer), max(1, len(sources)))[:len(sources)]
-	for i, source := range sources {
-		array.icons[i] = nativeIcon(source, size)
-	}
-	return array
-}
-
-func (a *iconArray) native() *unsafe.Pointer {
-	return (*unsafe.Pointer)(a.pointer)
-}
-
-func (a *iconArray) free() {
-	for _, icon := range a.icons {
-		C.gkWin32Release(icon)
-	}
-	C.free(a.pointer)
-}
 
 // imageIcons converts images to icon sources.
 func imageIcons(count int, image func(int) ui.IconSource) []ui.IconSource {
@@ -50,13 +17,6 @@ func imageIcons(count int, image func(int) ui.IconSource) []ui.IconSource {
 		sources[i] = image(i)
 	}
 	return sources
-}
-
-func readIDs(read func(*C.size_t) *C.char) []string {
-	var size C.size_t
-	buffer := read(&size)
-	defer C.free(unsafe.Pointer(buffer))
-	return splitNul(unsafe.Pointer(buffer), size)
 }
 
 // ---- Table and list ----
@@ -74,26 +34,16 @@ type table struct {
 	sorts     listeners[func(ui.SortDescriptor)]
 }
 
-func (w *Window) newTable(list bool, columns []ui.TableColumn, selection ui.SelectionMode, owner win32Receiver) (*table, error) {
+func (w *Window) newTable(list bool, columns []ui.TableColumn, selection ui.SelectionMode, owner eventReceiver) (*table, error) {
 	window, err := w.windowHandle()
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]string, len(columns))
-	titles := make([]string, len(columns))
-	widths := make([]C.int, len(columns))
-	sortable := make([]C.int, len(columns))
-	for i, column := range columns {
-		ids[i], titles[i] = column.ID, column.Title
-		widths[i], sortable[i] = C.int(column.Width), boolInt(column.Sortable)
-	}
-	idBuffer, titleBuffer := joinNul(ids), joinNul(titles)
 	result := &table{columns: append([]ui.TableColumn(nil), columns...), selection: selection}
 	if owner == nil {
 		owner = result
 	}
-	native := C.gkWin32TableCreate(window, boolInt(list), bytesPointer(idBuffer), C.size_t(len(idBuffer)),
-		bytesPointer(titleBuffer), C.size_t(len(titleBuffer)), &widths[0], &sortable[0], C.int(selection))
+	native := window.newTable(list, columns, selection)
 	role := ui.RoleTable
 	if list {
 		role = ui.RoleList
@@ -104,45 +54,37 @@ func (w *Window) newTable(list bool, columns []ui.TableColumn, selection ui.Sele
 	return result, nil
 }
 
-// setRows replaces the table rows; cells are row-major by column.
-func (t *table) setRows(ids []string, cells []string, details []string, icons []ui.IconSource) error {
-	native := t.nativePointer()
+// setRows replaces the rows of the table and keeps the selected rows that
+// stay.
+func (t *table) setRows(rows []tableRow) error {
+	native := t.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
 	selected := t.SelectedIDs()
-	idBuffer, cellBuffer, detailBuffer := joinNul(ids), joinNul(cells), joinNul(details)
-	var iconPointer *unsafe.Pointer
-	if icons != nil {
-		array := newIconArray(icons, 16)
-		defer array.free()
-		iconPointer = array.native()
+	native.setRows(rows)
+	t.rowIDs = make([]string, len(rows))
+	for i, row := range rows {
+		t.rowIDs[i] = row.id
 	}
-	C.gkWin32TableSetRows(native, bytesPointer(idBuffer), C.size_t(len(idBuffer)), bytesPointer(cellBuffer),
-		C.size_t(len(cellBuffer)), bytesPointer(detailBuffer), C.size_t(len(detailBuffer)), iconPointer,
-		C.int(max(1, len(t.columns))))
-	t.rowIDs = append([]string(nil), ids...)
 	kept := slices.DeleteFunc(selected, func(id string) bool {
-		return !slices.Contains(ids, id)
+		return !slices.Contains(t.rowIDs, id)
 	})
 	t.selectIDs(kept)
 	return nil
 }
 
 func (t *table) SelectedIDs() []string {
-	native := t.nativePointer()
+	native := t.nativeView()
 	if native == nil {
 		return nil
 	}
-	return readIDs(func(size *C.size_t) *C.char {
-		return C.gkWin32TableSelection(native, size)
-	})
+	return native.selectedRows()
 }
 
 func (t *table) selectIDs(ids []string) {
-	if native := t.nativePointer(); native != nil {
-		buffer := joinNul(ids)
-		C.gkWin32TableSelect(native, bytesPointer(buffer), C.size_t(len(buffer)))
+	if native := t.nativeView(); native != nil {
+		native.selectRows(ids)
 	}
 }
 
@@ -150,7 +92,7 @@ func (t *table) SetSelectedIDs(ids []string) error {
 	if err := ui.ValidateSelectedIDs(t.rowIDs, ids, t.selection); err != nil {
 		return err
 	}
-	if t.nativePointer() == nil {
+	if t.nativeView() == nil {
 		return ui.ErrClosed
 	}
 	t.selectIDs(ids)
@@ -158,13 +100,11 @@ func (t *table) SetSelectedIDs(ids []string) error {
 }
 
 func (t *table) ScrollToItem(id string) error {
-	native := t.nativePointer()
+	native := t.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	value := cString(id)
-	defer freeCString(value)
-	if C.gkWin32TableScrollTo(native, value) == 0 {
+	if !native.scrollToRow(id) {
 		return errors.New("ui: item does not exist")
 	}
 	return nil
@@ -178,20 +118,20 @@ func (t *table) OnActivate(handler ui.ActionHandler) ui.Unsubscribe {
 	return subscribe(&t.activates, handler, handler == nil)
 }
 
-func (t *table) win32Event(event win32Event) {
-	switch event.kind {
-	case C.GK_EVENT_SELECTION:
+func (t *table) receiveEvent(event any) {
+	switch event := event.(type) {
+	case changeEvent:
 		ids := t.SelectedIDs()
 		each(&t.selects, func(handler ui.SelectionIDsHandler) {
 			handler(append([]string(nil), ids...))
 		})
-	case C.GK_EVENT_ACTIVATE:
-		id := event.text
+	case activateEvent:
+		id := event.id
 		each(&t.activates, func(handler ui.ActionHandler) {
 			handler(id)
 		})
-	case C.GK_EVENT_SORT:
-		t.sort = ui.SortDescriptor{ColumnID: event.text, Ascending: event.a != 0}
+	case sortEvent:
+		t.sort = ui.SortDescriptor{ColumnID: event.column, Ascending: event.ascending}
 		sort := t.sort
 		each(&t.sorts, func(handler func(ui.SortDescriptor)) {
 			handler(sort)
@@ -238,16 +178,11 @@ func (l *listView) SetItems(items []ui.ListItem) error {
 	if err := (ui.ListViewOptions{Items: items}).Validate(); err != nil {
 		return err
 	}
-	ids := make([]string, len(items))
-	texts := make([]string, len(items))
-	details := make([]string, len(items))
+	rows := make([]tableRow, len(items))
 	for i, item := range items {
-		ids[i], texts[i], details[i] = item.ID, item.Text, item.Detail
+		rows[i] = tableRow{id: item.ID, cells: []string{item.Text}, detail: item.Detail, icon: newIcon(item.Icon, 16)}
 	}
-	icons := imageIcons(len(items), func(i int) ui.IconSource {
-		return items[i].Icon
-	})
-	if err := l.setRows(ids, texts, details, icons); err != nil {
+	if err := l.setRows(rows); err != nil {
 		return err
 	}
 	l.items = append([]ui.ListItem(nil), items...)
@@ -284,6 +219,7 @@ func (w *Window) CreateTableView(options ui.TableViewOptions) (ui.TableView, err
 func (t *tableView) Columns() []ui.TableColumn {
 	return append([]ui.TableColumn(nil), t.columns...)
 }
+
 func (t *tableView) Rows() []ui.TableRow {
 	return append([]ui.TableRow(nil), t.rows...)
 }
@@ -292,15 +228,14 @@ func (t *tableView) SetRows(rows []ui.TableRow) error {
 	if err := (ui.TableViewOptions{Columns: t.columns, Rows: rows}).Validate(); err != nil {
 		return err
 	}
-	ids := make([]string, len(rows))
-	cells := make([]string, 0, len(rows)*len(t.columns))
+	nativeRows := make([]tableRow, len(rows))
 	for i, row := range rows {
-		ids[i] = row.ID
-		for _, column := range t.columns {
-			cells = append(cells, row.Values[column.ID])
+		nativeRows[i] = tableRow{id: row.ID, cells: make([]string, len(t.columns))}
+		for j, column := range t.columns {
+			nativeRows[i].cells[j] = row.Values[column.ID]
 		}
 	}
-	if err := t.setRows(ids, cells, nil, nil); err != nil {
+	if err := t.setRows(nativeRows); err != nil {
 		return err
 	}
 	t.rows = append([]ui.TableRow(nil), rows...)
@@ -310,9 +245,11 @@ func (t *tableView) SetRows(rows []ui.TableRow) error {
 func (t *tableView) Sort() ui.SortDescriptor {
 	return t.sort
 }
+
 func (t *tableView) OnSortChange(handler func(ui.SortDescriptor)) ui.Unsubscribe {
 	return subscribe(&t.sorts, handler, handler == nil)
 }
+
 func (t *tableView) PreferredSize() ui.Size {
 	width := 0
 	for _, column := range t.columns {
@@ -340,13 +277,13 @@ type outline struct {
 	selects   listeners[ui.SelectionIDsHandler]
 }
 
-func (w *Window) newOutline(navigation bool, selection ui.SelectionMode, role ui.AccessibilityRole, owner win32Receiver) (*outline, error) {
+func (w *Window) newOutline(navigation bool, selection ui.SelectionMode, role ui.AccessibilityRole, owner eventReceiver) (*outline, error) {
 	window, err := w.windowHandle()
 	if err != nil {
 		return nil, err
 	}
 	result := &outline{selection: selection}
-	native := C.gkWin32OutlineCreate(window, boolInt(navigation), boolInt(selection == ui.SelectionMultiple))
+	native := window.newOutline(navigation, selection == ui.SelectionMultiple)
 	if result.widgetBase, err = w.newComponent(native, role, owner); err != nil {
 		return nil, err
 	}
@@ -354,60 +291,31 @@ func (w *Window) newOutline(navigation bool, selection ui.SelectionMode, role ui
 }
 
 func (o *outline) setNodes(parent *string, nodes []outlineNode) error {
-	native := o.nativePointer()
+	native := o.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	depths := make([]C.int, max(1, len(nodes)))
-	flags := make([]C.int, max(1, len(nodes)))
-	ids := make([]string, len(nodes))
-	texts := make([]string, len(nodes))
-	badges := make([]string, len(nodes))
-	icons := make([]ui.IconSource, len(nodes))
-	for i, node := range nodes {
-		depths[i] = C.int(node.depth)
-		if node.hasChildren {
-			flags[i] |= 1
-		}
-		if node.group {
-			flags[i] |= 2
-		}
-		ids[i], texts[i], badges[i], icons[i] = node.id, node.text, node.badge, node.icon
-	}
-	idBuffer, textBuffer, badgeBuffer := joinNul(ids), joinNul(texts), joinNul(badges)
-	array := newIconArray(icons, 16)
-	defer array.free()
-	var parentValue *C.char
-	if parent != nil {
-		parentValue = cString(*parent)
-		defer freeCString(parentValue)
-	}
-	C.gkWin32OutlineSetNodes(native, parentValue, &depths[0], &flags[0], bytesPointer(idBuffer), C.size_t(len(idBuffer)),
-		bytesPointer(textBuffer), C.size_t(len(textBuffer)), bytesPointer(badgeBuffer), C.size_t(len(badgeBuffer)),
-		array.native(), C.int(len(nodes)))
+	native.setOutlineNodes(parent, nodes)
 	return nil
 }
 
 func (o *outline) SelectedIDs() []string {
-	native := o.nativePointer()
+	native := o.nativeView()
 	if native == nil {
 		return nil
 	}
-	return readIDs(func(size *C.size_t) *C.char {
-		return C.gkWin32OutlineSelection(native, size)
-	})
+	return native.selectedOutlineItems()
 }
 
 func (o *outline) SetSelectedIDs(ids []string) error {
 	if err := ui.ValidateSelectedIDs(o.known, ids, o.selection); err != nil {
 		return err
 	}
-	native := o.nativePointer()
+	native := o.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	buffer := joinNul(ids)
-	C.gkWin32OutlineSelect(native, bytesPointer(buffer), C.size_t(len(buffer)))
+	native.selectOutlineItems(ids)
 	return nil
 }
 
@@ -415,15 +323,15 @@ func (o *outline) OnSelectionChange(handler ui.SelectionIDsHandler) ui.Unsubscri
 	return subscribe(&o.selects, handler, handler == nil)
 }
 
-func (o *outline) win32Event(event win32Event) {
-	switch event.kind {
-	case C.GK_EVENT_SELECTION:
+func (o *outline) receiveEvent(event any) {
+	switch event := event.(type) {
+	case changeEvent:
 		ids := o.SelectedIDs()
 		each(&o.selects, func(handler ui.SelectionIDsHandler) {
 			handler(append([]string(nil), ids...))
 		})
-	case C.GK_EVENT_EXPAND:
-		id := event.text
+	case expandEvent:
+		id := event.id
 		each(&o.expands, func(handler ui.ActionHandler) {
 			handler(id)
 		})
@@ -472,10 +380,6 @@ func (w *Window) CreateTreeView(options ui.TreeViewOptions) (ui.TreeView, error)
 		return nil, err
 	}
 	return result, nil
-}
-
-func (t *treeView) win32Event(event win32Event) {
-	t.outline.win32Event(event)
 }
 
 func (t *treeView) Roots() []ui.TreeNode {
@@ -537,23 +441,19 @@ func (t *treeView) SetChildren(id string, children []ui.TreeNode) error {
 }
 
 func (t *treeView) IsExpanded(id string) bool {
-	native := t.nativePointer()
+	native := t.nativeView()
 	if native == nil {
 		return false
 	}
-	value := cString(id)
-	defer freeCString(value)
-	return C.gkWin32OutlineExpanded(native, value) != 0
+	return native.isOutlineItemExpanded(id)
 }
 
 func (t *treeView) SetExpanded(id string, expanded bool) error {
-	native := t.nativePointer()
+	native := t.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	value := cString(id)
-	defer freeCString(value)
-	if C.gkWin32OutlineSetExpanded(native, value, boolInt(expanded)) == 0 {
+	if !native.setOutlineItemExpanded(id, expanded) {
 		return errors.New("ui: tree node does not exist")
 	}
 	return nil
@@ -590,9 +490,9 @@ func (w *Window) CreateNavigationList(options ui.NavigationListOptions) (ui.Navi
 	return result, nil
 }
 
-func (n *navigationList) win32Event(event win32Event) {
-	n.outline.win32Event(event)
-	if event.kind == C.GK_EVENT_SELECTION {
+func (n *navigationList) receiveEvent(event any) {
+	n.outline.receiveEvent(event)
+	if _, ok := event.(changeEvent); ok {
 		id := n.SelectedID()
 		each(&n.changes, func(handler ui.ActionHandler) {
 			handler(id)
@@ -666,7 +566,7 @@ func (w *Window) CreateCollectionView(options ui.CollectionViewOptions) (ui.Coll
 		return nil, err
 	}
 	result := &collectionView{selection: options.Selection}
-	native := C.gkWin32CollectionCreate(window, C.int(options.ItemSize.Width), C.int(options.ItemSize.Height), C.int(options.Selection))
+	native := window.newCollection(options.ItemSize.Width, options.ItemSize.Height, options.Selection)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleGrid, result); err != nil {
 		return nil, err
 	}
@@ -698,46 +598,32 @@ func (c *collectionView) SetItems(items []ui.CollectionItem) error {
 		}
 		seen[id] = true
 	}
-	native := c.nativePointer()
+	native := c.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	texts := make([]string, len(items))
-	for i, item := range items {
-		texts[i] = item.Text
-	}
-	icons := imageIcons(len(items), func(i int) ui.IconSource {
-		return ui.IconSource{Image: items[i].Image}
-	})
-	array := newIconArray(icons, 0)
-	defer array.free()
-	idBuffer, textBuffer := joinNul(ids), joinNul(texts)
-	C.gkWin32CollectionSetItems(native, bytesPointer(idBuffer), C.size_t(len(idBuffer)), bytesPointer(textBuffer),
-		C.size_t(len(textBuffer)), array.native(), C.int(len(items)))
+	native.setCollectionItems(items)
 	c.items = append([]ui.CollectionItem(nil), items...)
 	return nil
 }
 
 func (c *collectionView) SelectedIDs() []string {
-	native := c.nativePointer()
+	native := c.nativeView()
 	if native == nil {
 		return nil
 	}
-	return readIDs(func(size *C.size_t) *C.char {
-		return C.gkWin32CollectionSelection(native, size)
-	})
+	return native.selectedCollectionItems()
 }
 
 func (c *collectionView) SetSelectedIDs(ids []string) error {
 	if err := ui.ValidateSelectedIDs(c.ids(c.items), ids, c.selection); err != nil {
 		return err
 	}
-	native := c.nativePointer()
+	native := c.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	buffer := joinNul(ids)
-	C.gkWin32CollectionSelect(native, bytesPointer(buffer), C.size_t(len(buffer)))
+	native.selectCollectionItems(ids)
 	return nil
 }
 
@@ -749,8 +635,8 @@ func (c *collectionView) OnActivate(handler ui.ActionHandler) ui.Unsubscribe {
 	return subscribe(&c.activates, handler, handler == nil)
 }
 
-func (c *collectionView) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_SELECTION {
+func (c *collectionView) receiveEvent(event any) {
+	if _, ok := event.(changeEvent); ok {
 		ids := c.SelectedIDs()
 		each(&c.selects, func(handler ui.SelectionIDsHandler) {
 			handler(append([]string(nil), ids...))
@@ -777,7 +663,7 @@ func (w *Window) CreateBreadcrumbs(options ui.BreadcrumbsOptions) (ui.Breadcrumb
 		return nil, err
 	}
 	result := &breadcrumbs{}
-	if result.widgetBase, err = w.newComponent(C.gkWin32BreadcrumbsCreate(window), ui.RoleNavigation, result); err != nil {
+	if result.widgetBase, err = w.newComponent(window.newBreadcrumbs(), ui.RoleNavigation, result); err != nil {
 		return nil, err
 	}
 	if err := result.SetItems(options.Items); err != nil {
@@ -801,12 +687,11 @@ func (b *breadcrumbs) SetItems(items []ui.BreadcrumbItem) error {
 		seen[item.ID] = true
 		titles[i] = item.Text
 	}
-	native := b.nativePointer()
+	native := b.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	buffer := joinNul(titles)
-	C.gkWin32BreadcrumbsSetItems(native, bytesPointer(buffer), C.size_t(len(buffer)))
+	native.setBreadcrumbs(titles)
 	b.items = append([]ui.BreadcrumbItem(nil), items...)
 	return nil
 }
@@ -815,9 +700,10 @@ func (b *breadcrumbs) OnActivate(handler ui.ActionHandler) ui.Unsubscribe {
 	return subscribe(&b.activates, handler, handler == nil)
 }
 
-func (b *breadcrumbs) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_ACTIVATE && event.a >= 0 && event.a < len(b.items) {
-		id := b.items[event.a].ID
+func (b *breadcrumbs) receiveEvent(event any) {
+	activate, ok := event.(activateEvent)
+	if ok && activate.index >= 0 && activate.index < len(b.items) {
+		id := b.items[activate.index].ID
 		each(&b.activates, func(handler ui.ActionHandler) {
 			handler(id)
 		})
@@ -842,7 +728,7 @@ func (w *Window) CreatePagination(options ui.PaginationOptions) (ui.Pagination, 
 		return nil, err
 	}
 	result := &pagination{count: options.PageCount, selected: options.SelectedPage}
-	native := C.gkWin32PaginationCreate(window, C.int(options.PageCount), C.int(options.SelectedPage), boolInt(options.Compact))
+	native := window.newPagination(options.PageCount, options.SelectedPage, options.Compact)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleNavigation, result); err != nil {
 		return nil, err
 	}
@@ -852,14 +738,17 @@ func (w *Window) CreatePagination(options ui.PaginationOptions) (ui.Pagination, 
 func (p *pagination) PageCount() int {
 	return p.count
 }
+
 func (p *pagination) SelectedPage() int {
 	return p.selected
 }
+
 func (p *pagination) apply() {
-	if native := p.nativePointer(); native != nil {
-		C.gkWin32PaginationSet(native, C.int(p.count), C.int(p.selected))
+	if native := p.nativeView(); native != nil {
+		native.setPagination(p.count, p.selected)
 	}
 }
+
 func (p *pagination) SetPageCount(count int) error {
 	if count <= 0 {
 		return errors.New("ui: pagination requires at least one page")
@@ -869,6 +758,7 @@ func (p *pagination) SetPageCount(count int) error {
 	p.apply()
 	return nil
 }
+
 func (p *pagination) SetSelectedPage(page int) error {
 	if err := (ui.PaginationOptions{PageCount: p.count, SelectedPage: page}).Validate(); err != nil {
 		return err
@@ -877,12 +767,14 @@ func (p *pagination) SetSelectedPage(page int) error {
 	p.apply()
 	return nil
 }
+
 func (p *pagination) OnChange(handler ui.SelectionChangeHandler) ui.Unsubscribe {
 	return subscribe(&p.changes, handler, handler == nil)
 }
-func (p *pagination) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_SELECTION {
-		p.selected = event.a
+
+func (p *pagination) receiveEvent(event any) {
+	if change, ok := event.(pageChangeEvent); ok {
+		p.selected = change.page
 		page := p.selected
 		each(&p.changes, func(handler ui.SelectionChangeHandler) {
 			handler(page)

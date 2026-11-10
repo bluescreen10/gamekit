@@ -1,26 +1,14 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
-
-/*
-#include "win32_bridge.h"
-#include "window_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
 
 import (
 	"errors"
 	"fmt"
 	"image/color"
 	"math"
-	"runtime/cgo"
-	"strconv"
-	"strings"
 	"sync"
-	"unsafe"
 
-	"github.com/bluescreen10/gamekit/keyboard"
 	"github.com/bluescreen10/gamekit/ui"
 	"github.com/bluescreen10/gamekit/ui/internal/unsupported"
 )
@@ -62,8 +50,6 @@ type windowFlags struct {
 
 // attachExtensions connects the extended window contract after creation.
 func (w *Window) attachExtensions(options WindowOptions) error {
-	window := w.nativeWindowPointer()
-	C.gkWin32WindowAttach(window, C.uintptr_t(w.handle))
 	attachApplication()
 	w.flags = windowFlags{
 		resizable:   options.Resizable,
@@ -89,13 +75,6 @@ func (w *Window) attachExtensions(options WindowOptions) error {
 		}
 	}
 	return nil
-}
-
-// detachNativeWindow disconnects the extended contract before destruction.
-func detachNativeWindow(native unsafe.Pointer) {
-	if window := C.gkWin32WindowNativePointer(native); window != nil {
-		C.gkWin32WindowDetach(window)
-	}
 }
 
 // MinimumSize implements ui.Window.MinimumSize.
@@ -132,12 +111,12 @@ func (w *Window) setSizeLimits(minimum, maximum ui.Size) error {
 	if err := ui.ValidateSizeConstraints(minimum, maximum); err != nil {
 		return err
 	}
-	window := w.nativeWindowPointer()
+	window := w.nativeWindow()
 	if window == nil {
 		return ui.ErrClosed
 	}
-	C.gkWin32WindowSetSizeLimits(window, C.int(minimum.Width), C.int(minimum.Height),
-		C.int(maximum.Width), C.int(maximum.Height))
+	window.setSizeLimits(minimum.Width, minimum.Height,
+		maximum.Width, maximum.Height)
 	w.mu.Lock()
 	w.flags.minimum = minimum
 	w.flags.maximum = maximum
@@ -178,8 +157,8 @@ func (w *Window) SetBorderless(borderless bool) {
 }
 
 func (w *Window) applyStyle(flags windowFlags) {
-	if window := w.nativeWindowPointer(); window != nil {
-		C.gkWin32WindowSetStyle(window, boolInt(flags.resizable), boolInt(flags.borderless))
+	if window := w.nativeWindow(); window != nil {
+		window.setStyle(flags.resizable, flags.borderless)
 	}
 }
 
@@ -192,22 +171,22 @@ func (w *Window) IsAlwaysOnTop() bool {
 
 // SetAlwaysOnTop implements ui.Window.SetAlwaysOnTop.
 func (w *Window) SetAlwaysOnTop(alwaysOnTop bool) {
-	window := w.nativeWindowPointer()
+	window := w.nativeWindow()
 	if window == nil {
 		return
 	}
-	C.gkWin32WindowSetAlwaysOnTop(window, boolInt(alwaysOnTop))
+	window.setAlwaysOnTop(alwaysOnTop)
 	w.mu.Lock()
 	w.flags.alwaysOnTop = alwaysOnTop
 	w.mu.Unlock()
 }
 
-func (w *Window) windowCall(call func(unsafe.Pointer) C.int, failure string) error {
-	window := w.nativeWindowPointer()
+func (w *Window) windowCall(call func(*nativeWindow) bool, failure string) error {
+	window := w.nativeWindow()
 	if window == nil {
 		return ui.ErrClosed
 	}
-	if call(window) == 0 {
+	if !call(window) {
 		return errors.New("ui/win32: " + failure)
 	}
 	return nil
@@ -217,16 +196,16 @@ func (w *Window) windowCall(call func(unsafe.Pointer) C.int, failure string) err
 // window, which the window manager does not minimize. A hidden window is
 // shown first, because a window manager minimizes only mapped windows.
 func (w *Window) Minimize() error {
-	return w.windowCall(func(window unsafe.Pointer) C.int {
-		return C.gkWin32WindowMinimize(window)
+	return w.windowCall(func(window *nativeWindow) bool {
+		return window.minimize()
 	},
 		"the window could not be minimized")
 }
 
 // Maximize implements ui.Window.Maximize.
 func (w *Window) Maximize() error {
-	return w.windowCall(func(window unsafe.Pointer) C.int {
-		return C.gkWin32WindowMaximize(window)
+	return w.windowCall(func(window *nativeWindow) bool {
+		return window.maximize()
 	},
 		"the window could not be maximized")
 }
@@ -234,29 +213,29 @@ func (w *Window) Maximize() error {
 // Restore implements ui.Window.Restore. Leaving fullscreen completes
 // asynchronously.
 func (w *Window) Restore() error {
-	return w.windowCall(func(window unsafe.Pointer) C.int {
-		return C.gkWin32WindowRestore(window)
+	return w.windowCall(func(window *nativeWindow) bool {
+		return window.restore()
 	},
 		"the window could not be restored")
 }
 
 // IsMinimized implements ui.Window.IsMinimized.
 func (w *Window) IsMinimized() bool {
-	window := w.nativeWindowPointer()
-	return window != nil && C.gkWin32WindowIsMinimized(window) != 0
+	window := w.nativeWindow()
+	return window != nil && window.isMinimized()
 }
 
 // IsMaximized implements ui.Window.IsMaximized.
 func (w *Window) IsMaximized() bool {
-	window := w.nativeWindowPointer()
-	return window != nil && C.gkWin32WindowIsMaximized(window) != 0
+	window := w.nativeWindow()
+	return window != nil && window.isMaximized()
 }
 
 // IsFullscreen implements ui.Window.IsFullscreen. It reports a completed
 // transition into the fullscreen Space of the window.
 func (w *Window) IsFullscreen() bool {
-	window := w.nativeWindowPointer()
-	return window != nil && C.gkWin32WindowIsFullscreen(window) != 0
+	window := w.nativeWindow()
+	return window != nil && window.isFullscreen()
 }
 
 // OnFullscreenChange reports completed fullscreen transitions.
@@ -272,11 +251,11 @@ func (w *Window) SetFullscreen(fullscreen bool) error {
 	if w.Kind() == ui.WindowUtility && fullscreen {
 		return errors.New("ui: utility window cannot be fullscreen")
 	}
-	window := w.nativeWindowPointer()
+	window := w.nativeWindow()
 	if window == nil {
 		return ui.ErrClosed
 	}
-	if C.gkWin32WindowSetFullscreen(window, boolInt(fullscreen)) == 0 {
+	if !window.setFullscreen(fullscreen) {
 		return fmt.Errorf("ui/win32: fullscreen needs an unlocked, awake display: %w", ui.ErrUnavailable)
 	}
 	return nil
@@ -284,56 +263,53 @@ func (w *Window) SetFullscreen(fullscreen bool) error {
 
 // canBecomeKey reports whether Windows lets the window take keyboard focus.
 func (w *Window) canBecomeKey() bool {
-	window := w.nativeWindowPointer()
-	return window != nil && C.gkWin32WindowCanBecomeKey(window) != 0
+	window := w.nativeWindow()
+	return window != nil && window.canBecomeKey()
 }
 
 // Screen implements ui.Window.Screen.
 func (w *Window) Screen() ui.Screen {
-	window := w.nativeWindowPointer()
+	window := w.nativeWindow()
 	if window == nil {
 		return ui.Screen{}
 	}
-	var values [11]C.double
-	var name *C.char
-	C.gkWin32WindowScreen(window, &values[0], &name)
-	rect := func(offset int) ui.Rect {
-		return ui.Rect{
-			Position: ui.Point{X: int(values[offset]), Y: int(values[offset+1])},
-			Size:     ui.Size{Width: int(values[offset+2]), Height: int(values[offset+3])},
-		}
-	}
+	screen := window.screen()
 	return ui.Screen{
-		Name:        goStringFree(name),
-		Bounds:      rect(0),
-		WorkArea:    rect(4),
-		ScaleFactor: float64(values[8]),
-		DPI:         float64(values[9]),
-		RefreshRate: float64(values[10]),
+		Name: screen.name,
+		Bounds: ui.Rect{
+			Position: ui.Point{X: int(screen.x), Y: int(screen.y)},
+			Size:     ui.Size{Width: int(screen.width), Height: int(screen.height)},
+		},
+		WorkArea: ui.Rect{
+			Position: ui.Point{X: int(screen.workX), Y: int(screen.workY)},
+			Size:     ui.Size{Width: int(screen.workWidth), Height: int(screen.workHeight)},
+		},
+		ScaleFactor: screen.scale,
+		DPI:         screen.dpi,
+		RefreshRate: screen.refresh,
 	}
 }
 
 // SystemPreferences implements ui.Window.SystemPreferences.
 func (w *Window) SystemPreferences() ui.SystemPreferences {
-	return systemPreferences(w.nativeWindowPointer())
+	return systemPreferences(w.nativeWindow())
 }
 
-func systemPreferences(window unsafe.Pointer) ui.SystemPreferences {
-	var values [10]C.double
-	var locale *C.char
-	C.gkWin32SystemPreferences(window, &values[0], &locale)
-	channel := func(value C.double) uint8 {
+func systemPreferences(window *nativeWindow) ui.SystemPreferences {
+	values := systemPreferenceValuesOf(window)
+	channel := func(value float32) uint8 {
 		return uint8(math.Round(math.Max(0, math.Min(1, float64(value))) * 255))
 	}
+	accent := values.accent
 	return ui.SystemPreferences{
-		ResolvedTheme:       ui.Theme(values[0]),
-		TextScale:           float64(values[1]),
-		HighContrast:        values[2] != 0,
-		ReducedMotion:       values[3] != 0,
-		ReducedTransparency: values[4] != 0,
-		AccentColor:         color.RGBA{R: channel(values[5]), G: channel(values[6]), B: channel(values[7]), A: channel(values[8])},
-		Locale:              goStringFree(locale),
-		RightToLeft:         values[9] != 0,
+		ResolvedTheme:       ui.Theme(values.theme),
+		TextScale:           values.textScale,
+		HighContrast:        values.highContrast,
+		ReducedMotion:       values.reduceMotion,
+		ReducedTransparency: values.reduceTransparency,
+		AccentColor:         color.RGBA{R: channel(accent.r), G: channel(accent.g), B: channel(accent.b), A: channel(accent.a)},
+		Locale:              values.locale,
+		RightToLeft:         values.rightToLeft,
 	}
 }
 
@@ -387,8 +363,8 @@ func (w *Window) OnFileDrop(handler ui.FileDropHandler) ui.Unsubscribe {
 
 // updateFileDrops registers the window for file drops while it has handlers.
 func (w *Window) updateFileDrops() {
-	if window := w.nativeWindowPointer(); window != nil {
-		C.gkWin32WindowAcceptFiles(window, boolInt(len(w.events.fileDrops.snapshot()) > 0))
+	if window := w.nativeWindow(); window != nil {
+		window.setAcceptFiles(len(w.events.fileDrops.snapshot()) > 0)
 	}
 }
 
@@ -469,20 +445,18 @@ func each[T any](list *listeners[T], call func(T)) {
 	}
 }
 
-// win32Event receives window events from the native layer.
-func (w *Window) win32Event(event win32Event) {
-	switch event.kind {
-	case C.GK_EVENT_WINDOW_RESIZE:
-		size := ui.Size{Width: int(event.x), Height: int(event.y)}
+// receiveEvent receives the events of the native window.
+func (w *Window) receiveEvent(event any) {
+	switch event := event.(type) {
+	case windowResizeEvent:
 		each(&w.events.resizes, func(handler ui.ResizeHandler) {
-			handler(size)
+			handler(event.size)
 		})
-	case C.GK_EVENT_WINDOW_FULLSCREEN:
-		fullscreen := event.a != 0
+	case fullscreenEvent:
 		each(&w.events.fullscreens, func(handler ui.FullscreenHandler) {
-			handler(fullscreen)
+			handler(event.fullscreen)
 		})
-	case C.GK_EVENT_WINDOW_FOCUS:
+	case focusEvent:
 		w.mu.RLock()
 		bar := w.menuBar
 		w.mu.RUnlock()
@@ -492,96 +466,32 @@ func (w *Window) win32Event(event win32Event) {
 		each(&w.events.focuses, func(handler ui.FocusHandler) {
 			handler()
 		})
-	case C.GK_EVENT_WINDOW_BLUR:
+	case blurEvent:
 		each(&w.events.blurs, func(handler ui.FocusHandler) {
 			handler()
 		})
-	case C.GK_EVENT_WINDOW_THEME:
-		theme := ui.Theme(event.a)
+	case themeEvent:
 		each(&w.events.themes, func(handler ui.ThemeChangeHandler) {
-			handler(theme)
+			handler(event.theme)
 		})
 		w.dispatchPreferences()
-	case C.GK_EVENT_WINDOW_FILE_DROP:
-		paths := strings.Split(event.text, "\x1e")
+	case fileDropEvent:
 		each(&w.events.fileDrops, func(handler ui.FileDropHandler) {
-			handler(append([]string(nil), paths...))
+			handler(append([]string(nil), event.paths...))
 		})
-	case C.GK_EVENT_POINTER_MOVE:
-		move := ui.PointerMoveEvent{
-			X: event.x, Y: event.y, DeltaX: event.z, DeltaY: event.w,
-			Modifiers: keyboard.ModifierKey(event.a),
-		}
+	case ui.PointerMoveEvent:
 		each(&w.events.pointerMoves, func(handler ui.PointerMoveHandler) {
-			handler(move)
+			handler(event)
 		})
-	case C.GK_EVENT_POINTER_ENTER:
-		crossing := ui.PointerCrossingEvent{X: event.x, Y: event.y}
+	case pointerEnterEvent:
 		each(&w.events.enters, func(handler ui.PointerCrossingHandler) {
-			handler(crossing)
+			handler(event.crossing)
 		})
-	case C.GK_EVENT_POINTER_LEAVE:
-		crossing := ui.PointerCrossingEvent{X: event.x, Y: event.y}
+	case pointerLeaveEvent:
 		each(&w.events.leaves, func(handler ui.PointerCrossingHandler) {
-			handler(crossing)
+			handler(event.crossing)
 		})
-	case C.GK_EVENT_IME:
-		ime := ui.IMEEvent{
-			Kind:      ui.IMEEventKind(event.a),
-			Text:      event.text,
-			Selection: utf16Range(event.text, event.b, event.c),
-		}
-		each(&w.events.imes, func(handler ui.IMEHandler) {
-			handler(ime)
-		})
-	case C.GK_EVENT_TOUCH:
-		touch := ui.TouchEvent{ID: event.a, Phase: ui.InputPhase(event.b), X: event.x, Y: event.y, Pressure: event.z}
-		each(&w.events.touches, func(handler ui.TouchHandler) {
-			handler(touch)
-		})
-	case C.GK_EVENT_PEN:
-		pen := ui.PenEvent{
-			Phase: ui.InputPhase(event.a), X: event.x, Y: event.y, Pressure: event.z, Rotation: event.w,
-			Eraser: event.c&1 != 0, BarrelButton: event.c&2 != 0, DeviceID: event.b,
-		}
-		if fields := strings.Fields(event.text); len(fields) == 2 {
-			pen.TiltX, _ = strconv.ParseFloat(fields[0], 64)
-			pen.TiltY, _ = strconv.ParseFloat(fields[1], 64)
-		}
-		each(&w.events.pens, func(handler ui.PenHandler) {
-			handler(pen)
-		})
-	case C.GK_EVENT_GESTURE:
-		gesture := ui.GestureEvent{Kind: ui.GestureKind(event.a), Phase: ui.InputPhase(event.b), X: event.x, Y: event.y}
-		switch gesture.Kind {
-		case ui.GestureMagnify:
-			gesture.Magnification = event.z
-		case ui.GestureRotate:
-			gesture.Rotation = event.z
-		case ui.GestureSwipe:
-			gesture.DeltaX, gesture.DeltaY = event.z, event.w
-		}
-		each(&w.events.gestures, func(handler ui.GestureHandler) {
-			handler(gesture)
-		})
-	case C.GK_EVENT_DEVICE:
-		w.dispatchDevice(deviceEvent(event))
 	}
-}
-
-func deviceEvent(event win32Event) ui.DeviceChangeEvent {
-	return ui.DeviceChangeEvent{
-		Kind:      ui.DeviceKind(event.a),
-		DeviceID:  event.b,
-		Connected: event.c != 0,
-		Name:      event.text,
-	}
-}
-
-func (w *Window) dispatchDevice(device ui.DeviceChangeEvent) {
-	each(&w.events.devices, func(handler ui.DeviceChangeHandler) {
-		handler(device)
-	})
 }
 
 func (w *Window) dispatchPreferences() {
@@ -594,9 +504,9 @@ func (w *Window) dispatchPreferences() {
 	})
 }
 
-// win32Query answers whether a user close request may proceed.
-func (w *Window) win32Query(event win32Event) bool {
-	if event.kind != C.GK_EVENT_WINDOW_CLOSE_REQUEST {
+// answerQuery asks the close request handlers whether the window can close.
+func (w *Window) answerQuery(query any) bool {
+	if _, ok := query.(closeRequest); !ok {
 		return true
 	}
 	allow := true
@@ -631,15 +541,11 @@ func utf16Range(text string, start, length int) ui.TextRange {
 // window.
 type application struct{}
 
-var (
-	applicationOnce   sync.Once
-	applicationHandle cgo.Handle
-)
+var applicationOnce sync.Once
 
 func attachApplication() {
 	applicationOnce.Do(func() {
-		applicationHandle = cgo.NewHandle(&application{})
-		C.gkWin32AppAttach(C.uintptr_t(applicationHandle))
+		setAppReceiver(&application{})
 	})
 }
 
@@ -653,10 +559,10 @@ func liveWindows() []*Window {
 	return result
 }
 
-// win32Query asks the quit request handlers of every window whether the
-// application may quit.
-func (*application) win32Query(event win32Event) bool {
-	if event.kind != C.GK_EVENT_APP_QUIT_REQUEST {
+// answerQuery asks the quit request handlers of every window whether the
+// application can quit.
+func (*application) answerQuery(query any) bool {
+	if _, ok := query.(quitRequest); !ok {
 		return true
 	}
 	allow := true
@@ -670,21 +576,20 @@ func (*application) win32Query(event win32Event) bool {
 	return allow
 }
 
-func (*application) win32Event(event win32Event) {
+func (*application) receiveEvent(event any) {
+	activation, ok := event.(appActivationEvent)
+	if !ok {
+		return
+	}
 	for _, window := range liveWindows() {
-		switch event.kind {
-		case C.GK_EVENT_APP_ACTIVE:
+		if activation.active {
 			each(&window.events.activated, func(handler ui.FocusHandler) {
 				handler()
 			})
-		case C.GK_EVENT_APP_INACTIVE:
+		} else {
 			each(&window.events.deactivated, func(handler ui.FocusHandler) {
 				handler()
 			})
-		case C.GK_EVENT_PREFERENCES:
-			window.dispatchPreferences()
-		case C.GK_EVENT_DEVICE:
-			window.dispatchDevice(deviceEvent(event))
 		}
 	}
 }

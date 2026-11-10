@@ -1,4 +1,4 @@
-//go:build cgo && (darwin || linux || windows)
+//go:build windows || (cgo && (darwin || linux))
 
 package defaultui_test
 

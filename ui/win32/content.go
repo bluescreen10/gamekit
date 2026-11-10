@@ -1,19 +1,12 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
-
-/*
-#include "win32_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
 
 import (
 	"errors"
 	"fmt"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -35,29 +28,26 @@ func (w *Window) CreateIcon(options ui.IconOptions) (ui.Icon, error) {
 		return nil, err
 	}
 	result := &icon{options: options}
-	if result.widgetBase, err = w.newComponent(C.gkWin32IconCreate(window), ui.RoleImage, result); err != nil {
+	if result.widgetBase, err = w.newComponent(window.newIconView(), ui.RoleImage, result); err != nil {
 		return nil, err
 	}
 	result.apply()
 	return result, nil
 }
 
-func (i *icon) win32Event(win32Event) {
+func (i *icon) receiveEvent(event any) {
 	// An icon sends no native events.
 }
 
 func (i *icon) apply() {
-	native := i.nativePointer()
+	native := i.nativeView()
 	if native == nil {
 		return
 	}
 	size := i.options.Size
 	pointSize := float64(max(size.Width, size.Height))
-	image := nativeIcon(i.Source(), pointSize)
-	defer C.gkWin32Release(image)
-	name := cString(i.options.AccessibilityName)
-	defer freeCString(name)
-	C.gkWin32IconSet(native, image, C.int(size.Width), C.int(size.Height), C.int(i.options.Tint), name)
+	image := newIcon(i.Source(), pointSize)
+	native.setIcon(image, size.Width, size.Height, int(i.options.Tint), i.options.AccessibilityName)
 }
 
 func (i *icon) Source() ui.IconSource {
@@ -68,7 +58,7 @@ func (i *icon) SetSource(source ui.IconSource) error {
 	if source.IsZero() {
 		return errors.New("ui: icon requires a system name or image")
 	}
-	if i.nativePointer() == nil {
+	if i.nativeView() == nil {
 		return ui.ErrClosed
 	}
 	i.options.SystemName, i.options.Image = source.SystemName, source.Image
@@ -84,40 +74,39 @@ type document struct {
 	links   listeners[func(string)]
 }
 
-func (d *document) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_TEXT_CHANGE {
+func (d *document) receiveEvent(event any) {
+	if _, ok := event.(textChangeEvent); ok {
 		each(&d.changes, func(handler ui.FocusHandler) {
 			handler()
 		})
 	}
 }
 
-// win32Query reports whether a link click was handled; without handlers the
-// text view opens the link itself.
-func (d *document) win32Query(event win32Event) bool {
-	if event.kind != C.GK_EVENT_LINK {
+// answerQuery reports whether the application handled a link; without
+// handlers the text view opens the link itself.
+func (d *document) answerQuery(query any) bool {
+	link, ok := query.(linkRequest)
+	if !ok {
 		return false
 	}
 	handlers := d.links.snapshot()
 	for _, handler := range handlers {
-		handler(event.text)
+		handler(link.url)
 	}
 	return len(handlers) > 0
 }
 
 func (d *document) Text() string {
-	native := d.nativePointer()
+	native := d.nativeView()
 	if native == nil {
 		return ""
 	}
-	return goStringFree(C.gkWin32DocumentText(native))
+	return native.documentText()
 }
 
 func (d *document) SetText(text string) {
-	if native := d.nativePointer(); native != nil {
-		value := cString(text)
-		defer freeCString(value)
-		C.gkWin32DocumentSetText(native, value)
+	if native := d.nativeView(); native != nil {
+		native.setDocumentText(text)
 	}
 }
 
@@ -130,7 +119,7 @@ func (w *Window) CreateRichText(options ui.RichTextOptions) (ui.RichText, error)
 		return nil, err
 	}
 	result := &richText{}
-	if result.widgetBase, err = w.newComponent(C.gkWin32DocumentCreate(window, boolInt(options.Editable), 0), ui.RoleTextArea, result); err != nil {
+	if result.widgetBase, err = w.newComponent(window.newDocument(options.Editable, false), ui.RoleTextArea, result); err != nil {
 		return nil, err
 	}
 	result.SetText(options.Text)
@@ -143,40 +132,33 @@ func (w *Window) CreateRichText(options ui.RichTextOptions) (ui.RichText, error)
 	return result, nil
 }
 
-func (r *richText) win32Query(event win32Event) bool {
-	return r.document.win32Query(event)
-}
-
 func (r *richText) RTF() ([]byte, error) {
-	native := r.nativePointer()
+	native := r.nativeView()
 	if native == nil {
 		return nil, ui.ErrClosed
 	}
-	var size C.size_t
-	data := C.gkWin32DocumentRTF(native, &size)
-	defer C.free(unsafe.Pointer(data))
-	return C.GoBytes(unsafe.Pointer(data), C.int(size)), nil
+	return native.documentRTF(), nil
 }
 
 func (r *richText) SetRTF(rtf []byte) error {
-	native := r.nativePointer()
+	native := r.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	if len(rtf) == 0 || C.gkWin32DocumentSetRTF(native, (*C.uchar)(unsafe.Pointer(&rtf[0])), C.size_t(len(rtf))) == 0 {
+	if len(rtf) == 0 || !native.setDocumentRTF(rtf) {
 		return errors.New("ui/win32: the data is not valid RTF")
 	}
 	return nil
 }
 
 func (r *richText) IsEditable() bool {
-	native := r.nativePointer()
-	return native != nil && C.gkWin32DocumentEditable(native) != 0
+	native := r.nativeView()
+	return native != nil && native.isDocumentEditable()
 }
 
 func (r *richText) SetEditable(editable bool) {
-	if native := r.nativePointer(); native != nil {
-		C.gkWin32DocumentSetEditable(native, boolInt(editable))
+	if native := r.nativeView(); native != nil {
+		native.setDocumentEditable(editable)
 	}
 }
 
@@ -198,7 +180,7 @@ func (w *Window) CreateMarkdown(options ui.MarkdownOptions) (ui.Markdown, error)
 		return nil, err
 	}
 	result := &markdown{}
-	if result.widgetBase, err = w.newComponent(C.gkWin32DocumentCreate(window, 0, 1), ui.RoleDocument, result); err != nil {
+	if result.widgetBase, err = w.newComponent(window.newDocument(false, true), ui.RoleDocument, result); err != nil {
 		return nil, err
 	}
 	if err := result.SetSource(options.Source); err != nil {
@@ -208,22 +190,16 @@ func (w *Window) CreateMarkdown(options ui.MarkdownOptions) (ui.Markdown, error)
 	return result, nil
 }
 
-func (m *markdown) win32Query(event win32Event) bool {
-	return m.document.win32Query(event)
-}
-
 func (m *markdown) Source() string {
 	return m.source
 }
 
 func (m *markdown) SetSource(source string) error {
-	native := m.nativePointer()
+	native := m.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	value := cString(source)
-	defer freeCString(value)
-	if C.gkWin32MarkdownSet(native, value) == 0 {
+	if !native.setMarkdown(source) {
 		return errors.New("ui/win32: the Markdown source could not be parsed")
 	}
 	m.source = source
@@ -249,7 +225,7 @@ func (w *Window) CreateSVG(options ui.SVGOptions) (ui.SVG, error) {
 		return nil, err
 	}
 	result := &vector{text: options.AccessibilityText}
-	if result.widgetBase, err = w.newComponent(C.gkWin32VectorCreate(window), ui.RoleImage, result); err != nil {
+	if result.widgetBase, err = w.newComponent(window.newVectorImage(), ui.RoleImage, result); err != nil {
 		return nil, err
 	}
 	if err := result.SetSource(options.Source); err != nil {
@@ -259,7 +235,7 @@ func (w *Window) CreateSVG(options ui.SVGOptions) (ui.SVG, error) {
 	return result, nil
 }
 
-func (v *vector) win32Event(win32Event) {
+func (v *vector) receiveEvent(event any) {
 	// A vector image sends no native events.
 }
 
@@ -267,14 +243,12 @@ func (v *vector) SetSource(source []byte) error {
 	if len(source) == 0 {
 		return errors.New("ui: SVG source is empty")
 	}
-	native := v.nativePointer()
+	native := v.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	label := cString(v.text)
-	defer freeCString(label)
-	var width, height C.double
-	if C.gkWin32VectorSet(native, (*C.uchar)(unsafe.Pointer(&source[0])), C.size_t(len(source)), label, &width, &height) == 0 {
+	width, height, ok := native.setVectorImage(source, v.text)
+	if !ok {
 		return fmt.Errorf("ui/win32: Windows could not decode the SVG: %w", ui.ErrNotSupported)
 	}
 	v.size = ui.Size{Width: int(width), Height: int(height)}
@@ -301,16 +275,8 @@ func (w *Window) CreateAnimatedImage(options ui.AnimatedImageOptions) (ui.Animat
 	if err != nil {
 		return nil, err
 	}
-	sources := make([]ui.IconSource, len(options.Frames))
-	durations := make([]C.double, len(options.Frames))
-	for i, frame := range options.Frames {
-		sources[i] = ui.IconSource{Image: frame.Image}
-		durations[i] = C.double(frame.Duration.Seconds())
-	}
-	array := newIconArray(sources, 0)
-	defer array.free()
 	result := &animatedImage{}
-	native := C.gkWin32AnimationCreate(window, array.native(), &durations[0], C.int(len(options.Frames)), boolInt(options.Repeat))
+	native := window.newAnimatedImage(options.Frames, options.Repeat)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleImage, result); err != nil {
 		return nil, err
 	}
@@ -321,25 +287,25 @@ func (w *Window) CreateAnimatedImage(options ui.AnimatedImageOptions) (ui.Animat
 	return result, nil
 }
 
-func (a *animatedImage) win32Event(win32Event) {
+func (a *animatedImage) receiveEvent(event any) {
 	// An animated image sends no native events.
 }
 
 func (a *animatedImage) Play() {
-	if native := a.nativePointer(); native != nil {
-		C.gkWin32AnimationPlay(native, 1)
+	if native := a.nativeView(); native != nil {
+		native.playAnimation(true)
 	}
 }
 
 func (a *animatedImage) Pause() {
-	if native := a.nativePointer(); native != nil {
-		C.gkWin32AnimationPlay(native, 0)
+	if native := a.nativeView(); native != nil {
+		native.playAnimation(false)
 	}
 }
 
 func (a *animatedImage) IsPlaying() bool {
-	native := a.nativePointer()
-	return native != nil && C.gkWin32AnimationPlaying(native) != 0
+	native := a.nativeView()
+	return native != nil && native.isAnimationPlaying()
 }
 
 // ---- Video ----
@@ -357,73 +323,71 @@ func (w *Window) CreateVideo(options ui.VideoOptions) (ui.Video, error) {
 	if err != nil {
 		return nil, err
 	}
-	source := cString(options.Source)
-	defer freeCString(source)
 	result := &video{}
-	native := C.gkWin32VideoCreate(window, source, boolInt(options.ShowControls), boolInt(options.Autoplay), boolInt(options.Muted))
+	native := window.newVideo(options.Source, options.ShowControls, options.Autoplay, options.Muted)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleVideo, result); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func (v *video) win32Event(win32Event) {
+func (v *video) receiveEvent(event any) {
 	// A video view sends no native events.
 }
 
 func (v *video) Close() {
-	if native := v.nativePointer(); native != nil {
-		C.gkWin32VideoRelease(native)
+	if native := v.nativeView(); native != nil {
+		native.releaseVideo()
 	}
 	v.widgetBase.Close()
 }
 
 func (v *video) Play() {
-	if native := v.nativePointer(); native != nil {
-		C.gkWin32VideoPlay(native, 1)
+	if native := v.nativeView(); native != nil {
+		native.playVideo(true)
 	}
 }
 
 func (v *video) Pause() {
-	if native := v.nativePointer(); native != nil {
-		C.gkWin32VideoPlay(native, 0)
+	if native := v.nativeView(); native != nil {
+		native.playVideo(false)
 	}
 }
 
 func (v *video) IsPlaying() bool {
-	native := v.nativePointer()
-	return native != nil && C.gkWin32VideoPlaying(native) != 0
+	native := v.nativeView()
+	return native != nil && native.isVideoPlaying()
 }
 
-func seconds(value C.double) time.Duration {
-	return time.Duration(float64(value) * float64(time.Second))
+func seconds(value float64) time.Duration {
+	return time.Duration(value * float64(time.Second))
 }
 
 func (v *video) Position() time.Duration {
-	native := v.nativePointer()
+	native := v.nativeView()
 	if native == nil {
 		return 0
 	}
-	return seconds(C.gkWin32VideoPosition(native))
+	return seconds(native.videoPosition())
 }
 
 func (v *video) Duration() time.Duration {
-	native := v.nativePointer()
+	native := v.nativeView()
 	if native == nil {
 		return 0
 	}
-	return seconds(C.gkWin32VideoDuration(native))
+	return seconds(native.videoDuration())
 }
 
 func (v *video) Seek(position time.Duration) error {
 	if position < 0 {
 		return errors.New("ui: video position must be non-negative")
 	}
-	native := v.nativePointer()
+	native := v.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkWin32VideoSeek(native, C.double(position.Seconds()))
+	native.seekVideo(position.Seconds())
 	return nil
 }
 
@@ -441,7 +405,7 @@ func (w *Window) CreateWebView(options ui.WebViewOptions) (ui.WebView, error) {
 		return nil, err
 	}
 	result := &webView{}
-	if result.widgetBase, err = w.newComponent(C.gkWin32WebViewCreate(window, boolInt(options.AllowScripts)), ui.RoleWebView, result); err != nil {
+	if result.widgetBase, err = w.newComponent(window.newWebView(options.AllowScripts), ui.RoleWebView, result); err != nil {
 		return nil, err
 	}
 	switch {
@@ -457,51 +421,43 @@ func (w *Window) CreateWebView(options ui.WebViewOptions) (ui.WebView, error) {
 	return result, nil
 }
 
-func (v *webView) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_NAVIGATE {
-		url := event.text
-		each(&v.navigations, func(handler func(string)) {
-			handler(url)
-		})
-	}
+// receiveEvent receives no events: WebView2 does not report navigation to
+// the backend yet.
+func (v *webView) receiveEvent(any) {
 }
 
 func (v *webView) Close() {
-	if native := v.nativePointer(); native != nil {
-		C.gkWin32WebViewRelease(native)
+	if native := v.nativeView(); native != nil {
+		native.releaseWebView()
 	}
 	v.widgetBase.Close()
 }
 
 func (v *webView) URL() string {
-	native := v.nativePointer()
+	native := v.nativeView()
 	if native == nil {
 		return ""
 	}
-	return goStringFree(C.gkWin32WebViewURL(native))
+	return native.webViewURL()
 }
 
 func (v *webView) Load(url string) error {
-	native := v.nativePointer()
+	native := v.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	value := cString(url)
-	defer freeCString(value)
-	if C.gkWin32WebViewLoad(native, value) == 0 {
+	if !native.loadURL(url) {
 		return fmt.Errorf("ui: %q is not an absolute URL", url)
 	}
 	return nil
 }
 
 func (v *webView) LoadHTML(html string) error {
-	native := v.nativePointer()
+	native := v.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	value := cString(html)
-	defer freeCString(value)
-	C.gkWin32WebViewLoadHTML(native, value)
+	native.loadHTML(html)
 	return nil
 }
 

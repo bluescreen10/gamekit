@@ -1,4 +1,4 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32_test
 
@@ -48,7 +48,7 @@ func TestWin32PointerButtonOutOfRange(t *testing.T) {
 // Disabled is deliberately not exercised: it calls
 // CGAssociateMouseAndMouseCursorPosition(false), which detaches the pointer for the
 // whole system, and a test that failed midway would leave the developer's mouse frozen.
-// Hidden takes the same path through gkWin32WindowSetCursorMode without that risk.
+// Hidden takes the same path through setCursorMode without that risk.
 func TestWin32PointerModeRoundTrips(t *testing.T) {
 	if win32TestWindowError != nil {
 		t.Fatal(win32TestWindowError)

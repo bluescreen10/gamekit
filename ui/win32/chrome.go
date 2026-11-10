@@ -1,17 +1,9 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
 
-/*
-#include "win32_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"errors"
-	"runtime/cgo"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -22,7 +14,7 @@ import (
 // menu bar.
 type menuBar struct {
 	window        *Window
-	native        unsafe.Pointer
+	native        *nativeMenuBar
 	menus         []ui.NamedMenu
 	owned         []*menu
 	actions       []ui.Action
@@ -37,28 +29,23 @@ func (w *Window) CreateMenuBar(options ui.MenuBarOptions) (ui.MenuBar, error) {
 	if err := options.Validate(); err != nil {
 		return nil, err
 	}
-	if w.nativePointer() == nil {
+	if w.nativeWindow() == nil {
 		return nil, ui.ErrClosed
 	}
 	result := &menuBar{window: w, menus: append([]ui.NamedMenu(nil), options.Menus...), actions: append([]ui.Action(nil), options.Actions...)}
-	titles := make([]string, len(options.Menus))
-	natives := C.malloc(C.size_t(max(1, len(options.Menus))) * C.size_t(unsafe.Sizeof(uintptr(0))))
-	defer C.free(natives)
-	slots := unsafe.Slice((*unsafe.Pointer)(natives), max(1, len(options.Menus)))
+	menus := make([]barMenu, len(options.Menus))
 	for i, named := range options.Menus {
 		owned, err := ownedMenu(named.Menu)
 		if err != nil {
 			return nil, err
 		}
-		if slots[i] = owned.nativeMenu(); slots[i] == nil {
+		menus[i] = barMenu{title: named.Title, menu: owned.nativeMenu()}
+		if menus[i].menu == nil {
 			return nil, ui.ErrClosed
 		}
-		titles[i] = named.Title
 		result.owned = append(result.owned, owned)
 	}
-	buffer := joinNul(titles)
-	result.native = C.gkWin32MenuBarCreate(w.nativeWindowPointer(), bytesPointer(buffer), C.size_t(len(buffer)),
-		(*unsafe.Pointer)(natives), C.int(len(options.Menus)))
+	result.native = w.nativeWindow().newMenuBar(menus)
 	if result.native == nil {
 		return nil, errors.New("ui/win32: a menu in the menu bar already belongs to another menu")
 	}
@@ -81,7 +68,7 @@ func (w *Window) CreateMenuBar(options ui.MenuBarOptions) (ui.MenuBar, error) {
 // install shows the bar in its window.
 func (m *menuBar) install() {
 	if m.native != nil {
-		C.gkWin32MenuBarInstall(m.native)
+		m.native.install()
 	}
 }
 
@@ -103,7 +90,7 @@ func (m *menuBar) Close() {
 	}
 	m.window.mu.Unlock()
 	m.window.releaseResource(m)
-	C.gkWin32MenuBarRelease(native)
+	native.destroy()
 }
 
 func (m *menuBar) Menus() []ui.NamedMenu {
@@ -143,8 +130,7 @@ func (m *menuBar) OnAction(handler ui.ActionHandler) ui.Unsubscribe {
 
 type toolbar struct {
 	window    *Window
-	native    unsafe.Pointer
-	handle    cgo.Handle
+	native    *nativeToolbar
 	items     []ui.ToolbarItem
 	listeners listeners[ui.ActionHandler]
 }
@@ -154,54 +140,23 @@ func (w *Window) CreateToolbar(options ui.ToolbarOptions) (ui.Toolbar, error) {
 	if err := options.Validate(); err != nil {
 		return nil, err
 	}
-	window := w.nativeWindowPointer()
+	window := w.nativeWindow()
 	if window == nil {
 		return nil, ui.ErrClosed
 	}
-	actions := map[string]ui.Action{}
-	for _, action := range options.Actions {
-		actions[action.ID] = action
-	}
-	count := len(options.Items)
-	kinds := make([]C.int, max(1, count))
-	enabled := make([]C.int, max(1, count))
-	ids := make([]string, count)
-	labels := make([]string, count)
-	icons := make([]ui.IconSource, count)
-	for i, item := range options.Items {
-		switch {
-		case item.Separator:
-			kinds[i] = 1
-		case item.Space:
-			kinds[i] = 2
-		case item.FlexibleSpace:
-			kinds[i] = 3
-		default:
-			action, ok := actions[item.ActionID]
-			if !ok {
-				return nil, errors.New("ui: toolbar item names an unknown action " + item.ActionID)
-			}
-			ids[i], labels[i], icons[i], enabled[i] = action.ID, action.Text, action.Icon, boolInt(action.Enabled)
-			if icons[i].IsZero() {
-				icons[i] = ui.IconSource{SystemName: "circle"}
-			}
-		}
+	items, err := toolItems(options.Items, options.Actions)
+	if err != nil {
+		return nil, err
 	}
 	result := &toolbar{window: w, items: append([]ui.ToolbarItem(nil), options.Items...)}
-	result.handle = cgo.NewHandle(result)
-	array := newIconArray(icons, 0)
-	defer array.free()
-	idBuffer, labelBuffer := joinNul(ids), joinNul(labels)
-	result.native = C.gkWin32ToolbarCreate(C.uintptr_t(result.handle), window, &kinds[0], bytesPointer(idBuffer),
-		C.size_t(len(idBuffer)), bytesPointer(labelBuffer), C.size_t(len(labelBuffer)), array.native(),
-		&enabled[0], C.int(count), boolInt(options.ShowsLabels))
+	result.native = newToolbar(result, window, items, options.ShowsLabels)
 	w.adoptResource(result)
 	return result, nil
 }
 
-func (t *toolbar) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_ACTION {
-		id := event.text
+func (t *toolbar) receiveEvent(event any) {
+	if action, ok := event.(actionEvent); ok {
+		id := action.id
 		each(&t.listeners, func(handler ui.ActionHandler) {
 			handler(id)
 		})
@@ -214,8 +169,7 @@ func (t *toolbar) Close() {
 	}
 	native := t.native
 	t.native = nil
-	C.gkWin32ToolbarRelease(native)
-	t.handle.Delete()
+	native.destroy()
 	t.window.releaseResource(t)
 }
 
@@ -229,9 +183,7 @@ func (t *toolbar) SetActionEnabled(id string, enabled bool) error {
 	}
 	for _, item := range t.items {
 		if item.ActionID == id {
-			value := cString(id)
-			defer freeCString(value)
-			C.gkWin32ToolbarSetEnabled(t.native, value, boolInt(enabled))
+			t.native.setEnabled(id, enabled)
 			return nil
 		}
 	}
@@ -255,27 +207,25 @@ func (w *Window) CreateStatusBar(options ui.StatusBarOptions) (ui.StatusBar, err
 	if err != nil {
 		return nil, err
 	}
-	text := cString(options.Text)
-	defer freeCString(text)
 	result := &statusBar{text: options.Text}
-	if result.widgetBase, err = w.newComponent(C.gkWin32StatusBarCreate(window, text), ui.RoleStatus, result); err != nil {
+	if result.widgetBase, err = w.newComponent(window.newStatusBar(options.Text), ui.RoleStatus, result); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func (s *statusBar) win32Event(win32Event) {
+func (s *statusBar) receiveEvent(event any) {
 	// A status bar sends no native events.
 }
+
 func (s *statusBar) Text() string {
 	return s.text
 }
+
 func (s *statusBar) SetText(text string) {
 	s.text = text
-	if native := s.nativePointer(); native != nil {
-		value := cString(text)
-		defer freeCString(value)
-		C.gkWin32StatusBarSet(native, value)
+	if native := s.nativeView(); native != nil {
+		native.setStatus(text)
 	}
 	s.announceText(text)
 }
@@ -299,7 +249,7 @@ func (w *Window) CreateCommandBar(options ui.CommandBarOptions) (ui.CommandBar, 
 		return nil, err
 	}
 	result := &commandBar{compact: options.Compact}
-	if result.widgetBase, err = w.newComponent(C.gkWin32CommandBarCreate(window), ui.RoleToolbar, result); err != nil {
+	if result.widgetBase, err = w.newComponent(window.newCommandBar(), ui.RoleToolbar, result); err != nil {
 		return nil, err
 	}
 	if err := result.SetActions(options.Actions); err != nil {
@@ -317,22 +267,11 @@ func (c *commandBar) SetActions(actions []ui.Action) error {
 	if err := (ui.CommandBarOptions{Actions: actions}).Validate(); err != nil {
 		return err
 	}
-	native := c.nativePointer()
+	native := c.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	ids := make([]string, len(actions))
-	titles := make([]string, len(actions))
-	icons := make([]ui.IconSource, len(actions))
-	enabled := make([]C.int, len(actions))
-	for i, action := range actions {
-		ids[i], titles[i], icons[i], enabled[i] = action.ID, action.Text, action.Icon, boolInt(action.Enabled)
-	}
-	array := newIconArray(icons, 0)
-	defer array.free()
-	idBuffer, titleBuffer := joinNul(ids), joinNul(titles)
-	C.gkWin32CommandBarSetActions(native, bytesPointer(idBuffer), C.size_t(len(idBuffer)), bytesPointer(titleBuffer),
-		C.size_t(len(titleBuffer)), array.native(), &enabled[0], C.int(len(actions)), boolInt(c.compact))
+	native.setCommandBarActions(actions, c.compact)
 	c.actions = append([]ui.Action(nil), actions...)
 	return nil
 }
@@ -341,9 +280,9 @@ func (c *commandBar) OnAction(handler ui.ActionHandler) ui.Unsubscribe {
 	return subscribe(&c.listeners, handler, handler == nil)
 }
 
-func (c *commandBar) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_ACTION {
-		id := event.text
+func (c *commandBar) receiveEvent(event any) {
+	if action, ok := event.(actionEvent); ok {
+		id := action.id
 		each(&c.listeners, func(handler ui.ActionHandler) {
 			handler(id)
 		})

@@ -1,12 +1,6 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
-
-/*
-#include "win32_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
 
 import (
 	"context"
@@ -15,10 +9,9 @@ import (
 	stdimage "image"
 	"os"
 	"path/filepath"
-	"runtime/cgo"
+	"slices"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -33,7 +26,7 @@ type clipboard struct {
 
 var (
 	clipboardMu    sync.Mutex
-	clipboardCount C.long = -1
+	clipboardCount = -1
 )
 
 // Clipboard returns the system clipboard.
@@ -42,70 +35,12 @@ func (w *Window) Clipboard() ui.Clipboard {
 }
 
 func (clipboard) Read() (ui.ClipboardContent, error) {
-	var text, files, types *C.char
-	var hasText, width, height, count C.int
-	var filesSize, typesSize C.size_t
-	var pixels, data *C.uchar
-	var sizes *C.size_t
-	C.gkWin32ClipboardRead(&text, &hasText, &files, &filesSize, &pixels, &width, &height,
-		&types, &typesSize, &data, &sizes, &count)
-	defer C.free(unsafe.Pointer(files))
-	defer C.free(unsafe.Pointer(pixels))
-	defer C.free(unsafe.Pointer(types))
-	defer C.free(unsafe.Pointer(data))
-	defer C.free(unsafe.Pointer(sizes))
-	content := ui.ClipboardContent{
-		Text:  goStringFree(text),
-		Files: splitNul(unsafe.Pointer(files), filesSize),
-	}
-	if pixels != nil && width > 0 && height > 0 {
-		image := stdimage.NewNRGBA(stdimage.Rect(0, 0, int(width), int(height)))
-		copy(image.Pix, unsafe.Slice((*byte)(unsafe.Pointer(pixels)), int(width)*int(height)*4))
-		content.Image = image
-	}
-	if count > 0 {
-		mimes := splitNul(unsafe.Pointer(types), typesSize)
-		lengths := unsafe.Slice(sizes, int(count))
-		content.Custom = make(map[string][]byte, len(mimes))
-		offset := 0
-		for i, mime := range mimes {
-			if i >= len(lengths) {
-				break
-			}
-			length := int(lengths[i])
-			content.Custom[mime] = C.GoBytes(unsafe.Add(unsafe.Pointer(data), offset), C.int(length))
-			offset += length
-		}
-	}
-	return content, nil
+	return readClipboard(), nil
 }
 
 func (clipboard) Write(content ui.ClipboardContent) error {
-	text := cString(content.Text)
-	defer freeCString(text)
-	files := joinNul(absolutePaths(content.Files))
-	var pixels []byte
-	var width, height int
-	if content.Image != nil && !content.Image.Bounds().Empty() {
-		pixels, width, height = rgbaPixels(content.Image)
-	}
-	types := make([]string, 0, len(content.Custom))
-	var data []byte
-	var sizes []C.size_t
-	for mime, value := range content.Custom {
-		types = append(types, mime)
-		data = append(data, value...)
-		sizes = append(sizes, C.size_t(len(value)))
-	}
-	typeBuffer := joinNul(types)
-	var sizesPointer *C.size_t
-	if len(sizes) > 0 {
-		sizesPointer = &sizes[0]
-	}
-	if C.gkWin32ClipboardWrite(text, boolInt(content.Text != ""), bytesPointer(files), C.size_t(len(files)),
-		(*C.uchar)(unsafe.Pointer(bytesPointer(pixels))), C.int(width), C.int(height),
-		bytesPointer(typeBuffer), C.size_t(len(typeBuffer)),
-		(*C.uchar)(unsafe.Pointer(bytesPointer(data))), sizesPointer, C.int(len(sizes))) == 0 {
+	content.Files = absolutePaths(content.Files)
+	if !writeClipboard(content) {
 		return errors.New("ui/win32: the clipboard rejected the content")
 	}
 	return nil
@@ -123,21 +58,18 @@ func absolutePaths(paths []string) []string {
 }
 
 func (clipboard) Clear() error {
-	C.gkWin32ClipboardClear()
+	clearClipboard()
 	return nil
 }
 
 func (clipboard) Formats() ([]string, error) {
-	var size C.size_t
-	buffer := C.gkWin32ClipboardFormats(&size)
-	defer C.free(unsafe.Pointer(buffer))
-	return splitNul(unsafe.Pointer(buffer), size), nil
+	return clipboardFormats(), nil
 }
 
 func (c clipboard) OnChange(handler ui.FocusHandler) ui.Unsubscribe {
 	clipboardMu.Lock()
 	if clipboardCount < 0 {
-		clipboardCount = C.gkWin32ClipboardChangeCount()
+		clipboardCount = clipboardChangeCount()
 	}
 	clipboardMu.Unlock()
 	return subscribe(&c.window.events.clipboard, handler, handler == nil)
@@ -150,7 +82,7 @@ func pollClipboard() {
 		clipboardMu.Unlock()
 		return
 	}
-	count := C.gkWin32ClipboardChangeCount()
+	count := clipboardChangeCount()
 	changed := count != clipboardCount
 	clipboardCount = count
 	clipboardMu.Unlock()
@@ -171,9 +103,7 @@ func (w *Window) OpenURL(ctx context.Context, url string, options ui.OpenURLOpti
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	value := cString(url)
-	defer freeCString(value)
-	if C.gkWin32OpenURL(value, boolInt(options.Background)) == 0 {
+	if !openURL(url, options.Background) {
 		return fmt.Errorf("ui/win32: no application could open %q", url)
 	}
 	return nil
@@ -191,9 +121,7 @@ func (w *Window) RevealFile(ctx context.Context, path string, options ui.RevealF
 	if _, err := os.Stat(absolute); err != nil {
 		return err
 	}
-	value := cString(absolute)
-	defer freeCString(value)
-	if C.gkWin32RevealFile(value, boolInt(options.Select)) == 0 {
+	if !revealFile(absolute, options.Select) {
 		return fmt.Errorf("ui/win32: Finder could not reveal %q", absolute)
 	}
 	return nil
@@ -215,9 +143,7 @@ func (recentDocuments) Add(path string) error {
 	if err != nil {
 		return err
 	}
-	value := cString(absolute)
-	defer freeCString(value)
-	C.gkWin32RecentAdd(value)
+	addRecentDocument(absolute)
 	return nil
 }
 
@@ -226,22 +152,17 @@ func (recentDocuments) Remove(path string) error {
 	if err != nil {
 		return err
 	}
-	value := cString(absolute)
-	defer freeCString(value)
-	C.gkWin32RecentRemove(value)
+	removeRecentDocument(absolute)
 	return nil
 }
 
 func (recentDocuments) Clear() error {
-	C.gkWin32RecentClear()
+	clearRecentDocuments()
 	return nil
 }
 
 func (recentDocuments) List() ([]string, error) {
-	var size C.size_t
-	buffer := C.gkWin32RecentList(&size)
-	defer C.free(unsafe.Pointer(buffer))
-	return splitNul(unsafe.Pointer(buffer), size), nil
+	return readRecentDocuments(), nil
 }
 
 type fileAssociations struct{}
@@ -257,9 +178,7 @@ func (fileAssociations) DefaultApplication(extension string) (string, error) {
 	if extension == "" || extension == "." {
 		return "", errors.New("ui: file extension is empty")
 	}
-	value := cString(extension)
-	defer freeCString(value)
-	return goStringFree(C.gkWin32DefaultApplication(value)), nil
+	return defaultApplication(extension), nil
 }
 
 // ---- Printing ----
@@ -280,11 +199,7 @@ func (w *Window) Print(ctx context.Context, options ui.PrintOptions) (ui.PrintRe
 		return ui.PrintResult{}, err
 	}
 	job := &printJob{options: options}
-	handle := cgo.NewHandle(job)
-	defer handle.Delete()
-	title := cString(options.Title)
-	defer freeCString(title)
-	pages := int(C.gkWin32Print(C.uintptr_t(handle), title, boolInt(options.ShowDialog), w.nativeWindowPointer()))
+	pages := printPages(options.Title, options.ShowDialog, w.nativeWindow(), job.pageCount, job.page)
 	if job.err != nil {
 		return ui.PrintResult{}, job.err
 	}
@@ -294,25 +209,22 @@ func (w *Window) Print(ctx context.Context, options ui.PrintOptions) (ui.PrintRe
 	return ui.PrintResult{Pages: pages}, nil
 }
 
-//export gkWin32GoPrintPageCount
-func gkWin32GoPrintPageCount(handle C.uintptr_t) C.int {
-	job := cgo.Handle(handle).Value().(*printJob)
+func (job *printJob) pageCount() int {
 	job.pages = max(0, job.options.PageCount())
-	return C.int(job.pages)
+	return job.pages
 }
 
-//export gkWin32GoPrintPage
-func gkWin32GoPrintPage(handle C.uintptr_t, page C.int, width, height C.double) C.int {
-	job := cgo.Handle(handle).Value().(*printJob)
+// page draws a page in a size in points and reports whether it succeeded.
+func (job *printJob) page(index int, width, height float64) bool {
 	if job.err != nil {
-		return 0
+		return false
 	}
 	canvas := printCanvas{size: ui.Size{Width: int(width), Height: int(height)}}
-	if err := job.options.RenderPage(int(page), canvas); err != nil {
+	if err := job.options.RenderPage(index, canvas); err != nil {
 		job.err = err
-		return 0
+		return false
 	}
-	return 1
+	return true
 }
 
 // printCanvas draws into the current print page.
@@ -329,9 +241,9 @@ func (p printCanvas) DrawImage(image stdimage.Image, bounds ui.Rect) error {
 		return errors.New("ui: print image is empty")
 	}
 	pixels, width, height := rgbaPixels(image)
-	C.gkWin32PrintImage((*C.uchar)(unsafe.Pointer(&pixels[0])), C.int(width), C.int(height),
-		C.double(bounds.Position.X), C.double(bounds.Position.Y),
-		C.double(bounds.Size.Width), C.double(bounds.Size.Height))
+	printImage(pixels, width, height,
+		float64(bounds.Position.X), float64(bounds.Position.Y),
+		float64(bounds.Size.Width), float64(bounds.Size.Height))
 	return nil
 }
 
@@ -339,12 +251,8 @@ func (p printCanvas) DrawText(text string, position ui.Point, font ui.Font) erro
 	if err := font.Validate(); err != nil {
 		return err
 	}
-	value := cString(text)
-	family := cString(font.Family)
-	defer freeCString(value)
-	defer freeCString(family)
-	if C.gkWin32PrintText(value, C.double(position.X), C.double(position.Y), family, C.double(font.Size),
-		C.int(font.Weight), boolInt(font.Italic)) == 0 {
+	if !printText(text, float64(position.X), float64(position.Y), font.Family, font.Size,
+		int(font.Weight), font.Italic) {
 		return errors.New("ui/win32: font family is not installed")
 	}
 	return nil
@@ -363,38 +271,28 @@ func (w *Window) Share(ctx context.Context, options ui.ShareOptions) (string, er
 	if err := options.Validate(); err != nil {
 		return "", err
 	}
-	var texts, urls, files []string
-	for _, item := range options.Items {
-		if item.Text != "" {
-			texts = append(texts, item.Text)
-		}
-		if item.URL != "" {
-			urls = append(urls, item.URL)
-		}
-		if item.File != "" {
-			files = append(files, absolutePaths([]string{item.File})...)
+	items := slices.Clone(options.Items)
+	for i := range items {
+		if items[i].File != "" {
+			items[i].File = absolutePaths([]string{items[i].File})[0]
 		}
 	}
-	var view unsafe.Pointer
+	var view *nativeView
 	if owner, ok := options.Source.(nativeWidget); ok && owner.base().window == w {
-		view = owner.base().nativePointer()
+		view = owner.base().nativeView()
 	} else if content, ok := w.content.(nativeWidget); ok {
-		view = content.base().nativePointer()
+		view = content.base().nativeView()
 	}
 	if view == nil {
 		return "", errors.New("ui/win32: sharing needs a visible source widget or window content")
 	}
-	textBuffer, urlBuffer, fileBuffer := joinNul(texts), joinNul(urls), joinNul(files)
-	picker := C.gkWin32ShareBegin(bytesPointer(textBuffer), C.size_t(len(textBuffer)),
-		bytesPointer(urlBuffer), C.size_t(len(urlBuffer)), bytesPointer(fileBuffer), C.size_t(len(fileBuffer)), view)
+	picker := beginShare(view, items)
 	if picker == nil {
 		return "", errors.New("ui/win32: the share picker needs a visible window")
 	}
-	defer C.gkWin32ShareEnd(picker)
+	defer picker.end()
 	for {
-		var service *C.char
-		if C.gkWin32ShareStep(picker, &service) != 0 {
-			name := goStringFree(service)
+		if name, done := picker.step(); done {
 			if name == "" {
 				return "", ui.ErrCancelled
 			}

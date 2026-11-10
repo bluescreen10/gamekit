@@ -1,18 +1,10 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
-
-/*
-#include "win32_bridge.h"
-#include "window_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
 
 import (
 	"strconv"
 	"strings"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -28,12 +20,12 @@ func (w *Window) registerWidget(widget *widgetBase) {
 	w.mu.Unlock()
 }
 
-func (w *Window) unregisterWidget(widget *widgetBase, handle uintptr) {
+func (w *Window) unregisterWidget(widget *widgetBase) {
 	w.mu.Lock()
 	delete(w.widgets, widget)
 	w.mu.Unlock()
-	if window := w.nativeWindowPointer(); window != nil {
-		C.gkWin32ForgetFocus(window, C.uintptr_t(handle))
+	if window := w.nativeWindow(); window != nil {
+		window.forgetFocus(widget)
 	}
 }
 
@@ -61,7 +53,7 @@ func (w *Window) releaseResource(owned resource) {
 
 // closeWidgets closes every widget that the window created and that is still
 // open. A widget that is not in the content tree, or that a closed container
-// did not close, would otherwise keep its native view and its handles.
+// did not close, would otherwise keep its native view.
 func (w *Window) closeWidgets() {
 	for {
 		w.mu.Lock()
@@ -80,18 +72,9 @@ func (w *Window) closeWidgets() {
 
 // trackFocus reports focus changes since the last check.
 func (w *Window) trackFocus() {
-	if window := w.nativeWindowPointer(); window != nil {
-		C.gkWin32TrackFocus(window)
+	if window := w.nativeWindow(); window != nil {
+		trackFocus(window)
 	}
-}
-
-// nativeWindowPointer returns the native window record of the native layer.
-func (w *Window) nativeWindowPointer() unsafe.Pointer {
-	native := w.nativePointer()
-	if native == nil {
-		return nil
-	}
-	return C.gkWin32WindowNativePointer(native)
 }
 
 // controlTypes maps the names of UI Automation control types to ui roles.
@@ -176,17 +159,15 @@ func accessibilityRole(controlType, component string) ui.AccessibilityRole {
 // Automation exposes it to assistive technologies. Bounds are in content
 // coordinates.
 func (w *Window) AccessibilityTree() ui.AccessibilityNode {
-	window := w.nativeWindowPointer()
+	window := w.nativeWindow()
 	if window == nil {
 		return ui.AccessibilityNode{Role: ui.RoleWindow}
 	}
-	var size C.size_t
-	buffer := C.gkWin32AccessibilityTree(window, &size)
-	if buffer == nil {
+	tree := window.accessibilityTree()
+	if tree == "" {
 		return ui.AccessibilityNode{Role: ui.RoleWindow}
 	}
-	defer C.free(unsafe.Pointer(buffer))
-	return parseAccessibilityTree(C.GoStringN(buffer, C.int(size)))
+	return parseAccessibilityTree(tree)
 }
 
 // parseAccessibilityTree builds nodes from depth-first records separated by

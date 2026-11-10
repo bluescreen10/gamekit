@@ -1,23 +1,15 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
-
-/*
-#include "win32_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image/png"
 	"os"
 	"path/filepath"
-	"runtime/cgo"
 	"sync"
-	"time"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -37,18 +29,16 @@ var notificationsOnce sync.Once
 
 func attachNotifications() {
 	notificationsOnce.Do(func() {
-		C.gkWin32NotificationsAttach(C.uintptr_t(cgo.NewHandle(&notificationCenter{})))
+		setNotificationReceiver(&notificationCenter{})
 	})
 }
 
-func (*notificationCenter) win32Event(event win32Event) {
-	if event.kind != C.GK_EVENT_NOTIFICATION {
+func (*notificationCenter) receiveEvent(event any) {
+	notification, ok := event.(notificationEvent)
+	if !ok {
 		return
 	}
-	activation := ui.NotificationActivation{NotificationID: event.text, ActionID: event.text2}
-	if event.object != nil {
-		activation.ReplyText = C.GoString((*C.char)(event.object))
-	}
+	activation := notification.activation
 	for _, window := range liveWindows() {
 		each(&window.events.notifications, func(handler ui.NotificationActivationHandler) {
 			handler(activation)
@@ -66,66 +56,30 @@ func (w *Window) Notifications() ui.Notifications {
 var errNotBundled = errors.Join(ui.ErrNotSupported,
 	errors.New("ui/win32: Windows cannot send toast notifications for this application"))
 
-// notificationResult is the completion of an asynchronous notification call.
-type notificationResult struct {
-	status int
-	ids    []string
-	err    error
-}
-
-//export gkWin32GoNotificationResult
-func gkWin32GoNotificationResult(token C.uintptr_t, status C.int, ids *C.char, size C.size_t, message *C.char) {
-	result := notificationResult{status: int(status), ids: splitNul(unsafe.Pointer(ids), size)}
-	if ids != nil {
-		C.free(unsafe.Pointer(ids))
-	}
-	if message != nil {
-		result.err = errors.New("ui/win32: " + C.GoString(message))
-		C.free(unsafe.Pointer(message))
-	} else if status < 0 {
-		result.err = errors.New("ui/win32: the notification center reported an error")
-	}
-	cgo.Handle(token).Value().(chan notificationResult) <- result
-}
-
-// await starts an asynchronous call and waits for its result or ctx.
-func await(ctx context.Context, start func(token C.uintptr_t)) (notificationResult, error) {
+// available reports errNotBundled when Windows cannot create a notifier for
+// the application, after ctx.
+func available(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
-		return notificationResult{}, err
+		return err
 	}
-	if C.gkWin32NotificationsAvailable() == 0 {
-		return notificationResult{}, errNotBundled
+	if !notificationsAvailable() {
+		return errNotBundled
 	}
-	results := make(chan notificationResult, 1)
-	handle := cgo.NewHandle(results)
-	start(C.uintptr_t(handle))
-	select {
-	case result := <-results:
-		handle.Delete()
-		return result, result.err
-	case <-ctx.Done():
-		// The completion still arrives later; the buffered channel keeps it
-		// from blocking, and the handle must stay valid until then.
-		go func() {
-			<-results
-			handle.Delete()
-		}()
-		return notificationResult{}, ctx.Err()
-	}
+	return nil
 }
 
 func (notifications) Authorization(ctx context.Context) (ui.NotificationAuthorization, error) {
-	result, err := await(ctx, func(token C.uintptr_t) {
-		C.gkWin32NotificationAuthorization(token)
-	})
-	return ui.NotificationAuthorization(result.status), err
+	if err := available(ctx); err != nil {
+		return 0, err
+	}
+	return notificationAuthorization(), nil
 }
 
 func (notifications) RequestAuthorization(ctx context.Context) (ui.NotificationAuthorization, error) {
-	result, err := await(ctx, func(token C.uintptr_t) {
-		C.gkWin32NotificationRequestAuthorization(token)
-	})
-	return ui.NotificationAuthorization(result.status), err
+	if err := available(ctx); err != nil {
+		return 0, err
+	}
+	return requestNotificationAuthorization(), nil
 }
 
 func (notifications) Send(ctx context.Context, notification ui.Notification) error {
@@ -143,48 +97,13 @@ func (notifications) Send(ctx context.Context, notification ui.Notification) err
 		}
 		attachment = path
 	}
-	category := notification.Category
-	if category == "" && len(notification.Actions) > 0 {
-		category = "gamekit." + notification.ID
+	if err := available(ctx); err != nil {
+		return err
 	}
-	ids := make([]string, len(notification.Actions))
-	titles := make([]string, len(notification.Actions))
-	flags := make([]C.int, max(1, len(notification.Actions)))
-	for i, action := range notification.Actions {
-		ids[i], titles[i] = action.ID, action.Text
-		if action.Destructive {
-			flags[i] |= 1
-		}
-		if action.TextInput {
-			flags[i] |= 2
-		}
+	if err := sendNotification(notification, attachment); err != nil {
+		return fmt.Errorf("ui/win32: %w", err)
 	}
-	delay := 0.0
-	if !notification.Delivery.IsZero() {
-		delay = time.Until(notification.Delivery).Seconds()
-	}
-	_, err := await(ctx, func(token C.uintptr_t) {
-		identifier := cString(notification.ID)
-		title := cString(notification.Title)
-		subtitle := cString(notification.Subtitle)
-		body := cString(notification.Body)
-		categoryValue := cString(category)
-		thread := cString(notification.ThreadID)
-		attachmentValue := cString(attachment)
-		defer freeCString(identifier)
-		defer freeCString(title)
-		defer freeCString(subtitle)
-		defer freeCString(body)
-		defer freeCString(categoryValue)
-		defer freeCString(thread)
-		defer freeCString(attachmentValue)
-		idBuffer, titleBuffer := joinNul(ids), joinNul(titles)
-		C.gkWin32NotificationSend(token, identifier, title, subtitle, body, categoryValue, thread,
-			boolInt(notification.Sound), attachmentValue, C.double(delay),
-			bytesPointer(idBuffer), C.size_t(len(idBuffer)), bytesPointer(titleBuffer), C.size_t(len(titleBuffer)),
-			&flags[0], C.int(len(notification.Actions)))
-	})
-	return err
+	return nil
 }
 
 // writeNotificationImage stores the icon where the notification center can
@@ -206,34 +125,31 @@ func writeNotificationImage(notification ui.Notification) (string, error) {
 }
 
 func (notifications) Pending(ctx context.Context) ([]string, error) {
-	result, err := await(ctx, func(token C.uintptr_t) {
-		C.gkWin32NotificationPending(token)
-	})
-	return result.ids, err
+	if err := available(ctx); err != nil {
+		return nil, err
+	}
+	return pendingNotifications(), nil
 }
 
 func (notifications) Delivered(ctx context.Context) ([]string, error) {
-	result, err := await(ctx, func(token C.uintptr_t) {
-		C.gkWin32NotificationDelivered(token)
-	})
-	return result.ids, err
+	if err := available(ctx); err != nil {
+		return nil, err
+	}
+	return deliveredNotifications(), nil
 }
 
 func (notifications) Withdraw(ids ...string) error {
-	if C.gkWin32NotificationsAvailable() == 0 {
+	if !notificationsAvailable() {
 		return errNotBundled
 	}
-	buffer := joinNul(ids)
-	C.gkWin32NotificationWithdraw(bytesPointer(buffer), C.size_t(len(buffer)))
+	withdrawNotifications(ids)
 	return nil
 }
 
 // SetBadge shows badge as an overlay on the taskbar buttons of the
 // application's windows. An empty badge removes the overlay.
 func (notifications) SetBadge(badge string) error {
-	value := cString(badge)
-	defer freeCString(value)
-	C.gkWin32SetBadge(value)
+	setBadge(badge)
 	return nil
 }
 

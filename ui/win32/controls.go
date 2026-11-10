@@ -1,13 +1,6 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
-
-/*
-#include "win32_bridge.h"
-#include "widget_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
 
 import (
 	"errors"
@@ -17,14 +10,13 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
 
 // newComponent wraps a native view created for the window and routes its
 // events to owner.
-func (w *Window) newComponent(native unsafe.Pointer, role ui.AccessibilityRole, owner win32Receiver) (*widgetBase, error) {
+func (w *Window) newComponent(native *nativeView, role ui.AccessibilityRole, owner eventReceiver) (*widgetBase, error) {
 	if native == nil {
 		return nil, fmt.Errorf("ui/win32: native backend could not create a %s", role)
 	}
@@ -33,11 +25,11 @@ func (w *Window) newComponent(native unsafe.Pointer, role ui.AccessibilityRole, 
 	return base, nil
 }
 
-func (w *Window) windowHandle() (C.uintptr_t, error) {
-	if w.nativePointer() == nil {
-		return 0, ui.ErrClosed
+func (w *Window) windowHandle() (*nativeWindow, error) {
+	if w.nativeWindow() == nil {
+		return nil, ui.ErrClosed
 	}
-	return w.nativeWindowHandle(), nil
+	return w.nativeWindow(), nil
 }
 
 // ---- Toggle button ----
@@ -54,13 +46,10 @@ func (w *Window) CreateToggleButton(options ui.ToggleButtonOptions) (ui.ToggleBu
 	if err != nil {
 		return nil, err
 	}
-	text := cString(options.Text)
-	defer freeCString(text)
-	icon := nativeIcon(options.Icon, 0)
-	defer C.gkWin32Release(icon)
+	icon := newIcon(options.Icon, 0)
 	result := &toggleButton{groupID: options.GroupID}
-	native := C.gkWin32ToggleButtonCreate(window, text, icon, boolInt(options.Checked),
-		boolInt(options.Presentation == ui.ToggleButtonToolbar))
+	native := window.newToggleButton(options.Text, icon, options.Checked,
+		options.Presentation == ui.ToggleButtonToolbar)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleToggleButton, result); err != nil {
 		return nil, err
 	}
@@ -71,27 +60,32 @@ func (w *Window) CreateToggleButton(options ui.ToggleButtonOptions) (ui.ToggleBu
 }
 
 func (t *toggleButton) Text() string {
-	return nativeText(t.nativePointer())
+	return nativeText(t.nativeView())
 }
+
 func (t *toggleButton) SetText(text string) {
-	setNativeText(t.nativePointer(), text)
+	setNativeText(t.nativeView(), text)
 	t.announceText(text)
 }
+
 func (t *toggleButton) IsChecked() bool {
-	native := t.nativePointer()
-	return native != nil && C.gkWin32UIChecked(native) != 0
+	native := t.nativeView()
+	return native != nil && native.isChecked()
 }
+
 func (t *toggleButton) SetChecked(checked bool) {
-	if native := t.nativePointer(); native != nil {
-		C.gkWin32UISetChecked(native, boolInt(checked))
+	if native := t.nativeView(); native != nil {
+		native.setChecked(checked)
 		if checked {
 			t.uncheckGroup()
 		}
 	}
 }
+
 func (t *toggleButton) GroupID() string {
 	return t.groupID
 }
+
 func (t *toggleButton) OnChange(handler ui.ToggleHandler) ui.Unsubscribe {
 	return subscribe(&t.changes, handler, handler == nil)
 }
@@ -104,7 +98,7 @@ func (t *toggleButton) uncheckGroup() {
 	for _, widget := range t.window.liveWidgets() {
 		other, ok := widget.contract.owner.(*toggleButton)
 		if ok && other != t && other.groupID == t.groupID && other.IsChecked() {
-			C.gkWin32UISetChecked(other.nativePointer(), 0)
+			other.nativeView().setChecked(false)
 			checked := false
 			each(&other.changes, func(handler ui.ToggleHandler) {
 				handler(checked)
@@ -113,8 +107,8 @@ func (t *toggleButton) uncheckGroup() {
 	}
 }
 
-func (t *toggleButton) win32Event(event win32Event) {
-	if event.kind != C.GK_EVENT_VALUE {
+func (t *toggleButton) receiveEvent(event any) {
+	if _, ok := event.(changeEvent); !ok {
 		return
 	}
 	checked := t.IsChecked()
@@ -151,12 +145,8 @@ func (w *Window) CreateSwitch(options ui.SwitchOptions) (ui.Switch, error) {
 	if err != nil {
 		return nil, err
 	}
-	text, on, off := cString(options.Text), cString(options.OnLabel), cString(options.OffLabel)
-	defer freeCString(text)
-	defer freeCString(on)
-	defer freeCString(off)
 	result := &switchControl{text: options.Text}
-	native := C.gkWin32SwitchCreate(window, text, on, off, boolInt(options.Checked), C.int(options.Size))
+	native := window.newSwitch(options.Text, options.OnLabel, options.OffLabel, options.Checked, int(options.Size))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSwitch, result); err != nil {
 		return nil, err
 	}
@@ -166,30 +156,34 @@ func (w *Window) CreateSwitch(options ui.SwitchOptions) (ui.Switch, error) {
 func (s *switchControl) Text() string {
 	return s.text
 }
+
 func (s *switchControl) SetText(text string) {
 	s.text = text
 	s.set(s.IsChecked())
 	s.announceText(text)
 }
+
 func (s *switchControl) IsChecked() bool {
-	native := s.nativePointer()
-	return native != nil && C.gkWin32SwitchChecked(native) != 0
+	native := s.nativeView()
+	return native != nil && native.isSwitchOn()
 }
+
 func (s *switchControl) SetChecked(checked bool) {
 	s.set(checked)
 }
+
 func (s *switchControl) set(checked bool) {
-	if native := s.nativePointer(); native != nil {
-		text := cString(s.text)
-		defer freeCString(text)
-		C.gkWin32SwitchSet(native, text, boolInt(checked))
+	if native := s.nativeView(); native != nil {
+		native.configureSwitch(s.text, checked)
 	}
 }
+
 func (s *switchControl) OnChange(handler ui.ToggleHandler) ui.Unsubscribe {
 	return subscribe(&s.changes, handler, handler == nil)
 }
-func (s *switchControl) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_VALUE {
+
+func (s *switchControl) receiveEvent(event any) {
+	if _, ok := event.(changeEvent); ok {
 		checked := s.IsChecked()
 		s.set(checked)
 		each(&s.changes, func(handler ui.ToggleHandler) {
@@ -215,10 +209,8 @@ func (w *Window) CreatePasswordField(options ui.PasswordFieldOptions) (ui.Passwo
 	if err != nil {
 		return nil, err
 	}
-	placeholder := cString(options.Placeholder)
-	defer freeCString(placeholder)
 	result := &passwordField{placeholder: options.Placeholder, reveal: options.Reveal}
-	native := C.gkWin32PasswordCreate(window, placeholder, boolInt(options.Reveal == ui.PasswordRevealButton))
+	native := window.newPasswordField(options.Placeholder, options.Reveal == ui.PasswordRevealButton)
 	if result.widgetBase, err = w.newComponent(native, ui.RolePasswordField, result); err != nil {
 		return nil, err
 	}
@@ -226,35 +218,38 @@ func (w *Window) CreatePasswordField(options ui.PasswordFieldOptions) (ui.Passwo
 }
 
 func (p *passwordField) Text() string {
-	native := p.nativePointer()
+	native := p.nativeView()
 	if native == nil {
 		return ""
 	}
-	return goStringFree(C.gkWin32PasswordText(native))
+	return native.passwordText()
 }
+
 func (p *passwordField) SetText(text string) {
 	p.set(text)
 }
+
 func (p *passwordField) set(text string) {
-	if native := p.nativePointer(); native != nil {
-		value, placeholder := cString(text), cString(p.placeholder)
-		defer freeCString(value)
-		defer freeCString(placeholder)
-		C.gkWin32PasswordSet(native, value, placeholder, boolInt(p.revealed))
+	if native := p.nativeView(); native != nil {
+		native.setPassword(text, p.placeholder, p.revealed)
 	}
 }
+
 func (p *passwordField) Placeholder() string {
 	return p.placeholder
 }
+
 func (p *passwordField) SetPlaceholder(placeholder string) {
 	p.placeholder = placeholder
 	p.set(p.Text())
 }
+
 func (p *passwordField) IsRevealed() bool {
 	return p.revealed
 }
+
 func (p *passwordField) SetRevealed(revealed bool) error {
-	if p.nativePointer() == nil {
+	if p.nativeView() == nil {
 		return ui.ErrClosed
 	}
 	if revealed && p.reveal == ui.PasswordRevealNone {
@@ -265,26 +260,29 @@ func (p *passwordField) SetRevealed(revealed bool) error {
 	p.set(text)
 	return nil
 }
+
 func (p *passwordField) OnChange(handler ui.TextChangeHandler) ui.Unsubscribe {
 	return subscribe(&p.changes, handler, handler == nil)
 }
+
 func (p *passwordField) OnSubmit(handler ui.TextChangeHandler) ui.Unsubscribe {
 	return subscribe(&p.submits, handler, handler == nil)
 }
-func (p *passwordField) win32Event(event win32Event) {
-	switch event.kind {
-	case C.GK_EVENT_TEXT_CHANGE:
+
+func (p *passwordField) receiveEvent(event any) {
+	switch event := event.(type) {
+	case textChangeEvent:
 		text := p.Text()
 		each(&p.changes, func(handler ui.TextChangeHandler) {
 			handler(text)
 		})
-	case C.GK_EVENT_SUBMIT:
+	case submitEvent:
 		text := p.Text()
 		each(&p.submits, func(handler ui.TextChangeHandler) {
 			handler(text)
 		})
-	case C.GK_EVENT_EXPAND:
-		p.revealed = event.a != 0
+	case expandEvent:
+		p.revealed = event.expanded
 	}
 }
 
@@ -303,11 +301,8 @@ func (w *Window) CreateSearchField(options ui.SearchFieldOptions) (ui.SearchFiel
 	if err != nil {
 		return nil, err
 	}
-	text, placeholder := cString(options.Text), cString(options.Placeholder)
-	defer freeCString(text)
-	defer freeCString(placeholder)
 	result := &searchField{}
-	native := C.gkWin32SearchCreate(window, text, placeholder)
+	native := window.newSearchField(options.Text, options.Placeholder)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSearchField, result); err != nil {
 		return nil, err
 	}
@@ -316,52 +311,58 @@ func (w *Window) CreateSearchField(options ui.SearchFieldOptions) (ui.SearchFiel
 }
 
 func (s *searchField) Text() string {
-	return nativeText(s.nativePointer())
+	return nativeText(s.nativeView())
 }
+
 func (s *searchField) SetText(text string) {
-	setNativeText(s.nativePointer(), text)
+	setNativeText(s.nativeView(), text)
 }
+
 func (s *searchField) Placeholder() string {
-	native := s.nativePointer()
+	native := s.nativeView()
 	if native == nil {
 		return ""
 	}
-	return goStringFree(C.gkWin32UIPlaceholder(native))
+	return native.placeholder
 }
+
 func (s *searchField) SetPlaceholder(placeholder string) {
-	if native := s.nativePointer(); native != nil {
-		value := cString(placeholder)
-		defer freeCString(value)
-		C.gkWin32UISetPlaceholder(native, value)
+	if native := s.nativeView(); native != nil {
+		native.setPlaceholder(placeholder)
 	}
 }
+
 func (s *searchField) Suggestions() []string {
 	return append([]string(nil), s.suggestions...)
 }
+
 func (s *searchField) SetSuggestions(suggestions []string) {
 	s.suggestions = append([]string(nil), suggestions...)
-	if native := s.nativePointer(); native != nil {
-		buffer := joinNul(suggestions)
-		C.gkWin32SearchSetSuggestions(native, bytesPointer(buffer), C.size_t(len(buffer)))
+	if native := s.nativeView(); native != nil {
+		native.setSuggestions(suggestions)
 	}
 }
+
 func (s *searchField) Clear() {
 	s.SetText("")
 }
+
 func (s *searchField) OnChange(handler ui.TextChangeHandler) ui.Unsubscribe {
 	return subscribe(&s.changes, handler, handler == nil)
 }
+
 func (s *searchField) OnSubmit(handler ui.TextChangeHandler) ui.Unsubscribe {
 	return subscribe(&s.submits, handler, handler == nil)
 }
-func (s *searchField) win32Event(event win32Event) {
+
+func (s *searchField) receiveEvent(event any) {
 	text := s.Text()
-	switch event.kind {
-	case C.GK_EVENT_TEXT_CHANGE:
+	switch event.(type) {
+	case textChangeEvent:
 		each(&s.changes, func(handler ui.TextChangeHandler) {
 			handler(text)
 		})
-	case C.GK_EVENT_SUBMIT:
+	case submitEvent:
 		each(&s.submits, func(handler ui.TextChangeHandler) {
 			handler(text)
 		})
@@ -386,8 +387,8 @@ func (w *Window) CreateNumberField(options ui.NumberFieldOptions) (ui.NumberFiel
 		return nil, err
 	}
 	result := &numberField{options: options}
-	native := C.gkWin32NumberCreate(window, C.double(options.Minimum), C.double(options.Maximum),
-		C.double(options.Value), C.double(options.Step), C.int(options.Decimals))
+	native := window.newNumberField(options.Minimum, options.Maximum,
+		options.Value, options.Step, options.Decimals)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSpinButton, result); err != nil {
 		return nil, err
 	}
@@ -395,40 +396,47 @@ func (w *Window) CreateNumberField(options ui.NumberFieldOptions) (ui.NumberFiel
 }
 
 func (n *numberField) Value() float64 {
-	native := n.nativePointer()
+	native := n.nativeView()
 	if native == nil {
 		return 0
 	}
-	return float64(C.gkWin32NumberValue(native))
+	return float64(native.numberFieldValue())
 }
+
 func (n *numberField) SetValue(value float64) error {
 	if math.IsNaN(value) || value < n.options.Minimum || value > n.options.Maximum {
 		return errors.New("ui: number field value must be within its range")
 	}
-	native := n.nativePointer()
+	native := n.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkWin32NumberSetValue(native, C.double(value))
+	native.setNumberFieldValue(value)
 	return nil
 }
+
 func (n *numberField) Minimum() float64 {
 	return n.options.Minimum
 }
+
 func (n *numberField) Maximum() float64 {
 	return n.options.Maximum
 }
+
 func (n *numberField) Step() float64 {
 	return n.options.Step
 }
+
 func (n *numberField) Decimals() int {
 	return n.options.Decimals
 }
+
 func (n *numberField) OnChange(handler ui.ValueChangeHandler) ui.Unsubscribe {
 	return subscribe(&n.changes, handler, handler == nil)
 }
-func (n *numberField) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_VALUE {
+
+func (n *numberField) receiveEvent(event any) {
+	if _, ok := event.(changeEvent); ok {
 		value := n.Value()
 		each(&n.changes, func(handler ui.ValueChangeHandler) {
 			handler(value)
@@ -455,11 +463,8 @@ func (w *Window) CreateEditableCombo(options ui.EditableComboOptions) (ui.Editab
 	if !options.AllowFreeText && options.Text != "" && !slices.Contains(options.Items, options.Text) {
 		return nil, errors.New("ui: combo text must be one of its items when free text is not allowed")
 	}
-	text := cString(options.Text)
-	defer freeCString(text)
-	items := joinNul(options.Items)
 	result := &editableCombo{items: append([]string(nil), options.Items...), freeText: options.AllowFreeText, lastValid: options.Text}
-	native := C.gkWin32ComboCreate(window, text, bytesPointer(items), C.size_t(len(items)))
+	native := window.newComboBox(options.Text, options.Items)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleComboBox, result); err != nil {
 		return nil, err
 	}
@@ -467,42 +472,47 @@ func (w *Window) CreateEditableCombo(options ui.EditableComboOptions) (ui.Editab
 }
 
 func (c *editableCombo) Text() string {
-	return nativeText(c.nativePointer())
+	return nativeText(c.nativeView())
 }
+
 func (c *editableCombo) SetText(text string) {
-	setNativeText(c.nativePointer(), text)
+	setNativeText(c.nativeView(), text)
 	if c.freeText || slices.Contains(c.items, text) {
 		c.lastValid = text
 	}
 }
+
 func (c *editableCombo) Items() []string {
 	return append([]string(nil), c.items...)
 }
+
 func (c *editableCombo) SetItems(items []string) {
 	c.items = append([]string(nil), items...)
-	if native := c.nativePointer(); native != nil {
-		buffer := joinNul(items)
-		C.gkWin32ComboSetItems(native, bytesPointer(buffer), C.size_t(len(buffer)))
+	if native := c.nativeView(); native != nil {
+		native.setComboItems(items)
 	}
 }
+
 func (c *editableCombo) SelectedIndex() int {
 	return slices.Index(c.items, c.Text())
 }
+
 func (c *editableCombo) OnChange(handler ui.TextChangeHandler) ui.Unsubscribe {
 	return subscribe(&c.changes, handler, handler == nil)
 }
-func (c *editableCombo) win32Event(event win32Event) {
+
+func (c *editableCombo) receiveEvent(event any) {
 	text := c.Text()
-	switch event.kind {
-	case C.GK_EVENT_TEXT_CHANGE:
+	switch event := event.(type) {
+	case textChangeEvent:
 		if event.text != "" {
 			text = event.text
 		}
-	case C.GK_EVENT_SUBMIT:
+	case submitEvent:
 		// Return or leaving the field commits the text; without free text an
 		// unknown entry reverts to the last valid one.
 		if !c.freeText && !slices.Contains(c.items, text) {
-			setNativeText(c.nativePointer(), c.lastValid)
+			setNativeText(c.nativeView(), c.lastValid)
 			return
 		}
 	default:
@@ -534,25 +544,8 @@ func (w *Window) CreateSegmentedControl(options ui.SegmentedControlOptions) (ui.
 	if err != nil {
 		return nil, err
 	}
-	labels := make([]string, len(options.Items))
-	icons := C.malloc(C.size_t(len(options.Items)) * C.size_t(unsafe.Sizeof(uintptr(0))))
-	defer C.free(icons)
-	iconSlice := unsafe.Slice((*unsafe.Pointer)(icons), len(options.Items))
-	enabled := make([]C.int, len(options.Items))
-	for i, item := range options.Items {
-		labels[i] = item.Text
-		iconSlice[i] = nativeIcon(item.Icon, 0)
-		enabled[i] = boolInt(item.Enabled)
-	}
-	defer func() {
-		for _, icon := range iconSlice {
-			C.gkWin32Release(icon)
-		}
-	}()
-	buffer := joinNul(labels)
 	result := &segmentedControl{items: append([]ui.Segment(nil), options.Items...), mode: options.Mode}
-	native := C.gkWin32SegmentedCreate(window, bytesPointer(buffer), C.size_t(len(buffer)),
-		(*unsafe.Pointer)(icons), &enabled[0], C.int(len(options.Items)), C.int(options.Mode))
+	native := window.newSegmentedControl(options.Items, options.Mode)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleRadioGroup, result); err != nil {
 		return nil, err
 	}
@@ -566,6 +559,7 @@ func (w *Window) CreateSegmentedControl(options ui.SegmentedControlOptions) (ui.
 func (s *segmentedControl) Items() []ui.Segment {
 	return append([]ui.Segment(nil), s.items...)
 }
+
 func (s *segmentedControl) ids() []string {
 	ids := make([]string, len(s.items))
 	for i, item := range s.items {
@@ -573,44 +567,48 @@ func (s *segmentedControl) ids() []string {
 	}
 	return ids
 }
+
 func (s *segmentedControl) SelectedIDs() []string {
-	native := s.nativePointer()
+	native := s.nativeView()
 	if native == nil || s.mode == ui.SelectionNone {
 		return nil
 	}
 	var selected []string
 	for i, item := range s.items {
-		if C.gkWin32SegmentSelected(native, C.int(i)) != 0 {
+		if native.isSegmentSelected(i) {
 			selected = append(selected, item.ID)
 		}
 	}
 	return selected
 }
+
 func (s *segmentedControl) SetSelectedIDs(ids []string) error {
 	if err := ui.ValidateSelectedIDs(s.ids(), ids, s.mode); err != nil {
 		return err
 	}
-	native := s.nativePointer()
+	native := s.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
 	for i, item := range s.items {
-		C.gkWin32SegmentSetSelected(native, C.int(i), boolInt(slices.Contains(ids, item.ID)))
+		native.setSegmentSelected(i, slices.Contains(ids, item.ID))
 	}
 	return nil
 }
+
 func (s *segmentedControl) OnChange(handler ui.SelectionIDsHandler) ui.Unsubscribe {
 	return subscribe(&s.changes, handler, handler == nil)
 }
-func (s *segmentedControl) win32Event(event win32Event) {
-	if event.kind != C.GK_EVENT_SELECTION {
+
+func (s *segmentedControl) receiveEvent(event any) {
+	if _, ok := event.(changeEvent); !ok {
 		return
 	}
 	selected := s.SelectedIDs()
 	if s.mode == ui.SelectionNone {
 		// A momentary control reports the clicked segment.
-		if native := s.nativePointer(); native != nil {
-			index := int(C.gkWin32SegmentClicked(native))
+		if native := s.nativeView(); native != nil {
+			index := int(native.clickedSegment())
 			if index >= 0 && index < len(s.items) {
 				selected = []string{s.items[index].ID}
 			}
@@ -632,28 +630,31 @@ type rangedControl struct {
 }
 
 func (r *rangedControl) Value() float64 {
-	native := r.nativePointer()
+	native := r.nativeView()
 	if native == nil {
 		return 0
 	}
-	return float64(C.gkWin32ControlValue(native))
+	return float64(native.controlValue())
 }
+
 func (r *rangedControl) SetValue(value float64) error {
 	if math.IsNaN(value) || value < r.minimum || value > r.maximum {
 		return errors.New("ui: value must be within the control's range")
 	}
-	native := r.nativePointer()
+	native := r.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkWin32ControlSetValue(native, C.double(value))
+	native.setControlValue(value)
 	return nil
 }
+
 func (r *rangedControl) OnChange(handler ui.ValueChangeHandler) ui.Unsubscribe {
 	return subscribe(&r.changes, handler, handler == nil)
 }
-func (r *rangedControl) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_VALUE {
+
+func (r *rangedControl) receiveEvent(event any) {
+	if _, ok := event.(changeEvent); ok {
 		value := r.Value()
 		each(&r.changes, func(handler ui.ValueChangeHandler) {
 			handler(value)
@@ -680,6 +681,7 @@ type stepper struct{ rangedControl }
 func (s *stepper) Increment() {
 	s.stepBy(max(s.step, 1))
 }
+
 func (s *stepper) Decrement() {
 	s.stepBy(-max(s.step, 1))
 }
@@ -694,8 +696,8 @@ func (w *Window) CreateStepper(options ui.StepperOptions) (ui.Stepper, error) {
 		return nil, err
 	}
 	result := &stepper{rangedControl{minimum: options.Minimum, maximum: options.Maximum, step: options.Step, wraps: options.Wrap}}
-	native := C.gkWin32StepperCreate(window, C.double(options.Minimum), C.double(options.Maximum),
-		C.double(options.Value), C.double(options.Step), boolInt(options.Wrap))
+	native := window.newStepper(options.Minimum, options.Maximum,
+		options.Value, options.Step, options.Wrap)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSpinButton, result); err != nil {
 		return nil, err
 	}
@@ -714,8 +716,8 @@ func (w *Window) CreateDial(options ui.DialOptions) (ui.Dial, error) {
 		return nil, err
 	}
 	result := &dial{rangedControl{minimum: options.Minimum, maximum: options.Maximum, step: options.Step, wraps: options.Wrap}}
-	native := C.gkWin32DialCreate(window, C.double(options.Minimum), C.double(options.Maximum),
-		C.double(options.Value), C.double(options.Step), boolInt(options.Wrap))
+	native := window.newDial(options.Minimum, options.Maximum,
+		options.Value, options.Step, options.Wrap)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSlider, result); err != nil {
 		return nil, err
 	}
@@ -740,8 +742,8 @@ func (w *Window) CreateRangeSlider(options ui.RangeSliderOptions) (ui.RangeSlide
 		return nil, err
 	}
 	result := &rangeSlider{options: options}
-	native := C.gkWin32RangeSliderCreate(window, C.double(options.Minimum), C.double(options.Maximum),
-		C.double(options.LowerValue), C.double(options.UpperValue), C.double(options.Step))
+	native := window.newRangeSlider(options.Minimum, options.Maximum,
+		options.LowerValue, options.UpperValue, options.Step)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSlider, result); err != nil {
 		return nil, err
 	}
@@ -749,41 +751,45 @@ func (w *Window) CreateRangeSlider(options ui.RangeSliderOptions) (ui.RangeSlide
 }
 
 func (r *rangeSlider) values() (float64, float64) {
-	native := r.nativePointer()
+	native := r.nativeView()
 	if native == nil {
 		return 0, 0
 	}
-	var lower, upper C.double
-	C.gkWin32RangeSliderValues(native, &lower, &upper)
+	lower, upper := native.rangeValues()
 	return float64(lower), float64(upper)
 }
+
 func (r *rangeSlider) LowerValue() float64 {
 	lower, _ := r.values()
 	return lower
 }
+
 func (r *rangeSlider) UpperValue() float64 {
 	_, upper := r.values()
 	return upper
 }
+
 func (r *rangeSlider) SetValues(lower, upper float64) error {
 	options := r.options
 	options.LowerValue, options.UpperValue = lower, upper
 	if err := options.Validate(); err != nil {
 		return err
 	}
-	native := r.nativePointer()
+	native := r.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkWin32RangeSliderSet(native, C.double(lower), C.double(upper))
+	native.setRange(lower, upper)
 	return nil
 }
+
 func (r *rangeSlider) OnChange(handler ui.RangeChangeHandler) ui.Unsubscribe {
 	return subscribe(&r.changes, handler, handler == nil)
 }
-func (r *rangeSlider) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_VALUE {
-		lower, upper := event.x, event.y
+
+func (r *rangeSlider) receiveEvent(event any) {
+	if change, ok := event.(rangeChangeEvent); ok {
+		lower, upper := change.lower, change.upper
 		each(&r.changes, func(handler ui.RangeChangeHandler) {
 			handler(lower, upper)
 		})
@@ -841,8 +847,8 @@ func (w *Window) CreateDatePicker(options ui.DatePickerOptions) (ui.DatePicker, 
 		return nil, errors.New("ui: date picker minimum is after its maximum")
 	}
 	result := &datePicker{minimum: minimum, maximum: maximum}
-	native := C.gkWin32DatePickerCreate(window, 0, datePickerYearMonthDay, C.double(unixSeconds(value)),
-		C.double(unixSeconds(minimum)), C.double(unixSeconds(maximum)), 0, 0, 0)
+	native := window.newDatePicker(0, datePickerYearMonthDay, unixSeconds(value),
+		unixSeconds(minimum), unixSeconds(maximum), 0, 0, 0)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleDatePicker, result); err != nil {
 		return nil, err
 	}
@@ -850,31 +856,33 @@ func (w *Window) CreateDatePicker(options ui.DatePickerOptions) (ui.DatePicker, 
 }
 
 func (d *datePicker) Value() time.Time {
-	native := d.nativePointer()
+	native := d.nativeView()
 	if native == nil {
 		return time.Time{}
 	}
-	var value, interval C.double
-	C.gkWin32DatePickerValue(native, &value, &interval)
-	return calendarDate(float64(value))
+	value, _ := native.pickedDate()
+	return calendarDate(value)
 }
+
 func (d *datePicker) SetValue(date time.Time) error {
 	date = dateOnly(date)
 	if date.IsZero() || (!d.minimum.IsZero() && date.Before(d.minimum)) || (!d.maximum.IsZero() && date.After(d.maximum)) {
 		return errors.New("ui: date is outside the picker's range")
 	}
-	native := d.nativePointer()
+	native := d.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkWin32DatePickerSet(native, C.double(unixSeconds(date)), 0)
+	native.setPickedDate(unixSeconds(date), 0)
 	return nil
 }
+
 func (d *datePicker) OnChange(handler ui.DateChangeHandler) ui.Unsubscribe {
 	return subscribe(&d.changes, handler, handler == nil)
 }
-func (d *datePicker) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_VALUE {
+
+func (d *datePicker) receiveEvent(event any) {
+	if _, ok := event.(changeEvent); ok {
 		value := d.Value()
 		each(&d.changes, func(handler ui.DateChangeHandler) {
 			handler(value)
@@ -896,13 +904,13 @@ func (w *Window) CreateTimePicker(options ui.TimePickerOptions) (ui.TimePicker, 
 	if err != nil {
 		return nil, err
 	}
-	elements := C.int(datePickerHourMinute)
+	elements := datePickerHourMinute
 	if options.ShowSeconds {
 		elements = datePickerHourMinuteSecond
 	}
 	result := &timePicker{}
-	native := C.gkWin32DatePickerCreate(window, 0, elements, C.double(options.Value.Seconds()), 0, 0, 0, 0,
-		C.int(options.Clock))
+	native := window.newDatePicker(0, elements, options.Value.Seconds(), 0, 0, 0, 0,
+		int(options.Clock))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleTimePicker, result); err != nil {
 		return nil, err
 	}
@@ -910,34 +918,36 @@ func (w *Window) CreateTimePicker(options ui.TimePickerOptions) (ui.TimePicker, 
 }
 
 func (t *timePicker) Value() time.Duration {
-	native := t.nativePointer()
+	native := t.nativeView()
 	if native == nil {
 		return 0
 	}
-	var value, interval C.double
-	C.gkWin32DatePickerValue(native, &value, &interval)
-	seconds := math.Mod(float64(value), 24*60*60)
+	value, _ := native.pickedDate()
+	seconds := math.Mod(value, 24*60*60)
 	if seconds < 0 {
 		seconds += 24 * 60 * 60
 	}
 	return time.Duration(math.Round(seconds)) * time.Second
 }
+
 func (t *timePicker) SetValue(value time.Duration) error {
 	if err := (ui.TimePickerOptions{Value: value}).Validate(); err != nil {
 		return err
 	}
-	native := t.nativePointer()
+	native := t.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkWin32DatePickerSet(native, C.double(value.Seconds()), 0)
+	native.setPickedDate(value.Seconds(), 0)
 	return nil
 }
+
 func (t *timePicker) OnChange(handler ui.TimeChangeHandler) ui.Unsubscribe {
 	return subscribe(&t.changes, handler, handler == nil)
 }
-func (t *timePicker) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_VALUE {
+
+func (t *timePicker) receiveEvent(event any) {
+	if _, ok := event.(changeEvent); ok {
 		value := t.Value()
 		each(&t.changes, func(handler ui.TimeChangeHandler) {
 			handler(value)
@@ -971,8 +981,7 @@ func (w *Window) CreateCalendar(options ui.CalendarOptions) (ui.Calendar, error)
 	}
 	seconds := calendarSeconds(dates)
 	result := &calendar{selection: options.Selection}
-	native := C.gkWin32CalendarCreate(window, C.int(options.Selection), doublesPointer(seconds), C.int(len(seconds)),
-		C.double(unixSeconds(monthOf(options.VisibleMonth))))
+	native := window.newCalendar(int(options.Selection), seconds, unixSeconds(monthOf(options.VisibleMonth)))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleCalendar, result); err != nil {
 		return nil, err
 	}
@@ -1008,52 +1017,43 @@ func calendarDates(selection ui.CalendarSelection, dates []time.Time) ([]time.Ti
 	return result, nil
 }
 
-func calendarSeconds(dates []time.Time) []C.double {
-	seconds := make([]C.double, len(dates))
+func calendarSeconds(dates []time.Time) []float64 {
+	seconds := make([]float64, len(dates))
 	for i, date := range dates {
-		seconds[i] = C.double(unixSeconds(date))
+		seconds[i] = unixSeconds(date)
 	}
 	return seconds
 }
 
-func doublesPointer(values []C.double) *C.double {
-	if len(values) == 0 {
-		return nil
-	}
-	return &values[0]
-}
-
 // VisibleMonth returns the first day of the month that the calendar shows.
 func (c *calendar) VisibleMonth() time.Time {
-	native := c.nativePointer()
+	native := c.nativeView()
 	if native == nil {
 		return time.Time{}
 	}
-	return calendarDate(float64(C.gkWin32CalendarVisibleMonth(native)))
+	return calendarDate(float64(native.visibleMonth()))
 }
 
 // SetVisibleMonth shows the month of month without changing the selection.
 func (c *calendar) SetVisibleMonth(month time.Time) {
-	if native := c.nativePointer(); native != nil && !month.IsZero() {
-		C.gkWin32CalendarSetVisibleMonth(native, C.double(unixSeconds(monthOf(month))))
+	if native := c.nativeView(); native != nil && !month.IsZero() {
+		native.setVisibleMonth(unixSeconds(monthOf(month)))
 	}
 }
 
 // SelectedDates returns the selected dates in ascending order.
 func (c *calendar) SelectedDates() []time.Time {
-	native := c.nativePointer()
+	native := c.nativeView()
 	if native == nil {
 		return nil
 	}
-	count := int(C.gkWin32CalendarDates(native, nil, 0))
-	if count == 0 {
+	seconds := native.calendarDates()
+	if len(seconds) == 0 {
 		return nil
 	}
-	seconds := make([]C.double, count)
-	C.gkWin32CalendarDates(native, &seconds[0], C.int(count))
-	dates := make([]time.Time, count)
+	dates := make([]time.Time, len(seconds))
 	for i, value := range seconds {
-		dates[i] = calendarDate(float64(value))
+		dates[i] = calendarDate(value)
 	}
 	return dates
 }
@@ -1068,19 +1068,21 @@ func (c *calendar) SetSelectedDates(dates []time.Time) error {
 	if len(selected) == 0 && c.selection != ui.CalendarMultiple {
 		return errors.New("ui: a calendar needs at least one selected date")
 	}
-	native := c.nativePointer()
+	native := c.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
 	seconds := calendarSeconds(selected)
-	C.gkWin32CalendarSetDates(native, doublesPointer(seconds), C.int(len(seconds)))
+	native.setCalendarDates(seconds)
 	return nil
 }
+
 func (c *calendar) OnChange(handler ui.DatesChangeHandler) ui.Unsubscribe {
 	return subscribe(&c.changes, handler, handler == nil)
 }
-func (c *calendar) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_VALUE {
+
+func (c *calendar) receiveEvent(event any) {
+	if _, ok := event.(changeEvent); ok {
 		dates := c.SelectedDates()
 		each(&c.changes, func(handler ui.DatesChangeHandler) {
 			handler(append([]time.Time(nil), dates...))
@@ -1096,12 +1098,12 @@ type colorPicker struct {
 	changes     listeners[ui.ColorChangeHandler]
 }
 
-func colorComponents(value color.Color) [4]C.double {
+func colorComponents(value color.Color) [4]float64 {
 	if value == nil {
 		value = color.Black
 	}
 	rgba := color.NRGBAModel.Convert(value).(color.NRGBA)
-	return [4]C.double{C.double(rgba.R) / 255, C.double(rgba.G) / 255, C.double(rgba.B) / 255, C.double(rgba.A) / 255}
+	return [4]float64{float64(rgba.R) / 255, float64(rgba.G) / 255, float64(rgba.B) / 255, float64(rgba.A) / 255}
 }
 
 // CreateColorPicker implements ui.Window.CreateColorPicker.
@@ -1115,7 +1117,7 @@ func (w *Window) CreateColorPicker(options ui.ColorPickerOptions) (ui.ColorPicke
 		c[3] = 1
 	}
 	result := &colorPicker{allowsAlpha: options.AllowAlpha}
-	native := C.gkWin32ColorWellCreate(window, c[0], c[1], c[2], c[3], boolInt(options.AllowAlpha))
+	native := window.newColorWell(c[0], c[1], c[2], c[3], options.AllowAlpha)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleColorPicker, result); err != nil {
 		return nil, err
 	}
@@ -1124,34 +1126,37 @@ func (w *Window) CreateColorPicker(options ui.ColorPickerOptions) (ui.ColorPicke
 
 // Color returns the color as non-premultiplied sRGB stored in color.RGBA.
 func (c *colorPicker) Color() color.RGBA {
-	native := c.nativePointer()
+	native := c.nativeView()
 	if native == nil {
 		return color.RGBA{}
 	}
-	var rgba [4]C.double
-	C.gkWin32ColorWellColor(native, &rgba[0])
-	channel := func(value C.double) uint8 {
-		return uint8(math.Round(math.Max(0, math.Min(1, float64(value))) * 255))
+	rgba := native.colorWellColor()
+	channel := func(value float64) uint8 {
+		return uint8(math.Round(math.Max(0, math.Min(1, value)) * 255))
 	}
 	return color.RGBA{R: channel(rgba[0]), G: channel(rgba[1]), B: channel(rgba[2]), A: channel(rgba[3])}
 }
+
 func (c *colorPicker) SetColor(value color.Color) {
-	if native := c.nativePointer(); native != nil {
+	if native := c.nativeView(); native != nil {
 		components := colorComponents(value)
 		if !c.allowsAlpha {
 			components[3] = 1
 		}
-		C.gkWin32ColorWellSet(native, components[0], components[1], components[2], components[3])
+		native.setColorWellColor(components[0], components[1], components[2], components[3])
 	}
 }
+
 func (c *colorPicker) AllowsAlpha() bool {
 	return c.allowsAlpha
 }
+
 func (c *colorPicker) OnChange(handler ui.ColorChangeHandler) ui.Unsubscribe {
 	return subscribe(&c.changes, handler, handler == nil)
 }
-func (c *colorPicker) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_VALUE {
+
+func (c *colorPicker) receiveEvent(event any) {
+	if _, ok := event.(changeEvent); ok {
 		value := c.Color()
 		each(&c.changes, func(handler ui.ColorChangeHandler) {
 			handler(value)
@@ -1174,11 +1179,9 @@ func (w *Window) CreateFontPicker(options ui.FontPickerOptions) (ui.FontPicker, 
 	if err != nil {
 		return nil, err
 	}
-	family := cString(options.Font.Family)
-	defer freeCString(family)
 	result := &fontPicker{font: options.Font}
-	native := C.gkWin32FontPickerCreate(window, family, C.double(options.Font.Size), C.int(options.Font.Weight),
-		boolInt(options.Font.Italic))
+	native := window.newFontPicker(options.Font.Family, options.Font.Size, int(options.Font.Weight),
+		options.Font.Italic)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleFontPicker, result); err != nil {
 		return nil, err
 	}
@@ -1188,35 +1191,34 @@ func (w *Window) CreateFontPicker(options ui.FontPickerOptions) (ui.FontPicker, 
 func (f *fontPicker) Font() ui.Font {
 	return f.font
 }
+
 func (f *fontPicker) SetFont(font ui.Font) error {
 	if err := font.Validate(); err != nil {
 		return err
 	}
-	native := f.nativePointer()
+	native := f.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	family := cString(font.Family)
-	defer freeCString(family)
-	C.gkWin32FontPickerSet(native, family, C.double(font.Size), C.int(font.Weight), boolInt(font.Italic))
+	native.setPickedFont(font.Family, font.Size, int(font.Weight), font.Italic)
 	f.font = font
 	return nil
 }
+
 func (f *fontPicker) OnChange(handler ui.FontChangeHandler) ui.Unsubscribe {
 	return subscribe(&f.changes, handler, handler == nil)
 }
-func (f *fontPicker) win32Event(event win32Event) {
-	if event.kind != C.GK_EVENT_VALUE {
+
+func (f *fontPicker) receiveEvent(event any) {
+	if _, ok := event.(changeEvent); !ok {
 		return
 	}
-	native := f.nativePointer()
+	native := f.nativeView()
 	if native == nil {
 		return
 	}
-	var size C.double
-	var weight, italic C.int
-	family := goStringFree(C.gkWin32FontPickerFont(native, &size, &weight, &italic))
-	f.font = ui.Font{Family: family, Size: float64(size), Weight: ui.FontWeight(weight), Italic: italic != 0}
+	family, size, weight, italic := native.pickedFont()
+	f.font = ui.Font{Family: family, Size: size, Weight: ui.FontWeight(weight), Italic: italic}
 	font := f.font
 	each(&f.changes, func(handler ui.FontChangeHandler) {
 		handler(font)
@@ -1238,7 +1240,7 @@ func (w *Window) CreateKeyRecorder(options ui.KeyRecorderOptions) (ui.KeyRecorde
 		return nil, err
 	}
 	result := &keyRecorder{}
-	native := C.gkWin32KeyRecorderCreate(window)
+	native := window.newKeyRecorder()
 	if result.widgetBase, err = w.newComponent(native, ui.RoleButton, result); err != nil {
 		return nil, err
 	}
@@ -1249,14 +1251,14 @@ func (w *Window) CreateKeyRecorder(options ui.KeyRecorderOptions) (ui.KeyRecorde
 func (k *keyRecorder) Shortcut() ui.Shortcut {
 	return k.shortcut
 }
+
 func (k *keyRecorder) SetShortcut(shortcut ui.Shortcut) {
 	k.shortcut = shortcut
-	if native := k.nativePointer(); native != nil {
-		display := cString(shortcutText(shortcut))
-		defer freeCString(display)
-		C.gkWin32KeyRecorderSet(native, display)
+	if native := k.nativeView(); native != nil {
+		native.setRecordedKey(shortcutText(shortcut))
 	}
 }
+
 func (k *keyRecorder) OnChange(handler ui.ShortcutChangeHandler) ui.Unsubscribe {
 	return subscribe(&k.changes, handler, handler == nil)
 }
@@ -1267,24 +1269,25 @@ var keyNames = map[int]string{
 	262: "Right", 263: "Left", 264: "Down", 265: "Up", 266: "PageUp", 267: "PageDown", 268: "Home", 269: "End",
 }
 
-func (k *keyRecorder) win32Event(event win32Event) {
-	if event.kind != C.GK_EVENT_VALUE {
+func (k *keyRecorder) receiveEvent(event any) {
+	record, ok := event.(keyRecordEvent)
+	if !ok {
 		return
 	}
 	shortcut := ui.Shortcut{}
-	if event.text != "" || event.b != 0 {
-		key := strings.ToUpper(event.text)
-		if name, ok := keyNames[event.b]; ok {
+	if record.label != "" || record.key != 0 {
+		key := strings.ToUpper(record.label)
+		if name, ok := keyNames[record.key]; ok {
 			key = name
-		} else if event.b >= 290 && event.b <= 314 {
-			key = fmt.Sprintf("F%d", event.b-289)
+		} else if record.key >= 290 && record.key <= 314 {
+			key = fmt.Sprintf("F%d", record.key-289)
 		}
 		shortcut = ui.Shortcut{
 			Key:     key,
-			Command: event.a&1 != 0,
-			Control: event.a&2 != 0,
-			Alt:     event.a&4 != 0,
-			Shift:   event.a&8 != 0,
+			Command: record.modifiers&1 != 0,
+			Control: record.modifiers&2 != 0,
+			Alt:     record.modifiers&4 != 0,
+			Shift:   record.modifiers&8 != 0,
 		}
 	}
 	k.SetShortcut(shortcut)

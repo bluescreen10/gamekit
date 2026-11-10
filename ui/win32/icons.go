@@ -1,17 +1,11 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
-
-/*
-#include "win32_bridge.h"
-*/
-import "C"
 
 import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -70,26 +64,30 @@ var symbolGlyphs = map[string]rune{
 	"heart":           0xEB51,
 }
 
-// nativeIcon returns a referenced icon for source, or nil when the source is
-// empty or names a symbol that has no glyph. pointSize scales symbols and
-// images; zero keeps their natural size.
-func nativeIcon(source ui.IconSource, pointSize float64) unsafe.Pointer {
-	if source.IsZero() {
+// newIcon returns the icon of source, or nil when the source is empty or names
+// a symbol that has no glyph. pointSize scales symbols and images; zero keeps
+// their natural size.
+func newIcon(source ui.IconSource, pointSize float64) *iconImage {
+	icon := &iconImage{pointSize: pointSize}
+	if glyph, ok := symbolGlyphs[source.SystemName]; ok {
+		icon.glyph = string(glyph)
+	}
+	if source.Image != nil && !source.Image.Bounds().Empty() {
+		icon.pixels, icon.width, icon.height = rgbaPixels(source.Image)
+	}
+	if icon.glyph == "" && icon.pixels == nil {
 		return nil
 	}
-	symbol := cString("")
-	if glyph, ok := symbolGlyphs[source.SystemName]; ok {
-		freeCString(symbol)
-		symbol = cString(string(glyph))
+	return icon
+}
+
+// newIcons returns the icons of sources; see newIcon.
+func newIcons(sources []ui.IconSource, pointSize float64) []*iconImage {
+	icons := make([]*iconImage, len(sources))
+	for i, source := range sources {
+		icons[i] = newIcon(source, pointSize)
 	}
-	defer freeCString(symbol)
-	var pixels []byte
-	var width, height int
-	if source.Image != nil && !source.Image.Bounds().Empty() {
-		pixels, width, height = rgbaPixels(source.Image)
-	}
-	return C.gkWin32Icon(symbol, (*C.uchar)(unsafe.Pointer(bytesPointer(pixels))),
-		C.int(width), C.int(height), C.double(pointSize))
+	return icons
 }
 
 // Modifier bits of a keyboard accelerator. They match the

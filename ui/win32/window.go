@@ -1,4 +1,4 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
 
@@ -7,6 +7,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/bluescreen10/gamekit/gpu"
 	"github.com/bluescreen10/gamekit/keyboard"
 	"github.com/bluescreen10/gamekit/pointer"
 	"github.com/bluescreen10/gamekit/ui"
@@ -54,16 +55,12 @@ type WindowOptions struct {
 // window to the thread that created it.
 type Window struct {
 	mu        sync.RWMutex
-	native    unsafe.Pointer
+	native    *nativeWindow
 	title     string
 	kind      ui.WindowKind
 	owner     *Window
 	children  map[*Window]struct{}
 	destroyed bool
-
-	// handle identifies this window to the C layer, which cannot hold a Go pointer.
-	// Released by Destroy; see callbacks.go.
-	handle uintptr
 
 	// Event callbacks, all guarded by mu. See callbacks.go.
 	keyCallback           KeyCallback
@@ -123,14 +120,14 @@ func CreateWindow(title string, width, height int, opts *WindowOptions) (*Window
 	if options.Kind == ui.WindowNormal && options.Owner != nil {
 		return nil, errors.New("ui/win32: normal window cannot have an owner")
 	}
-	var ownerNative unsafe.Pointer
+	var ownerNative *nativeWindow
 	if options.Owner != nil {
-		ownerNative = options.Owner.nativePointer()
+		ownerNative = options.Owner.nativeWindow()
 		if ownerNative == nil {
 			return nil, ui.ErrClosed
 		}
 	}
-	native, err := createNativeWindow(title, width, height, options, ownerNative)
+	native, err := newNativeWindow(title, width, height, options, ownerNative)
 	if err != nil {
 		return nil, err
 	}
@@ -150,10 +147,8 @@ func CreateWindow(title string, width, height int, opts *WindowOptions) (*Window
 		w.owner.children[w] = struct{}{}
 		w.owner.mu.Unlock()
 	}
-	// Give the C layer a way to name this window when it dispatches an event.
-	w.handle = newWindowHandle(w)
-	setNativeWindowHandle(native, w.handle)
-	setNativeWindowTheme(native, options.Theme)
+	native.window = w
+	native.setTheme(int(options.Theme))
 	w.connectInput()
 	if err := w.attachExtensions(options); err != nil {
 		w.Destroy()
@@ -173,7 +168,6 @@ func (w *Window) Destroy() {
 		return
 	}
 	native := w.native
-	handle := w.handle
 	content := w.content
 	resources := make([]resource, 0, len(w.resources))
 	for owned := range w.resources {
@@ -185,7 +179,6 @@ func (w *Window) Destroy() {
 	}
 	owner := w.owner
 	w.native = nil
-	w.handle = 0
 	w.content = nil
 	w.resources = nil
 	w.children = nil
@@ -212,12 +205,9 @@ func (w *Window) Destroy() {
 	windowsMu.Lock()
 	delete(windows, w)
 	windowsMu.Unlock()
-	// Clear the handle before the native window goes away, so an event still in flight
-	// resolves to nothing rather than to a freed window.
-	detachNativeWindow(native)
-	setNativeWindowHandle(native, 0)
-	deleteWindowHandle(handle)
-	destroyNativeWindow(native)
+	// The native window stops reporting events before it goes away.
+	native.window = nil
+	native.close()
 }
 
 // Close is equivalent to Destroy.
@@ -228,8 +218,8 @@ func (w *Window) Close() {
 // PollEvents processes pending operating-system events for this window.
 
 func (w *Window) PollEvents() {
-	if native := w.nativePointer(); native != nil {
-		pollNativeWindow(native)
+	if native := w.nativeWindow(); native != nil {
+		native.poll()
 	}
 	pollClipboard()
 	if w.content != nil {
@@ -255,31 +245,31 @@ func PollEvents() {
 
 // ShouldClose reports whether the user requested that the window close.
 func (w *Window) ShouldClose() bool {
-	if native := w.nativePointer(); native != nil {
-		return nativeWindowShouldClose(native)
+	if native := w.nativeWindow(); native != nil {
+		return native.shouldClose
 	}
 	return true
 }
 
 // SetShouldClose changes the close-request flag without destroying the window.
 func (w *Window) SetShouldClose(close bool) {
-	if native := w.nativePointer(); native != nil {
-		setNativeWindowShouldClose(native, close)
+	if native := w.nativeWindow(); native != nil {
+		native.shouldClose = close
 	}
 }
 
 // GetSize returns the native window's drawable client size in logical pixels.
 func (w *Window) GetSize() (width, height int) {
-	if native := w.nativePointer(); native != nil {
-		return nativeWindowSize(native)
+	if native := w.nativeWindow(); native != nil {
+		return native.size()
 	}
 	return 0, 0
 }
 
 // GetFramebufferSize returns the drawable size in physical pixels.
 func (w *Window) GetFramebufferSize() (width, height int) {
-	if native := w.nativePointer(); native != nil {
-		return nativeWindowFramebufferSize(native)
+	if native := w.nativeWindow(); native != nil {
+		return native.framebufferSize()
 	}
 	return 0, 0
 }
@@ -311,54 +301,54 @@ func (w *Window) SetSize(size ui.Size) error {
 	if !size.IsValid() {
 		return errors.New("ui/win32: window size must be positive")
 	}
-	native := w.nativePointer()
+	native := w.nativeWindow()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	setNativeWindowSize(native, size.Width, size.Height)
+	native.setSize(size.Width, size.Height)
 	return nil
 }
 
 // Position reports the window's top-left position. A utility window's position
 // is relative to its owner's content area.
 func (w *Window) Position() ui.Point {
-	native := w.nativePointer()
+	native := w.nativeWindow()
 	if native == nil {
 		return ui.Point{}
 	}
-	x, y := nativeWindowPosition(native)
+	x, y := native.position()
 	return ui.Point{X: x, Y: y}
 }
 
 // SetPosition moves the window. Utility-window coordinates are relative to the
 // owner's content area.
 func (w *Window) SetPosition(position ui.Point) {
-	native := w.nativePointer()
+	native := w.nativeWindow()
 	if native == nil {
 		return
 	}
-	setNativeWindowPosition(native, position.X, position.Y)
+	native.setPosition(position.X, position.Y)
 }
 
 // IsVisible reports whether the native window is currently shown.
 func (w *Window) IsVisible() bool {
-	native := w.nativePointer()
-	return native != nil && nativeWindowVisible(native)
+	native := w.nativeWindow()
+	return native != nil && native.visible()
 }
 
 // SetVisible shows or hides the native window.
 func (w *Window) SetVisible(visible bool) {
-	native := w.nativePointer()
+	native := w.nativeWindow()
 	if native == nil {
 		return
 	}
-	setNativeWindowVisible(native, visible)
+	native.setVisible(visible)
 }
 
 // BringToFront raises a visible window above other windows.
 func (w *Window) BringToFront() {
-	if native := w.nativePointer(); native != nil {
-		bringNativeWindowToFront(native)
+	if native := w.nativeWindow(); native != nil {
+		native.bringToFront()
 	}
 }
 
@@ -399,8 +389,8 @@ func (w *Window) dispatchMove(position ui.Point) {
 
 // SetTitle changes the native window title.
 func (w *Window) SetTitle(title string) {
-	if native := w.nativePointer(); native != nil {
-		setNativeWindowTitle(native, title)
+	if native := w.nativeWindow(); native != nil {
+		native.setTitle(title)
 		w.mu.Lock()
 		w.title = title
 		w.mu.Unlock()
@@ -437,11 +427,11 @@ func (w *Window) SetTheme(theme ui.Theme) error {
 	if err := theme.Validate(); err != nil {
 		return err
 	}
-	native := w.nativePointer()
+	native := w.nativeWindow()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	setNativeWindowTheme(native, theme)
+	native.setTheme(int(theme))
 	w.mu.Lock()
 	w.theme = theme
 	w.mu.Unlock()
@@ -452,8 +442,8 @@ func (w *Window) SetTheme(theme ui.Theme) error {
 // Prefer passing the window to gpu.Backend.CreateSurface unless integrating
 // another native API.
 func (w *Window) GetNativeHandle() uintptr {
-	if native := w.nativePointer(); native != nil {
-		return nativeWindowHandle(native)
+	if native := w.nativeWindow(); native != nil {
+		return native.nativeHandle()
 	}
 	return 0
 }
@@ -461,17 +451,33 @@ func (w *Window) GetNativeHandle() uintptr {
 // GetNativeDisplay returns the module instance (HINSTANCE) of the process,
 // which Win32 surface APIs take with a window.
 func (w *Window) GetNativeDisplay() unsafe.Pointer {
-	if native := w.nativePointer(); native != nil {
-		return nativeWindowDisplay(native)
+	if native := w.nativeWindow(); native != nil {
+		return moduleAddress()
 	}
 	return nil
 }
 
-func (w *Window) nativePointer() unsafe.Pointer {
+func (w *Window) nativeWindow() *nativeWindow {
 	if w == nil {
 		return nil
 	}
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.native
+}
+
+// NativeSurface describes the window to a GPU backend as a Win32 window.
+func (w *Window) NativeSurface() gpu.NativeSurface {
+	native := w.nativeWindow()
+	if native == nil {
+		return gpu.NativeSurface{}
+	}
+	handle := native.nativeHandle()
+	if handle == 0 {
+		return gpu.NativeSurface{}
+	}
+	return gpu.NativeSurface{
+		Kind:   gpu.NativeSurfaceWin32Window,
+		Handle: handle,
+	}
 }

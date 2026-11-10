@@ -1,135 +1,155 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
 
-/*
-#cgo CXXFLAGS: -std=c++17 -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DNTDDI_VERSION=0x0A00000B
-#cgo LDFLAGS: -static-libstdc++ -static-libgcc -luser32 -lgdi32 -lcomdlg32 -lshell32 -lshlwapi -lole32 -loleaut32 -luuid -ldwmapi -luxtheme -loleacc -ladvapi32 -ld2d1 -ldwrite -lwindowscodecs -limm32 -lwinmm -lruntimeobject -lmfplay -lpropsys
-#include "win32_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
-	"runtime/cgo"
-	"unsafe"
+	"time"
+
+	"github.com/bluescreen10/gamekit/ui"
 )
 
-// win32Event is an event reported by the native layer; see win32_bridge.h.
-type win32Event struct {
-	kind       int
-	a, b, c    int
-	x, y, z, w float64
-	text       string
-	text2      string
-	object     unsafe.Pointer
+// The native layer reports events to the Go layer as values of the types below,
+// and the receiver selects them with a type switch. Events that the ui package
+// defines, such as ui.PointerMoveEvent, ui.KeyEvent, and ui.SurfaceEvent, go as
+// they are.
+
+// eventReceiver receives the events of a native object.
+type eventReceiver interface {
+	receiveEvent(event any)
 }
 
-// win32Receiver receives events for the Go value a handle names.
-type win32Receiver interface {
-	win32Event(event win32Event)
+// queryReceiver answers the questions of a native object, such as whether a
+// window can close. A native object without a queryReceiver takes yes as the
+// answer.
+type queryReceiver interface {
+	answerQuery(query any) bool
 }
 
-// win32Querier answers decisions the native layer asks for.
-type win32Querier interface {
-	win32Query(event win32Event) bool
+// Events of views.
+type (
+	// focusEvent reports that a view or a window got the keyboard focus.
+	focusEvent struct{}
+	// blurEvent reports that a view or a window lost the keyboard focus.
+	blurEvent struct{}
+	// clickEvent reports that the user clicked a button or a link.
+	clickEvent struct{}
+	// changeEvent reports that the user changed the state of a control: its
+	// value, its selection, its checked state, its selected tab, or its
+	// expansion. The receiver reads the new state from the view.
+	changeEvent struct{}
+	// textChangeEvent reports that the user changed the text of a control.
+	// An empty text tells the receiver to read the text from the view.
+	textChangeEvent struct {
+		text string
+	}
+	// submitEvent reports that the user committed the text of a control.
+	submitEvent struct{}
+	// actionEvent reports that the user chose an action.
+	actionEvent struct {
+		id string
+	}
+	// activateEvent reports that the user activated an item, by its
+	// identifier or by its index.
+	activateEvent struct {
+		id    string
+		index int
+	}
+	// sortEvent reports that the user sorted a table by a column.
+	sortEvent struct {
+		column    string
+		ascending bool
+	}
+	// expandEvent reports that the user expanded or collapsed an item, or
+	// revealed or hid a password.
+	expandEvent struct {
+		id       string
+		expanded bool
+	}
+	// closeEvent reports that the user closed a view, a popover, or a dialog.
+	closeEvent struct{}
+	// layoutChangeEvent reports that the user moved a divider.
+	layoutChangeEvent struct{}
+	// rangeChangeEvent reports the new range of a range slider.
+	rangeChangeEvent struct {
+		lower, upper float64
+	}
+	// pageChangeEvent reports the page that the user selected.
+	pageChangeEvent struct {
+		page int
+	}
+	// keyRecordEvent reports the key that a key recorder recorded: the
+	// modifier bits, the key code, and the text of the key.
+	keyRecordEvent struct {
+		modifiers int
+		key       int
+		label     string
+	}
+	// charEvent reports a character that the keyboard layout produced.
+	charEvent struct {
+		char rune
+	}
+	// frameEvent asks a canvas for a frame.
+	frameEvent struct {
+		interval time.Duration
+	}
+)
+
+// Events of windows and the application.
+type (
+	windowResizeEvent struct {
+		size ui.Size
+	}
+	fullscreenEvent struct {
+		fullscreen bool
+	}
+	themeEvent struct {
+		theme ui.Theme
+	}
+	fileDropEvent struct {
+		paths []string
+	}
+	pointerEnterEvent struct {
+		crossing ui.PointerCrossingEvent
+	}
+	pointerLeaveEvent struct {
+		crossing ui.PointerCrossingEvent
+	}
+	occlusionEvent struct {
+		occluded bool
+	}
+	// appActivationEvent reports that the application became active or
+	// inactive.
+	appActivationEvent struct {
+		active bool
+	}
+	notificationEvent struct {
+		activation ui.NotificationActivation
+	}
+)
+
+// Queries.
+type (
+	closeRequest struct{}
+	quitRequest  struct{}
+	// linkRequest asks whether the application opens a link itself. For no,
+	// the backend opens it with the default program.
+	linkRequest struct {
+		url string
+	}
+)
+
+// send reports an event to a receiver, if there is one.
+func send(receiver eventReceiver, event any) {
+	if receiver != nil {
+		receiver.receiveEvent(event)
+	}
 }
 
-func convertEvent(event *C.GKWin32Event) win32Event {
-	result := win32Event{
-		kind:   int(event.kind),
-		a:      int(event.a),
-		b:      int(event.b),
-		c:      int(event.c),
-		x:      float64(event.x),
-		y:      float64(event.y),
-		z:      float64(event.z),
-		w:      float64(event.w),
-		object: event.object,
+// ask asks a receiver a question. Without a receiver that answers queries, the
+// answer is yes.
+func ask(receiver eventReceiver, query any) bool {
+	if answerer, ok := receiver.(queryReceiver); ok {
+		return answerer.answerQuery(query)
 	}
-	if event.text != nil {
-		result.text = C.GoString(event.text)
-	}
-	if event.text2 != nil {
-		result.text2 = C.GoString(event.text2)
-	}
-	return result
-}
-
-//export gkWin32GoEvent
-func gkWin32GoEvent(handle C.uintptr_t, event *C.GKWin32Event) {
-	if handle == 0 || event == nil {
-		return
-	}
-	if receiver, ok := cgo.Handle(handle).Value().(win32Receiver); ok {
-		receiver.win32Event(convertEvent(event))
-	}
-}
-
-//export gkWin32GoQuery
-func gkWin32GoQuery(handle C.uintptr_t, event *C.GKWin32Event) C.int {
-	if handle == 0 || event == nil {
-		return 1
-	}
-	if querier, ok := cgo.Handle(handle).Value().(win32Querier); ok {
-		return boolInt(querier.win32Query(convertEvent(event)))
-	}
-	return 1
-}
-
-// cString returns a C copy of value that the caller must free.
-func cString(value string) *C.char {
-	return C.CString(value)
-}
-
-func freeCString(value *C.char) {
-	C.free(unsafe.Pointer(value))
-}
-
-// goStringFree converts a malloc'd C string and frees it.
-func goStringFree(value *C.char) string {
-	if value == nil {
-		return ""
-	}
-	defer C.free(unsafe.Pointer(value))
-	return C.GoString(value)
-}
-
-// joinNul joins values into a NUL-separated buffer, as the native layer
-// expects for string lists.
-func joinNul(values []string) []byte {
-	var buffer []byte
-	for _, value := range values {
-		buffer = append(buffer, value...)
-		buffer = append(buffer, 0)
-	}
-	return buffer
-}
-
-// splitNul splits a NUL-separated buffer of size bytes.
-func splitNul(buffer unsafe.Pointer, size C.size_t) []string {
-	if buffer == nil || size == 0 {
-		return nil
-	}
-	data := C.GoBytes(buffer, C.int(size))
-	var values []string
-	start := 0
-	for i, b := range data {
-		if b == 0 {
-			values = append(values, string(data[start:i]))
-			start = i + 1
-		}
-	}
-	if start < len(data) {
-		values = append(values, string(data[start:]))
-	}
-	return values
-}
-
-// bytesPointer returns a C pointer to the first byte of buffer, or nil.
-func bytesPointer(buffer []byte) *C.char {
-	if len(buffer) == 0 {
-		return nil
-	}
-	return (*C.char)(unsafe.Pointer(&buffer[0]))
+	return true
 }

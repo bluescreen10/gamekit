@@ -1,15 +1,8 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
 
-/*
-#include "window_bridge.h"
-*/
-import "C"
-
 import (
-	"runtime/cgo"
-
 	"github.com/bluescreen10/gamekit/keyboard"
 	"github.com/bluescreen10/gamekit/pointer"
 	"github.com/bluescreen10/gamekit/ui"
@@ -91,93 +84,43 @@ func (w *Window) SetPointerButtonCallback(cb PointerButtonCallback) PointerButto
 	return previous
 }
 
-// windowFromHandle resolves the cgo.Handle the C layer was given back to its *Window.
-//
-// A handle rather than the native pointer, for two reasons: C may not store a Go
-// pointer at all, and handles are never reused, so one can never come to name a
-// different window the way a recycled address could.
-//
-// Note that Handle.Value panics on a handle that has been deleted — it does not return
-// nil. Destroy therefore clears the C-side handle to zero BEFORE releasing the Go one,
-// so anything still dispatching sees zero and stops here. That ordering is what makes
-// this safe, not any tolerance for stale handles.
-func windowFromHandle(h C.uintptr_t) *Window {
-	if h == 0 {
-		// Either the window is mid-construction and has no handle yet, or it has been
-		// destroyed and its handle was cleared.
-		return nil
-	}
-	w, _ := cgo.Handle(h).Value().(*Window)
-	return w
+// The native window calls these for every event, whether or not a callback is
+// registered. Key and button dispatch update the polling state of the window
+// first. Every path releases the lock before it calls user code, so callbacks
+// can call back into the window.
+
+// dispatchNativeKey reports a key that the native window received.
+func (w *Window) dispatchNativeKey(key, scancode, action, mods int) {
+	w.dispatchKey(keyboard.Key(key), scancode, keyboard.KeyAction(action), keyboard.ModifierKey(mods))
 }
 
-// The C layer calls these for every event, whether or not a callback is registered —
-// see the note in window_bridge.h. Key and button dispatch update Window's polling
-// state first. Every path releases the lock before invoking user code, so callbacks
-// are free to call back into the window.
-
-//export gkWin32GoKeyEvent
-func gkWin32GoKeyEvent(h C.uintptr_t, key, scancode, action, mods C.int) {
-	w := windowFromHandle(h)
-	if w == nil {
-		return
-	}
-	w.dispatchKey(keyboard.Key(key), int(scancode), keyboard.KeyAction(action), keyboard.ModifierKey(mods))
+// dispatchNativeButton reports a button of the pointer that the native window
+// received.
+func (w *Window) dispatchNativeButton(button, action, mods int) {
+	w.dispatchPointerButton(pointer.Button(button), pointer.ButtonAction(action), keyboard.ModifierKey(mods))
 }
 
-//export gkWin32GoCharEvent
-func gkWin32GoCharEvent(h C.uintptr_t, codepoint C.uint) {
-	w := windowFromHandle(h)
-	if w == nil {
-		return
-	}
+// dispatchChar reports a character that the keyboard layout produced.
+func (w *Window) dispatchChar(char rune) {
 	w.mu.RLock()
 	cb := w.charCallback
 	w.mu.RUnlock()
 	if cb != nil {
-		cb(w, rune(codepoint))
+		cb(w, char)
 	}
 }
 
-//export gkWin32GoScrollEvent
-func gkWin32GoScrollEvent(h C.uintptr_t, x, y C.double) {
-	w := windowFromHandle(h)
-	if w == nil {
-		return
-	}
+// dispatchScroll reports scrolling.
+func (w *Window) dispatchScroll(x, y float64) {
 	w.mu.RLock()
 	cb := w.scrollCallback
 	w.mu.RUnlock()
 	if cb != nil {
-		cb(w, float64(x), float64(y))
+		cb(w, x, y)
 	}
 }
 
-//export gkWin32GoPointerButtonEvent
-func gkWin32GoPointerButtonEvent(h C.uintptr_t, button, action, mods C.int) {
-	w := windowFromHandle(h)
-	if w == nil {
-		return
-	}
-	w.dispatchPointerButton(pointer.Button(button), pointer.ButtonAction(action), keyboard.ModifierKey(mods))
-}
-
-//export gkWin32GoWindowMove
-func gkWin32GoWindowMove(h C.uintptr_t, x, y C.int) {
-	w := windowFromHandle(h)
-	if w != nil {
-		w.dispatchMove(ui.Point{X: int(x), Y: int(y)})
-	}
-}
-
-// newWindowHandle allocates the cgo.Handle naming w to the C layer, and
-// deleteWindowHandle releases it. Split out so window.go stays free of cgo.
-func newWindowHandle(w *Window) uintptr {
-	return uintptr(cgo.NewHandle(w))
-}
-
-func deleteWindowHandle(h uintptr) {
-	if h != 0 {
-		cgo.Handle(h).Delete()
-	}
+// dispatchNativeMove reports a new position of the native window.
+func (w *Window) dispatchNativeMove(x, y int) {
+	w.dispatchMove(ui.Point{X: x, Y: y})
 }

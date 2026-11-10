@@ -1,18 +1,11 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
-
-/*
-#include "win32_bridge.h"
-*/
-import "C"
 
 import (
 	"errors"
 	"fmt"
-	"runtime/cgo"
 	"sync"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -22,8 +15,7 @@ import (
 type menu struct {
 	window  *Window
 	mu      sync.RWMutex
-	native  unsafe.Pointer
-	handle  cgo.Handle
+	native  *nativeMenu
 	actions []ui.Action
 	items   []ui.MenuItem
 	// inherited are actions supplied by the container that shows the menu.
@@ -40,10 +32,8 @@ func newMenu(options ui.MenuOptions) (*menu, error) {
 		actions: append([]ui.Action(nil), options.Actions...),
 		items:   cloneMenuItems(options.Items),
 	}
-	result.handle = cgo.NewHandle(result)
-	result.native = C.gkWin32MenuCreate(C.uintptr_t(result.handle), nil)
+	result.native = newNativeMenu(result, "")
 	if result.native == nil {
-		result.handle.Delete()
 		return nil, errors.New("ui/win32: native backend could not create a menu")
 	}
 	result.rebuild()
@@ -62,16 +52,17 @@ func cloneMenuItems(items []ui.MenuItem) []ui.MenuItem {
 	return result
 }
 
-func (m *menu) win32Event(event win32Event) {
-	if event.kind != C.GK_EVENT_ACTION {
+func (m *menu) receiveEvent(event any) {
+	action, ok := event.(actionEvent)
+	if !ok {
 		return
 	}
 	for _, handler := range m.listeners.snapshot() {
-		handler(event.text)
+		handler(action.id)
 	}
 }
 
-func (m *menu) nativeMenu() unsafe.Pointer {
+func (m *menu) nativeMenu() *nativeMenu {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.closed {
@@ -88,12 +79,9 @@ func (m *menu) Close() {
 	}
 	m.closed = true
 	native := m.native
-	handle := m.handle
 	m.native = nil
 	m.mu.Unlock()
-	C.gkWin32MenuSetHandle(native, 0)
-	C.gkWin32Release(native)
-	handle.Delete()
+	native.setReceiver(nil)
 	m.window.releaseResource(m)
 }
 
@@ -177,15 +165,15 @@ func (m *menu) rebuild() {
 	if closed || native == nil {
 		return
 	}
-	C.gkWin32MenuClear(native)
+	native.clear()
 	m.build(native, items)
 }
 
-func (m *menu) build(native unsafe.Pointer, items []ui.MenuItem) {
+func (m *menu) build(native *nativeMenu, items []ui.MenuItem) {
 	for _, item := range items {
 		switch {
 		case item.Separator:
-			C.gkWin32MenuAddSeparator(native)
+			native.addSeparator()
 		case item.ActionID != "":
 			action, ok := m.lookup(item.ActionID)
 			if !ok {
@@ -194,36 +182,23 @@ func (m *menu) build(native unsafe.Pointer, items []ui.MenuItem) {
 			}
 			addMenuAction(native, action)
 		default:
-			title := cString(item.Title)
-			submenu := C.gkWin32MenuAddSubmenu(native, title)
-			freeCString(title)
+			submenu := native.addSubmenu(item.Title)
 			m.build(submenu, item.Items)
 		}
 	}
 }
 
-func addMenuAction(native unsafe.Pointer, action ui.Action) {
-	id := cString(action.ID)
-	text := cString(action.Text)
-	tooltip := cString(action.Tooltip)
+func addMenuAction(native *nativeMenu, action ui.Action) {
 	key, modifiers := keyEquivalent(action.Shortcut)
-	keyValue := cString(key)
-	defer freeCString(id)
-	defer freeCString(text)
-	defer freeCString(tooltip)
-	defer freeCString(keyValue)
-	icon := nativeIcon(action.Icon, 16)
-	C.gkWin32MenuAddItem(native, id, text, boolInt(action.Enabled), boolInt(action.Checked),
-		keyValue, C.int(modifiers), icon, tooltip)
-	C.gkWin32Release(icon)
+	icon := newIcon(action.Icon, 16)
+	native.addItem(action.ID, action.Text, action.Enabled, action.Checked, key, modifiers, icon,
+		action.Tooltip)
 }
 
 // setActionState updates every item for id; -1 leaves a field unchanged.
 func (m *menu) setActionState(id string, enabled, checked int) {
 	if native := m.nativeMenu(); native != nil {
-		value := cString(id)
-		defer freeCString(value)
-		C.gkWin32MenuSetActionState(native, value, C.int(enabled), C.int(checked))
+		native.setActionState(id, enabled, checked)
 	}
 }
 
@@ -237,18 +212,18 @@ func (c *contextMenu) Popup(widget ui.Widget, position ui.Point) error {
 	if !ok {
 		return errors.New("ui/win32: widget belongs to another backend")
 	}
-	view := owner.base().nativePointer()
+	view := owner.base().nativeView()
 	native := c.nativeMenu()
 	if view == nil || native == nil {
 		return ui.ErrClosed
 	}
-	C.gkWin32MenuPopup(native, view, C.double(position.X), C.double(position.Y))
+	native.popup(view, float64(position.X), float64(position.Y))
 	return nil
 }
 
 // CreateMenu creates a native menu.
 func (w *Window) CreateMenu(options ui.MenuOptions) (ui.Menu, error) {
-	if w.nativePointer() == nil {
+	if w.nativeWindow() == nil {
 		return nil, ui.ErrClosed
 	}
 	result, err := newMenu(options)
@@ -262,7 +237,7 @@ func (w *Window) CreateMenu(options ui.MenuOptions) (ui.Menu, error) {
 
 // CreateContextMenu creates a native context menu.
 func (w *Window) CreateContextMenu(options ui.ContextMenuOptions) (ui.ContextMenu, error) {
-	if w.nativePointer() == nil {
+	if w.nativeWindow() == nil {
 		return nil, ui.ErrClosed
 	}
 	result, err := newMenu(ui.MenuOptions(options))

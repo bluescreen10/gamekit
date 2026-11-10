@@ -1,18 +1,11 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
-
-/*
-#include "win32_bridge.h"
-*/
-import "C"
 
 import (
 	"errors"
 	"fmt"
-	"runtime/cgo"
 	"sync"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -20,8 +13,7 @@ import (
 // systemTray is an icon in the notification area of the Windows taskbar.
 type systemTray struct {
 	mu        sync.RWMutex
-	native    unsafe.Pointer
-	handle    cgo.Handle
+	native    *nativeTray
 	icon      ui.IconSource
 	title     string
 	tooltip   string
@@ -36,7 +28,7 @@ func (w *Window) CreateSystemTray(options ui.SystemTrayOptions) (ui.SystemTray, 
 	if err := options.Validate(); err != nil {
 		return nil, err
 	}
-	if w.nativePointer() == nil {
+	if w.nativeWindow() == nil {
 		return nil, ui.ErrClosed
 	}
 	tray := &systemTray{
@@ -45,10 +37,8 @@ func (w *Window) CreateSystemTray(options ui.SystemTrayOptions) (ui.SystemTray, 
 		tooltip: options.Tooltip,
 		visible: true,
 	}
-	tray.handle = cgo.NewHandle(tray)
-	tray.native = C.gkWin32TrayCreate(C.uintptr_t(tray.handle))
+	tray.native = newTray(tray)
 	if tray.native == nil {
-		tray.handle.Delete()
 		return nil, errors.New("ui/win32: the menu bar could not create a status item")
 	}
 	tray.apply()
@@ -61,8 +51,8 @@ func (w *Window) CreateSystemTray(options ui.SystemTrayOptions) (ui.SystemTray, 
 	return tray, nil
 }
 
-func (t *systemTray) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_ACTIVATE {
+func (t *systemTray) receiveEvent(event any) {
+	if _, ok := event.(activateEvent); ok {
 		each(&t.activates, func(handler ui.FocusHandler) {
 			handler()
 		})
@@ -78,16 +68,11 @@ func (t *systemTray) apply() {
 	if native == nil {
 		return
 	}
-	image := nativeIcon(icon, 15)
-	defer C.gkWin32Release(image)
-	titleValue := cString(title)
-	tooltipValue := cString(tooltip)
-	defer freeCString(titleValue)
-	defer freeCString(tooltipValue)
-	C.gkWin32TrayConfigure(native, image, boolInt(icon.SystemName != ""), titleValue, tooltipValue)
+	image := newIcon(icon, 15)
+	native.configure(image, icon.SystemName != "", title, tooltip)
 }
 
-func (t *systemTray) nativeTray() unsafe.Pointer {
+func (t *systemTray) nativeTray() *nativeTray {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.native
@@ -101,8 +86,7 @@ func (t *systemTray) Close() {
 	if native == nil {
 		return
 	}
-	C.gkWin32TrayRemove(native)
-	t.handle.Delete()
+	native.destroy()
 }
 
 func (t *systemTray) Icon() ui.IconSource {
@@ -169,7 +153,7 @@ func (t *systemTray) SetMenu(menu ui.Menu) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	var nativeMenu unsafe.Pointer
+	var nativeMenu *nativeMenu
 	if menu != nil {
 		owned, err := ownedMenu(menu)
 		if err != nil {
@@ -179,7 +163,7 @@ func (t *systemTray) SetMenu(menu ui.Menu) error {
 			return ui.ErrClosed
 		}
 	}
-	C.gkWin32TraySetMenu(native, nativeMenu)
+	native.setMenu(nativeMenu)
 	t.mu.Lock()
 	t.menu = menu
 	t.mu.Unlock()
@@ -197,7 +181,7 @@ func (t *systemTray) SetVisible(visible bool) {
 	if native == nil {
 		return
 	}
-	C.gkWin32TraySetVisible(native, boolInt(visible))
+	native.setVisible(visible)
 	t.mu.Lock()
 	t.visible = visible
 	t.mu.Unlock()
@@ -214,7 +198,7 @@ func (t *systemTray) SetAttention(attention bool) {
 	if native == nil {
 		return
 	}
-	C.gkWin32TraySetAttention(native, boolInt(attention))
+	native.setAttention(attention)
 	t.mu.Lock()
 	t.attention = attention
 	t.mu.Unlock()
@@ -225,8 +209,8 @@ func (t *systemTray) Bounds() (ui.Rect, error) {
 	if native == nil {
 		return ui.Rect{}, ui.ErrClosed
 	}
-	var x, y, width, height C.double
-	if C.gkWin32TrayBounds(native, &x, &y, &width, &height) == 0 {
+	x, y, width, height, ok := native.bounds()
+	if !ok {
 		return ui.Rect{}, fmt.Errorf("ui/win32: the item is not shown in the notification area: %w",
 			ui.ErrNotSupported)
 	}

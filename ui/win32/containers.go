@@ -1,25 +1,17 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
 
-/*
-#include "win32_bridge.h"
-#include "widget_bridge.h"
-*/
-import "C"
-
 import (
 	"errors"
-	"runtime/cgo"
 	"slices"
 	"sync"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
 
 // adopt validates child for container and moves its view into into.
-func adopt(container nativeWidget, child ui.Widget, into unsafe.Pointer) (nativeWidget, error) {
+func adopt(container nativeWidget, child ui.Widget, into *nativeView) (nativeWidget, error) {
 	native, err := validateContainerChild(container, child)
 	if err != nil {
 		return nil, err
@@ -30,7 +22,7 @@ func adopt(container nativeWidget, child ui.Widget, into unsafe.Pointer) (native
 
 // adoptAll adopts children, rejecting duplicates. It validates every child
 // before it moves any, so an error leaves all children unchanged.
-func adoptAll(container nativeWidget, children []ui.Widget, into unsafe.Pointer) ([]nativeWidget, error) {
+func adoptAll(container nativeWidget, children []ui.Widget, into *nativeView) ([]nativeWidget, error) {
 	natives, err := validateContainerChildren(container, children)
 	if err != nil {
 		return nil, err
@@ -64,17 +56,17 @@ func validateContainerChildren(container nativeWidget, children []ui.Widget) ([]
 }
 
 // attach moves the view of a validated child into into.
-func attach(container nativeWidget, child nativeWidget, into unsafe.Pointer) {
+func attach(container nativeWidget, child nativeWidget, into *nativeView) {
 	child.base().parent = container
-	C.gkWin32AddChild(into, child.base().nativePointer())
+	into.addChild(child.base().nativeView())
 }
 
 // orphan returns a child to the window when its container lets it go.
 func orphan(child nativeWidget) {
 	base := child.base()
 	base.parent = nil
-	if view := base.nativePointer(); view != nil && base.window != nil {
-		C.gkWin32UIAttachToWindow(base.window.nativeWindowHandle(), view)
+	if view := base.nativeView(); view != nil && base.window != nil {
+		base.window.nativeWindow().attachToWindow(view)
 		base.SetVisible(false)
 	}
 }
@@ -89,7 +81,7 @@ type frameContainer struct {
 	arrangement arrangement
 }
 
-func (w *Window) newFrameContainer(role ui.AccessibilityRole, owner win32Receiver) (*frameContainer, error) {
+func (w *Window) newFrameContainer(role ui.AccessibilityRole, owner eventReceiver) (*frameContainer, error) {
 	window, err := w.windowHandle()
 	if err != nil {
 		return nil, err
@@ -98,14 +90,14 @@ func (w *Window) newFrameContainer(role ui.AccessibilityRole, owner win32Receive
 	if owner == nil {
 		owner = result
 	}
-	result.widgetBase, err = w.newComponent(C.gkWin32ClipViewCreate(window), role, owner)
+	result.widgetBase, err = w.newComponent(window.newClipView(), role, owner)
 	if err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func (f *frameContainer) win32Event(win32Event) {
+func (f *frameContainer) receiveEvent(event any) {
 	// A frame sends no native events.
 }
 
@@ -114,7 +106,7 @@ func (f *frameContainer) base() *widgetBase {
 }
 
 func (f *frameContainer) setChildren(children []ui.Widget) error {
-	adopted, err := adoptAll(f, children, f.nativePointer())
+	adopted, err := adoptAll(f, children, f.nativeView())
 	if err != nil {
 		return err
 	}
@@ -335,49 +327,50 @@ func (w *Window) CreateGroupBox(options ui.GroupBoxOptions) (ui.GroupBox, error)
 	if err != nil {
 		return nil, err
 	}
-	title, subtitle := cString(options.Title), cString(options.Subtitle)
-	defer freeCString(title)
-	defer freeCString(subtitle)
 	result := &groupBox{title: options.Title, subtitle: options.Subtitle}
-	if result.widgetBase, err = w.newComponent(C.gkWin32GroupBoxCreate(window, title, subtitle), ui.RoleGroup, result); err != nil {
+	if result.widgetBase, err = w.newComponent(window.newGroupBox(options.Title, options.Subtitle), ui.RoleGroup, result); err != nil {
 		return nil, err
 	}
-	if result.content, err = adopt(result, options.Content, result.nativePointer()); err != nil {
+	if result.content, err = adopt(result, options.Content, result.nativeView()); err != nil {
 		result.widgetBase.Close()
 		return nil, err
 	}
 	return result, nil
 }
 
-func (g *groupBox) win32Event(win32Event) {
+func (g *groupBox) receiveEvent(event any) {
 	// A group box sends no native events.
 }
+
 func (g *groupBox) Title() string {
 	return g.title
 }
+
 func (g *groupBox) SetTitle(title string) {
 	g.title = title
 	g.apply()
 }
+
 func (g *groupBox) Subtitle() string {
 	return g.subtitle
 }
+
 func (g *groupBox) SetSubtitle(text string) {
 	g.subtitle = text
 	g.apply()
 }
+
 func (g *groupBox) Content() ui.Widget {
 	return g.content
 }
+
 func (g *groupBox) apply() {
-	if native := g.nativePointer(); native != nil {
-		title, subtitle := cString(g.title), cString(g.subtitle)
-		defer freeCString(title)
-		defer freeCString(subtitle)
-		C.gkWin32GroupBoxSet(native, title, subtitle)
+	if native := g.nativeView(); native != nil {
+		native.setGroupBoxTitle(g.title, g.subtitle)
 		g.relayout()
 	}
 }
+
 func (g *groupBox) SetBounds(bounds ui.Rect) {
 	previousTop := g.contentTop
 	g.widgetBase.SetBounds(bounds)
@@ -388,34 +381,35 @@ func (g *groupBox) SetBounds(bounds ui.Rect) {
 		g.relayoutParent()
 	}
 }
+
 func (g *groupBox) relayout() {
-	native := g.nativePointer()
+	native := g.nativeView()
 	if native == nil || g.content == nil {
 		return
 	}
-	var width, height, top C.int
-	C.gkWin32GroupBoxBody(native, &width, &height, &top)
-	g.contentTop = int(top)
+	width, height, top := native.groupBoxBody()
+	g.contentTop = top
 	g.content.SetBounds(ui.Rect{
 		Position: ui.Point{Y: int(top)},
 		Size:     ui.Size{Width: int(width), Height: max(0, int(height-top))},
 	})
 }
+
 func (g *groupBox) PreferredSize() ui.Size {
-	native := g.nativePointer()
+	native := g.nativeView()
 	if native == nil || g.content == nil {
 		return ui.Size{}
 	}
-	var chromeWidth, chromeHeight, width, height, top C.int
-	C.gkWin32GroupBoxChrome(native, &chromeWidth, &chromeHeight)
-	C.gkWin32GroupBoxBody(native, &width, &height, &top)
+	chromeWidth, chromeHeight := native.groupBoxChrome()
+	width, _, _ := native.groupBoxBody()
 	content := preferredOf(g.content)
 	// Before the first layout the box has no width, and a subtitle measured
 	// at that width wraps after every word. Measure it at the width that the
 	// content asks for instead.
-	top = C.gkWin32GroupBoxSubtitleHeight(native, C.int(max(int(width), content.Width)))
+	top := native.groupBoxSubtitleHeight(max(width, content.Width))
 	return ui.Size{Width: content.Width + int(chromeWidth), Height: content.Height + int(chromeHeight) + int(top)}
 }
+
 func (g *groupBox) Close() {
 	if g.content != nil {
 		g.content.Close()
@@ -449,7 +443,7 @@ func (w *Window) CreateSplitView(options ui.SplitViewOptions) (ui.SplitView, err
 		panes:     append([]ui.SplitPane(nil), options.Panes...),
 		pending:   append([]int(nil), options.Dividers...),
 	}
-	native := C.gkWin32SplitViewCreate(window, boolInt(options.Direction == ui.Horizontal), C.int(len(options.Panes)))
+	native := window.newSplitView(options.Direction == ui.Horizontal, len(options.Panes))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSplitView, result); err != nil {
 		return nil, err
 	}
@@ -464,15 +458,15 @@ func (w *Window) CreateSplitView(options ui.SplitViewOptions) (ui.SplitView, err
 		return nil, err
 	}
 	for i, pane := range options.Panes {
-		attach(result, children[i], C.gkWin32SplitViewPane(native, C.int(i)))
-		C.gkWin32SplitViewSetPane(native, C.int(i), C.double(pane.Minimum), boolInt(pane.Collapsible))
+		attach(result, children[i], native.paneView(i))
+		native.configurePane(i, float64(pane.Minimum), pane.Collapsible)
 	}
 	result.children = children
 	return result, nil
 }
 
-func (s *splitView) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_RESIZE {
+func (s *splitView) receiveEvent(event any) {
+	if _, ok := event.(layoutChangeEvent); ok {
 		s.layoutPanes()
 		positions := s.Dividers()
 		each(&s.changes, func(handler func([]int)) {
@@ -496,13 +490,12 @@ func (s *splitView) relayout() {
 }
 
 func (s *splitView) layoutPanes() {
-	native := s.nativePointer()
+	native := s.nativeView()
 	if native == nil {
 		return
 	}
 	for i, child := range s.children {
-		var x, y, width, height C.int
-		C.gkWin32SplitViewPaneFrame(native, C.int(i), &x, &y, &width, &height)
+		_, _, width, height := native.paneFrame(i)
 		child.SetBounds(ui.Rect{Size: ui.Size{Width: int(width), Height: int(height)}})
 	}
 }
@@ -527,13 +520,13 @@ func (s *splitView) Panes() []ui.SplitPane {
 }
 
 func (s *splitView) Dividers() []int {
-	native := s.nativePointer()
+	native := s.nativeView()
 	if native == nil {
 		return nil
 	}
 	positions := make([]int, max(0, len(s.panes)-1))
 	for i := range positions {
-		positions[i] = int(C.gkWin32SplitViewDivider(native, C.int(i)))
+		positions[i] = int(native.dividerPosition(i))
 	}
 	return positions
 }
@@ -545,7 +538,7 @@ func (s *splitView) SetDividers(positions []int) error {
 	if !slices.IsSorted(positions) {
 		return errors.New("ui: split view divider positions must be ascending")
 	}
-	native := s.nativePointer()
+	native := s.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
@@ -554,7 +547,7 @@ func (s *splitView) SetDividers(positions []int) error {
 		return nil
 	}
 	for i, position := range positions {
-		C.gkWin32SplitViewSetDivider(native, C.int(i), C.double(position))
+		native.setDividerPosition(i, float64(position))
 	}
 	s.layoutPanes()
 	return nil
@@ -576,8 +569,7 @@ func (s *splitView) Close() {
 
 type popover struct {
 	window  *Window
-	native  unsafe.Pointer
-	handle  cgo.Handle
+	native  *nativePopover
 	body    *frameContainer
 	anchor  nativeWidget
 	content nativeWidget
@@ -595,16 +587,13 @@ func (w *Window) CreatePopover(options ui.PopoverOptions) (ui.Popover, error) {
 		return nil, errors.New("ui/win32: popover anchor belongs to another backend or window")
 	}
 	result := &popover{window: w, anchor: anchor, edge: options.PreferredEdge}
-	result.handle = cgo.NewHandle(result)
-	result.native = C.gkWin32PopoverCreate(C.uintptr_t(result.handle), boolInt(options.Transient))
+	result.native = newPopover(result, options.Transient)
 	body := &frameContainer{}
-	body.widgetBase = newWidgetBase(w, C.gkWin32PopoverBody(result.native), ui.RoleDialog)
-	C.gkWin32Retain(body.nativePointer())
+	body.widgetBase = newWidgetBase(w, result.native.body(), ui.RoleDialog)
 	body.contract.owner = body
 	if err := body.setChildren([]ui.Widget{options.Content}); err != nil {
 		body.Close()
-		C.gkWin32PopoverRelease(result.native)
-		result.handle.Delete()
+		result.native.destroy()
 		return nil, err
 	}
 	result.body = body
@@ -616,8 +605,8 @@ func (w *Window) CreatePopover(options ui.PopoverOptions) (ui.Popover, error) {
 	return result, nil
 }
 
-func (p *popover) win32Event(event win32Event) {
-	if event.kind == C.GK_EVENT_CLOSE {
+func (p *popover) receiveEvent(event any) {
+	if _, ok := event.(closeEvent); ok {
 		each(&p.hides, func(handler ui.FocusHandler) {
 			handler()
 		})
@@ -633,8 +622,7 @@ func (p *popover) Close() {
 	if p.body != nil {
 		p.body.Close()
 	}
-	C.gkWin32PopoverRelease(native)
-	p.handle.Delete()
+	native.destroy()
 	p.window.releaseResource(p)
 }
 
@@ -642,13 +630,13 @@ func (p *popover) Show() error {
 	if p.native == nil {
 		return ui.ErrClosed
 	}
-	view := p.anchor.base().nativePointer()
+	view := p.anchor.base().nativeView()
 	if view == nil {
 		return ui.ErrClosed
 	}
 	size := preferredOf(p.content)
 	size.Width, size.Height = max(size.Width, 1), max(size.Height, 1)
-	if C.gkWin32PopoverShow(p.native, view, C.int(p.edge), C.int(size.Width), C.int(size.Height)) == 0 {
+	if !p.native.show(view, int(p.edge), size.Width, size.Height) {
 		return errors.New("ui/win32: a popover's anchor must be in a visible window")
 	}
 	p.body.SetBounds(ui.Rect{Size: size})
@@ -657,12 +645,12 @@ func (p *popover) Show() error {
 
 func (p *popover) Hide() {
 	if p.native != nil {
-		C.gkWin32PopoverHide(p.native)
+		p.native.hide()
 	}
 }
 
 func (p *popover) IsShown() bool {
-	return p.native != nil && C.gkWin32PopoverShown(p.native) != 0
+	return p.native != nil && p.native.shown
 }
 
 func (p *popover) Content() ui.Widget {
@@ -755,9 +743,11 @@ func (d *drawer) preferred() ui.Size {
 func (d *drawer) Content() ui.Widget {
 	return d.content
 }
+
 func (d *drawer) IsOpen() bool {
 	return d.open
 }
+
 func (d *drawer) SetOpen(open bool) {
 	if d.open == open {
 		return
@@ -769,6 +759,7 @@ func (d *drawer) SetOpen(open bool) {
 		handler(open)
 	})
 }
+
 func (d *drawer) OnChange(handler ui.ExpansionChangeHandler) ui.Unsubscribe {
 	return subscribe(&d.changes, handler, handler == nil)
 }
@@ -1034,7 +1025,7 @@ func (o *overlayLayout) SetItems(items []ui.OverlayItem) error {
 	}
 	// Later items are drawn on top.
 	for _, child := range o.frameContainer.children {
-		C.gkWin32UIBringToFront(child.base().nativePointer())
+		(child.base().nativeView()).bringToFront()
 	}
 	return nil
 }
@@ -1429,7 +1420,7 @@ type titleBarAccessory struct {
 	window     *Window
 	body       *frameContainer
 	content    nativeWidget
-	controller unsafe.Pointer
+	controller *nativeAccessory
 }
 
 // CreateTitleBarAccessory implements ui.Window.CreateTitleBarAccessory.
@@ -1437,7 +1428,7 @@ func (w *Window) CreateTitleBarAccessory(options ui.TitleBarAccessoryOptions) (u
 	if options.Content == nil {
 		return nil, errors.New("ui: title bar accessory content is required")
 	}
-	window := w.nativeWindowPointer()
+	window := w.nativeWindow()
 	if window == nil {
 		return nil, ui.ErrClosed
 	}
@@ -1465,16 +1456,15 @@ func (w *Window) CreateTitleBarAccessory(options ui.TitleBarAccessoryOptions) (u
 	if alignment != 0 {
 		height = max(height, 28)
 	}
-	var controller unsafe.Pointer
-	if C.gkWin32TitleAccessoryAdd(window, body.nativePointer(), C.int(alignment), C.int(preferred.Width),
-		C.int(height), &controller) == 0 {
+	controller := window.addTitleAccessory(body.nativeView(), alignment, preferred.Width, height)
+	if controller == nil {
 		body.Close()
 		return nil, errors.New("ui/win32: title bar accessories need a titled window")
 	}
 	body.SetBounds(ui.Rect{Size: ui.Size{Width: preferred.Width, Height: height}})
 	// SetBounds places the body at the start of the bar; the bar places it
 	// again at its alignment.
-	C.gkWin32TitleAccessoryLayout(controller)
+	controller.layout()
 	return &titleBarAccessory{window: w, body: body, content: content, controller: controller}, nil
 }
 
@@ -1488,7 +1478,7 @@ func (t *titleBarAccessory) Close() {
 	}
 	controller := t.controller
 	t.controller = nil
-	C.gkWin32TitleAccessoryRemove(controller)
+	controller.remove()
 	t.body.Close()
 }
 

@@ -1,19 +1,12 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
-
-/*
-#include "win32_bridge.h"
-#include "widget_bridge.h"
-*/
-import "C"
 
 import (
 	"errors"
 	"math"
 	"unicode/utf16"
 	"unicode/utf8"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -30,51 +23,62 @@ type labelState struct {
 }
 
 func (l *label) apply() {
-	if native := l.nativePointer(); native != nil {
+	if native := l.nativeView(); native != nil {
 		s := l.state
-		C.gkWin32LabelConfigure(native, C.int(s.alignment), C.int(s.wrap), C.int(s.truncation),
-			boolInt(s.selectable), C.int(s.style), C.int(s.maximumLines))
+		native.configureLabel(int(s.alignment), s.wrap != ui.WrapNone, int(s.truncation),
+			s.selectable, int(s.style), s.maximumLines)
 	}
 }
 
 func (l *label) TextAlignment() ui.TextAlignment {
 	return l.state.alignment
 }
+
 func (l *label) SetTextAlignment(alignment ui.TextAlignment) {
 	l.state.alignment = alignment
 	l.apply()
 }
+
 func (l *label) WrapMode() ui.WrapMode {
 	return l.state.wrap
 }
+
 func (l *label) SetWrapMode(mode ui.WrapMode) {
 	l.state.wrap = mode
 	l.apply()
 }
+
 func (l *label) Truncation() ui.Truncation {
 	return l.state.truncation
 }
+
 func (l *label) SetTruncation(truncation ui.Truncation) {
 	l.state.truncation = truncation
 	l.apply()
 }
+
 func (l *label) IsSelectable() bool {
 	return l.state.selectable
 }
+
 func (l *label) SetSelectable(selectable bool) {
 	l.state.selectable = selectable
 	l.apply()
 }
+
 func (l *label) SemanticStyle() ui.TextStyle {
 	return l.state.style
 }
+
 func (l *label) SetSemanticStyle(style ui.TextStyle) {
 	l.state.style = style
 	l.apply()
 }
+
 func (l *label) MaximumLines() int {
 	return l.state.maximumLines
 }
+
 func (l *label) SetMaximumLines(lines int) {
 	l.state.maximumLines = max(0, lines)
 	l.apply()
@@ -82,8 +86,8 @@ func (l *label) SetMaximumLines(lines int) {
 
 // SetBounds lets a wrapping label measure its height for its width.
 func (l *label) SetBounds(bounds ui.Rect) {
-	if native := l.nativePointer(); native != nil && l.state.wrap != ui.WrapNone {
-		C.gkWin32LabelPreferredWidth(native, C.int(bounds.Size.Width))
+	if native := l.nativeView(); native != nil && l.state.wrap != ui.WrapNone {
+		native.labelPreferredWidth(bounds.Size.Width)
 	}
 	l.widgetBase.SetBounds(bounds)
 }
@@ -100,16 +104,13 @@ type buttonState struct {
 }
 
 func (b *button) apply() {
-	native := b.nativePointer()
+	native := b.nativeView()
 	if native == nil {
 		return
 	}
-	icon := nativeIcon(b.state.icon, 0)
-	defer C.gkWin32Release(icon)
+	icon := newIcon(b.state.icon, 0)
 	key, modifiers := keyEquivalent(b.state.shortcut)
-	value := cString(key)
-	defer freeCString(value)
-	C.gkWin32ButtonConfigure(native, icon, C.int(b.state.placement), C.int(b.state.role), value, C.int(modifiers))
+	native.configureButton(icon, int(b.state.placement), int(b.state.role), key, modifiers)
 	// The icon and its placement change the preferred size.
 	b.relayoutParent()
 }
@@ -117,42 +118,49 @@ func (b *button) apply() {
 func (b *button) Icon() (ui.IconSource, ui.IconPlacement) {
 	return b.state.icon, b.state.placement
 }
+
 func (b *button) SetIcon(icon ui.IconSource, placement ui.IconPlacement) {
 	b.state.icon, b.state.placement = icon, placement
 	b.apply()
 }
+
 func (b *button) Role() ui.ButtonRole {
 	return b.state.role
 }
+
 func (b *button) SetRole(role ui.ButtonRole) {
 	b.state.role = role
 	b.apply()
 }
+
 func (b *button) Shortcut() ui.Shortcut {
 	return b.state.shortcut
 }
+
 func (b *button) SetShortcut(shortcut ui.Shortcut) {
 	b.state.shortcut = shortcut
 	b.apply()
 }
+
 func (b *button) IsBusy() bool {
 	return b.state.busy
 }
+
 func (b *button) SetBusy(busy bool) {
 	b.state.busy = busy
-	if native := b.nativePointer(); native != nil {
-		C.gkWin32ButtonSetBusy(native, boolInt(busy))
+	if native := b.nativeView(); native != nil {
+		native.setButtonBusy(busy)
 	}
 }
+
 func (b *button) Badge() string {
 	return b.state.badge
 }
+
 func (b *button) SetBadge(badge string) {
 	b.state.badge = badge
-	if native := b.nativePointer(); native != nil {
-		value := cString(badge)
-		defer freeCString(value)
-		C.gkWin32ButtonSetBadge(native, value)
+	if native := b.nativeView(); native != nil {
+		native.setButtonBadge(badge)
 	}
 }
 
@@ -171,9 +179,8 @@ func runeRange(text string, selection ui.TextRange) (start, length int) {
 	return start, length
 }
 
-func selectionOf(native unsafe.Pointer, text string) ui.TextRange {
-	var start, length C.int
-	C.gkWin32TextSelection(native, &start, &length)
+func selectionOf(native *nativeView, text string) ui.TextRange {
+	start, length := native.textSelection()
 	return utf16Range(text, int(start), int(length))
 }
 
@@ -190,81 +197,93 @@ type textFieldState struct {
 }
 
 func (t *textField) apply() {
-	native := t.nativePointer()
+	native := t.nativeView()
 	if native == nil {
 		return
 	}
 	s := &t.state
-	prefix := cString(s.prefix)
-	suffix := cString(s.suffix)
-	defer freeCString(prefix)
-	defer freeCString(suffix)
-	C.gkWin32TextFieldConfigure(native, boolInt(s.readOnly), C.int(s.maximumLength), C.int(s.purpose),
-		C.int(s.alignment), prefix, suffix, boolInt(s.spellCheck))
+	native.configureTextField(s.readOnly, s.maximumLength, int(s.purpose),
+		int(s.alignment), s.prefix, s.suffix, s.spellCheck)
 }
 
 func (t *textField) OnSubmit(handler ui.TextChangeHandler) ui.Unsubscribe {
 	return subscribe(&t.state.submits, handler, handler == nil)
 }
+
 func (t *textField) IsReadOnly() bool {
 	return t.state.readOnly
 }
+
 func (t *textField) SetReadOnly(readOnly bool) {
 	t.state.readOnly = readOnly
 	t.apply()
 }
+
 func (t *textField) Selection() ui.TextRange {
-	native := t.nativePointer()
+	native := t.nativeView()
 	if native == nil {
 		return ui.TextRange{}
 	}
 	return selectionOf(native, t.Text())
 }
+
 func (t *textField) SetSelection(selection ui.TextRange) {
-	if native := t.nativePointer(); native != nil {
+	if native := t.nativeView(); native != nil {
 		start, length := runeRange(t.Text(), selection)
-		C.gkWin32SetTextSelection(native, C.int(start), C.int(length))
+		native.setTextSelection(start, length)
 	}
 }
+
 func (t *textField) MaximumLength() int {
 	return t.state.maximumLength
 }
+
 func (t *textField) SetMaximumLength(length int) {
 	t.state.maximumLength = max(0, length)
 	t.apply()
 	t.enforceMaximumLength()
 }
+
 func (t *textField) InputPurpose() ui.InputPurpose {
 	return t.state.purpose
 }
+
 func (t *textField) SetInputPurpose(purpose ui.InputPurpose) {
 	t.state.purpose = purpose
 	t.apply()
 }
+
 func (t *textField) TextAlignment() ui.TextAlignment {
 	return t.state.alignment
 }
+
 func (t *textField) SetTextAlignment(alignment ui.TextAlignment) {
 	t.state.alignment = alignment
 	t.apply()
 }
+
 func (t *textField) Prefix() string {
 	return t.state.prefix
 }
+
 func (t *textField) SetPrefix(prefix string) {
 	t.state.prefix = prefix
 	t.apply()
 }
+
 func (t *textField) Suffix() string {
 	return t.state.suffix
 }
+
 func (t *textField) SetSuffix(suffix string) {
 	t.state.suffix = suffix
 	t.apply()
 }
+
 func (t *textField) IsSpellCheckEnabled() bool {
 	return t.state.spellCheck
 }
+
 func (t *textField) SetSpellCheckEnabled(enabled bool) {
 	t.state.spellCheck = enabled
 	t.apply()
@@ -293,64 +312,74 @@ type textAreaState struct {
 }
 
 func (t *textArea) apply() {
-	if native := t.nativePointer(); native != nil {
+	if native := t.nativeView(); native != nil {
 		s := t.state
-		C.gkWin32TextAreaConfigure(native, C.int(s.wrap), C.int(s.maximumLength),
-			boolInt(s.tabPolicy == ui.TabMovesFocus), boolInt(s.spellCheck))
+		native.configureTextArea(s.wrap != ui.WrapNone, s.maximumLength,
+			s.tabPolicy == ui.TabMovesFocus, s.spellCheck)
 	}
 }
 
 func (t *textArea) WrapMode() ui.WrapMode {
 	return t.state.wrap
 }
+
 func (t *textArea) SetWrapMode(mode ui.WrapMode) {
 	t.state.wrap = mode
 	t.apply()
 }
+
 func (t *textArea) Selection() ui.TextRange {
-	native := t.nativePointer()
+	native := t.nativeView()
 	if native == nil {
 		return ui.TextRange{}
 	}
 	return selectionOf(native, t.Text())
 }
+
 func (t *textArea) SetSelection(selection ui.TextRange) {
-	if native := t.nativePointer(); native != nil {
+	if native := t.nativeView(); native != nil {
 		start, length := runeRange(t.Text(), selection)
-		C.gkWin32SetTextSelection(native, C.int(start), C.int(length))
+		native.setTextSelection(start, length)
 	}
 }
+
 func (t *textArea) ScrollPosition() ui.Point {
-	native := t.nativePointer()
+	native := t.nativeView()
 	if native == nil {
 		return ui.Point{}
 	}
-	var x, y C.int
-	C.gkWin32ScrollPosition(native, &x, &y)
+	x, y := native.scrollPosition()
 	return ui.Point{X: int(x), Y: int(y)}
 }
+
 func (t *textArea) SetScrollPosition(position ui.Point) {
-	if native := t.nativePointer(); native != nil {
-		C.gkWin32SetScrollPosition(native, C.int(position.X), C.int(position.Y), 0)
+	if native := t.nativeView(); native != nil {
+		native.setScrollPosition(position.X, position.Y, false)
 	}
 }
+
 func (t *textArea) MaximumLength() int {
 	return t.state.maximumLength
 }
+
 func (t *textArea) SetMaximumLength(length int) {
 	t.state.maximumLength = max(0, length)
 	t.apply()
 }
+
 func (t *textArea) TabPolicy() ui.TabPolicy {
 	return t.state.tabPolicy
 }
+
 func (t *textArea) SetTabPolicy(policy ui.TabPolicy) {
 	t.state.tabPolicy = policy
 	t.apply()
 }
+
 func (t *textArea) IsSpellCheckEnabled() bool {
 	return t.state.spellCheck
 }
+
 func (t *textArea) SetSpellCheckEnabled(enabled bool) {
 	t.state.spellCheck = enabled
 	t.apply()
@@ -365,34 +394,33 @@ type checkBoxState struct {
 }
 
 func (c *checkBox) apply(state ui.CheckState) {
-	native := c.nativePointer()
+	native := c.nativeView()
 	if native == nil {
 		return
 	}
-	text := cString(c.Text())
-	description := cString(c.state.description)
-	defer freeCString(text)
-	defer freeCString(description)
-	C.gkWin32CheckBoxConfigure(native, boolInt(c.state.allowsMixed), C.int(state),
-		boolInt(c.state.placement == ui.LabelBeforeControl), text, description)
+	native.configureCheckBox(c.state.allowsMixed, int(state),
+		c.state.placement == ui.LabelBeforeControl, c.Text(), c.state.description)
 }
 
 func (c *checkBox) State() ui.CheckState {
-	native := c.nativePointer()
+	native := c.nativeView()
 	if native == nil {
 		return ui.CheckOff
 	}
-	return ui.CheckState(C.gkWin32CheckBoxState(native))
+	return ui.CheckState(native.checkBoxState())
 }
+
 func (c *checkBox) SetState(state ui.CheckState) {
 	if state == ui.CheckMixed && !c.state.allowsMixed {
 		state = ui.CheckOff
 	}
 	c.apply(state)
 }
+
 func (c *checkBox) AllowsMixedState() bool {
 	return c.state.allowsMixed
 }
+
 func (c *checkBox) SetAllowsMixedState(allow bool) {
 	c.state.allowsMixed = allow
 	state := c.State()
@@ -401,16 +429,20 @@ func (c *checkBox) SetAllowsMixedState(allow bool) {
 	}
 	c.apply(state)
 }
+
 func (c *checkBox) LabelPlacement() ui.LabelPlacement {
 	return c.state.placement
 }
+
 func (c *checkBox) SetLabelPlacement(placement ui.LabelPlacement) {
 	c.state.placement = placement
 	c.apply(c.State())
 }
+
 func (c *checkBox) Description() string {
 	return c.state.description
 }
+
 func (c *checkBox) SetDescription(description string) {
 	c.state.description = description
 	c.apply(c.State())
@@ -430,7 +462,7 @@ func (s *selection) applyChoices(choices []ui.Choice) error {
 	if err := ui.ValidateChoices(choices); err != nil {
 		return err
 	}
-	native := s.nativePointer()
+	native := s.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
@@ -438,32 +470,28 @@ func (s *selection) applyChoices(choices []ui.Choice) error {
 	if index := s.SelectedIndex(); index >= 0 && index < len(s.choices) {
 		selectedID = s.choices[index].ID
 	}
-	titles := make([]string, len(choices))
-	enabled := make([]C.int, len(choices))
 	items := make([]string, len(choices))
 	selected := -1
 	for i, choice := range choices {
-		titles[i] = choice.Text
 		items[i] = choice.Text
-		enabled[i] = boolInt(choice.Enabled)
 		if choice.ID == selectedID {
 			selected = i
 		}
 	}
-	buffer := joinNul(titles)
-	C.gkWin32SetChoices(native, bytesPointer(buffer), C.size_t(len(buffer)), &enabled[0], C.int(len(choices)))
+	native.setChoices(choices)
 	s.items = items
 	s.choices = append([]ui.Choice(nil), choices...)
 	if selected < 0 && len(choices) > 0 {
 		selected = 0
 	}
-	C.gkWin32UISetSelectionIndex(native, C.int(selected))
+	native.setSelectionIndex(selected)
 	return nil
 }
 
 func (s *selection) Choices() []ui.Choice {
 	return append([]ui.Choice(nil), s.choices...)
 }
+
 func (s *selection) SetChoices(choices []ui.Choice) error {
 	return s.applyChoices(choices)
 }
@@ -474,10 +502,8 @@ type radioGroupState struct {
 }
 
 func (r *radioGroup) applyLayout() {
-	if native := r.nativePointer(); native != nil {
-		value := cString(r.state.label)
-		defer freeCString(value)
-		C.gkWin32RadioGroupConfigure(native, boolInt(r.state.orientation == ui.Horizontal), value)
+	if native := r.nativeView(); native != nil {
+		native.configureRadioGroup(r.state.orientation == ui.Horizontal, r.state.label)
 		r.relayoutParent()
 	}
 }
@@ -485,13 +511,16 @@ func (r *radioGroup) applyLayout() {
 func (r *radioGroup) Orientation() ui.LayoutDirection {
 	return r.state.orientation
 }
+
 func (r *radioGroup) SetOrientation(orientation ui.LayoutDirection) {
 	r.state.orientation = orientation
 	r.applyLayout()
 }
+
 func (r *radioGroup) Label() string {
 	return r.state.label
 }
+
 func (r *radioGroup) SetLabel(label string) {
 	r.state.label = label
 	r.applyLayout()
@@ -504,23 +533,24 @@ type selectState struct {
 }
 
 func (s *selectControl) applyPresentation() {
-	if native := s.nativePointer(); native != nil {
-		value := cString(s.state.placeholder)
-		defer freeCString(value)
-		C.gkWin32SelectConfigure(native, value, C.int(s.state.popupWidth))
+	if native := s.nativeView(); native != nil {
+		native.configureSelect(s.state.placeholder, s.state.popupWidth)
 	}
 }
 
 func (s *selectControl) Placeholder() string {
 	return s.state.placeholder
 }
+
 func (s *selectControl) SetPlaceholder(placeholder string) {
 	s.state.placeholder = placeholder
 	s.applyPresentation()
 }
+
 func (s *selectControl) PopupWidth() int {
 	return s.state.popupWidth
 }
+
 func (s *selectControl) SetPopupWidth(width int) {
 	s.state.popupWidth = max(0, width)
 	s.applyPresentation()
@@ -536,8 +566,8 @@ func (s *selectControl) VisibleRowCount() int {
 // lets Windows choose.
 func (s *selectControl) SetVisibleRowCount(rows int) {
 	s.state.visibleRows = max(0, rows)
-	if native := s.nativePointer(); native != nil {
-		C.gkWin32SelectSetVisibleRows(native, C.int(s.state.visibleRows))
+	if native := s.nativeView(); native != nil {
+		native.setVisibleRows(s.state.visibleRows)
 	}
 }
 
@@ -550,9 +580,9 @@ type sliderState struct {
 }
 
 func (s *slider) apply() {
-	if native := s.nativePointer(); native != nil {
-		C.gkWin32SliderConfigure(native, boolInt(s.state.orientation == ui.Vertical),
-			C.double(s.minimum), C.double(s.maximum), C.double(s.ticks().Frequency), boolInt(s.ticks().SnapToTicks))
+	if native := s.nativeView(); native != nil {
+		native.configureSlider(s.state.orientation == ui.Vertical,
+			s.minimum, s.maximum, s.ticks().Frequency, s.ticks().SnapToTicks)
 	}
 }
 
@@ -567,6 +597,7 @@ func (s *slider) ticks() ui.SliderTicks {
 func (s *slider) Orientation() ui.LayoutDirection {
 	return s.state.orientation
 }
+
 func (s *slider) SetOrientation(orientation ui.LayoutDirection) {
 	s.state.orientation = orientation
 	s.apply()
@@ -581,13 +612,15 @@ func (s *slider) IsInverted() bool {
 // native layer maps the trackbar position, so the value does not change.
 func (s *slider) SetInverted(inverted bool) {
 	s.state.inverted = inverted
-	if native := s.nativePointer(); native != nil {
-		C.gkWin32SliderSetInverted(native, boolInt(inverted))
+	if native := s.nativeView(); native != nil {
+		native.setSliderInverted(inverted)
 	}
 }
+
 func (s *slider) Ticks() ui.SliderTicks {
 	return s.state.ticks
 }
+
 func (s *slider) SetTicks(ticks ui.SliderTicks) {
 	if math.IsNaN(ticks.Frequency) || ticks.Frequency < 0 {
 		ticks.Frequency = 0
@@ -604,39 +637,44 @@ type progressState struct {
 }
 
 func (p *progressBar) apply() {
-	if native := p.nativePointer(); native != nil {
-		text := cString(p.state.text)
-		defer freeCString(text)
-		C.gkWin32ProgressConfigure(native, boolInt(p.state.mode == ui.ProgressIndeterminate),
-			boolInt(p.state.orientation == ui.Vertical), text, C.int(p.state.condition))
+	if native := p.nativeView(); native != nil {
+		native.configureProgress(p.state.mode == ui.ProgressIndeterminate,
+			p.state.orientation == ui.Vertical, p.state.text, int(p.state.condition))
 	}
 }
 
 func (p *progressBar) Mode() ui.ProgressMode {
 	return p.state.mode
 }
+
 func (p *progressBar) SetMode(mode ui.ProgressMode) {
 	p.state.mode = mode
 	p.apply()
 }
+
 func (p *progressBar) Orientation() ui.LayoutDirection {
 	return p.state.orientation
 }
+
 func (p *progressBar) SetOrientation(orientation ui.LayoutDirection) {
 	p.state.orientation = orientation
 	p.apply()
 }
+
 func (p *progressBar) Text() string {
 	return p.state.text
 }
+
 func (p *progressBar) SetText(text string) {
 	p.state.text = text
 	p.apply()
 	p.announceText(text)
 }
+
 func (p *progressBar) State() ui.ProgressState {
 	return p.state.condition
 }
+
 func (p *progressBar) SetState(state ui.ProgressState) {
 	p.state.condition = state
 	p.apply()
@@ -648,23 +686,24 @@ type activityState struct {
 }
 
 func (a *activityIndicator) apply() {
-	if native := a.nativePointer(); native != nil {
-		label := cString(a.state.label)
-		defer freeCString(label)
-		C.gkWin32ActivityConfigure(native, C.int(a.state.size), label)
+	if native := a.nativeView(); native != nil {
+		native.configureActivity(int(a.state.size), a.state.label)
 	}
 }
 
 func (a *activityIndicator) ControlSize() ui.ControlSize {
 	return a.state.size
 }
+
 func (a *activityIndicator) SetControlSize(size ui.ControlSize) {
 	a.state.size = size
 	a.apply()
 }
+
 func (a *activityIndicator) Label() string {
 	return a.state.label
 }
+
 func (a *activityIndicator) SetLabel(label string) {
 	a.state.label = label
 	a.apply()
@@ -679,11 +718,9 @@ type separatorState struct {
 }
 
 func (s *separator) apply() {
-	if native := s.nativePointer(); native != nil {
-		label := cString(s.state.label)
-		defer freeCString(label)
-		C.gkWin32SeparatorConfigure(native, boolInt(s.direction == ui.Vertical), label,
-			boolInt(s.state.presentation == ui.SeparatorInset), C.int(s.Thickness()))
+	if native := s.nativeView(); native != nil {
+		native.configureSeparator(s.direction == ui.Vertical, s.state.label,
+			s.state.presentation == ui.SeparatorInset, s.Thickness())
 		s.relayoutParent()
 	}
 }
@@ -692,26 +729,32 @@ func (s *separator) SetDirection(direction ui.LayoutDirection) {
 	s.direction = direction
 	s.apply()
 }
+
 func (s *separator) Label() string {
 	return s.state.label
 }
+
 func (s *separator) SetLabel(label string) {
 	s.state.label = label
 	s.apply()
 }
+
 func (s *separator) Presentation() ui.SeparatorPresentation {
 	return s.state.presentation
 }
+
 func (s *separator) SetPresentation(presentation ui.SeparatorPresentation) {
 	s.state.presentation = presentation
 	s.apply()
 }
+
 func (s *separator) Thickness() int {
 	if s.state.thickness <= 0 {
 		return 1
 	}
 	return s.state.thickness
 }
+
 func (s *separator) SetThickness(thickness int) {
 	s.state.thickness = max(1, thickness)
 	s.apply()
@@ -725,11 +768,9 @@ type imageState struct {
 }
 
 func (i *imageView) apply() {
-	if native := i.nativePointer(); native != nil {
-		alternative := cString(i.state.alternative)
-		defer freeCString(alternative)
-		C.gkWin32ImageConfigure(native, C.int(i.state.alignment),
-			boolInt(i.state.interpolation == ui.InterpolationNearest), alternative, C.double(i.SourceScale()))
+	if native := i.nativeView(); native != nil {
+		native.configureImage(int(i.state.alignment),
+			i.state.interpolation == ui.InterpolationNearest, i.state.alternative, i.SourceScale())
 	}
 	// The source scale changes the preferred size.
 	i.relayoutParent()
@@ -738,30 +779,37 @@ func (i *imageView) apply() {
 func (i *imageView) Alignment() ui.Anchor {
 	return i.state.alignment
 }
+
 func (i *imageView) SetAlignment(alignment ui.Anchor) {
 	i.state.alignment = alignment
 	i.apply()
 }
+
 func (i *imageView) Interpolation() ui.Interpolation {
 	return i.state.interpolation
 }
+
 func (i *imageView) SetInterpolation(interpolation ui.Interpolation) {
 	i.state.interpolation = interpolation
 	i.apply()
 }
+
 func (i *imageView) AlternativeText() string {
 	return i.state.alternative
 }
+
 func (i *imageView) SetAlternativeText(text string) {
 	i.state.alternative = text
 	i.apply()
 }
+
 func (i *imageView) SourceScale() float64 {
 	if i.state.scale <= 0 {
 		return 1
 	}
 	return i.state.scale
 }
+
 func (i *imageView) SetSourceScale(scale float64) {
 	if math.IsNaN(scale) || math.IsInf(scale, 0) || scale <= 0 {
 		scale = 1
@@ -777,29 +825,33 @@ type linkState struct {
 }
 
 func (l *link) apply() {
-	if native := l.nativePointer(); native != nil {
-		icon := nativeIcon(l.state.icon, 13)
-		defer C.gkWin32Release(icon)
-		C.gkWin32LinkConfigure(native, boolInt(l.state.visited), icon)
+	if native := l.nativeView(); native != nil {
+		icon := newIcon(l.state.icon, 13)
+		native.configureLink(l.state.visited, icon)
 	}
 }
 
 func (l *link) IsVisited() bool {
 	return l.state.visited
 }
+
 func (l *link) SetVisited(visited bool) {
 	l.state.visited = visited
 	l.apply()
 }
+
 func (l *link) OpenPolicy() ui.LinkOpenPolicy {
 	return l.state.policy
 }
+
 func (l *link) SetOpenPolicy(policy ui.LinkOpenPolicy) {
 	l.state.policy = policy
 }
+
 func (l *link) Icon() ui.IconSource {
 	return l.state.icon
 }
+
 func (l *link) SetIcon(icon ui.IconSource) {
 	l.state.icon = icon
 	l.apply()
@@ -810,9 +862,7 @@ func (l *link) opened() {
 	if l.state.policy != ui.LinkOpenPlatform {
 		return
 	}
-	url := cString(l.URL())
-	defer freeCString(url)
-	if C.gkWin32OpenURL(url, 0) != 0 && !l.state.visited {
+	if openURL(l.URL(), false) && !l.state.visited {
 		l.SetVisited(true)
 	}
 }
@@ -827,10 +877,11 @@ type tabsState struct {
 func (t *tabs) Placement() ui.TabPlacement {
 	return t.state.placement
 }
+
 func (t *tabs) SetPlacement(placement ui.TabPlacement) {
 	t.state.placement = placement
-	if native := t.nativePointer(); native != nil {
-		C.gkWin32TabsConfigure(native, C.int(placement))
+	if native := t.nativeView(); native != nil {
+		native.configureTabs(int(placement))
 		t.layoutContent()
 	}
 }
@@ -845,8 +896,8 @@ func (t *tabs) OverflowPolicy() ui.TabOverflowPolicy {
 // every tab in a menu that opens from the tab bar.
 func (t *tabs) SetOverflowPolicy(policy ui.TabOverflowPolicy) {
 	t.state.overflow = policy
-	if native := t.nativePointer(); native != nil {
-		C.gkWin32TabsSetOverflow(native, C.int(policy))
+	if native := t.nativeView(); native != nil {
+		native.setTabOverflow(int(policy))
 	}
 }
 
@@ -858,10 +909,10 @@ type scrollState struct {
 }
 
 func (s *scrollView) apply() {
-	if native := s.nativePointer(); native != nil {
+	if native := s.nativeView(); native != nil {
 		i := s.state.insets
-		C.gkWin32ScrollConfigure(native, C.int(s.axes), C.int(s.state.policy), C.int(i.Top), C.int(i.Right),
-			C.int(i.Bottom), C.int(i.Left), boolInt(s.state.overscroll == ui.OverscrollDisabled))
+		native.configureScroll(int(s.axes), int(s.state.policy), i.Top, i.Right,
+			i.Bottom, i.Left, s.state.overscroll == ui.OverscrollDisabled)
 		s.layoutContent()
 	}
 }
@@ -869,55 +920,64 @@ func (s *scrollView) apply() {
 func (s *scrollView) ScrollbarPolicy() ui.ScrollbarPolicy {
 	return s.state.policy
 }
+
 func (s *scrollView) SetScrollbarPolicy(policy ui.ScrollbarPolicy) {
 	s.state.policy = policy
 	s.apply()
 }
+
 func (s *scrollView) ContentInsets() ui.Insets {
 	return s.state.insets
 }
+
 func (s *scrollView) SetContentInsets(insets ui.Insets) {
 	s.state.insets = insets
 	s.apply()
 }
+
 func (s *scrollView) ScrollBehavior() ui.ScrollBehavior {
 	return s.state.behavior
 }
+
 func (s *scrollView) SetScrollBehavior(behavior ui.ScrollBehavior) {
 	s.state.behavior = behavior
 }
+
 func (s *scrollView) OverscrollPolicy() ui.OverscrollPolicy {
 	return s.state.overscroll
 }
+
 func (s *scrollView) SetOverscrollPolicy(policy ui.OverscrollPolicy) {
 	s.state.overscroll = policy
 	s.apply()
 }
+
 func (s *scrollView) Zoom() float64 {
-	native := s.nativePointer()
+	native := s.nativeView()
 	if native == nil {
 		return 1
 	}
-	return float64(C.gkWin32ScrollZoom(native))
+	return float64(native.zoomFactor())
 }
+
 func (s *scrollView) SetZoom(zoom float64) error {
 	if math.IsNaN(zoom) || math.IsInf(zoom, 0) || zoom <= 0 {
 		return errors.New("ui: zoom must be positive and finite")
 	}
-	native := s.nativePointer()
+	native := s.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkWin32ScrollSetZoom(native, C.double(zoom))
+	native.setZoom(zoom)
 	return nil
 }
+
 func (s *scrollView) ViewportSize() ui.Size {
-	native := s.nativePointer()
+	native := s.nativeView()
 	if native == nil {
 		return ui.Size{}
 	}
-	var width, height C.int
-	C.gkWin32ScrollViewport(native, &width, &height)
+	width, height := native.scrollViewportSize()
 	size := ui.Size{Width: int(width), Height: int(height)}
 	if !size.IsValid() {
 		bounds := s.Bounds().Size
@@ -925,17 +985,18 @@ func (s *scrollView) ViewportSize() ui.Size {
 	}
 	return size
 }
+
 func (s *scrollView) ScrollToWidget(widget ui.Widget) error {
 	target, ok := widget.(nativeWidget)
 	if !ok || target.base().window != s.window {
 		return errors.New("ui/win32: widget belongs to another backend or window")
 	}
-	native := s.nativePointer()
-	view := target.base().nativePointer()
+	native := s.nativeView()
+	view := target.base().nativeView()
 	if native == nil || view == nil {
 		return ui.ErrClosed
 	}
-	if C.gkWin32ScrollToView(native, view, boolInt(s.state.behavior == ui.ScrollSmooth)) == 0 {
+	if !native.scrollToView(view, s.state.behavior == ui.ScrollSmooth) {
 		return errors.New("ui/win32: widget is not inside the scroll view")
 	}
 	return nil
@@ -949,34 +1010,34 @@ type sectionState struct {
 }
 
 func (s *section) apply() {
-	if native := s.nativePointer(); native != nil {
-		subtitle := cString(s.state.subtitle)
-		badge := cString(s.state.badge)
-		defer freeCString(subtitle)
-		defer freeCString(badge)
-		icon := nativeIcon(s.state.icon, 13)
-		defer C.gkWin32Release(icon)
-		C.gkWin32SectionConfigure(native, subtitle, icon, badge)
+	if native := s.nativeView(); native != nil {
+		icon := newIcon(s.state.icon, 13)
+		native.configureSection(s.state.subtitle, icon, s.state.badge)
 	}
 }
 
 func (s *section) Subtitle() string {
 	return s.state.subtitle
 }
+
 func (s *section) SetSubtitle(subtitle string) {
 	s.state.subtitle = subtitle
 	s.apply()
 }
+
 func (s *section) Icon() ui.IconSource {
 	return s.state.icon
 }
+
 func (s *section) SetIcon(icon ui.IconSource) {
 	s.state.icon = icon
 	s.apply()
 }
+
 func (s *section) Badge() string {
 	return s.state.badge
 }
+
 func (s *section) SetBadge(badge string) {
 	s.state.badge = badge
 	s.apply()
@@ -992,7 +1053,7 @@ func (s *section) IsAnimationEnabled() bool {
 // The parent layout changes the size of the section immediately.
 func (s *section) SetAnimationEnabled(enabled bool) {
 	s.state.animated = enabled
-	if native := s.nativePointer(); native != nil {
-		C.gkWin32SectionSetAnimated(native, boolInt(enabled))
+	if native := s.nativeView(); native != nil {
+		native.setSectionAnimated(enabled)
 	}
 }

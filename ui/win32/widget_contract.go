@@ -1,20 +1,12 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
-
-/*
-#include "win32_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
 
 import (
 	"errors"
 	stdimage "image"
 	"image/color"
 	"image/draw"
-	"runtime/cgo"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -22,11 +14,10 @@ import (
 // widgetContract is the state behind the common widget contract. Native
 // changes are applied immediately; the Go copy answers getters exactly.
 type widgetContract struct {
-	// owner receives component events that the native layer reports through the
-	// widget's handle.
-	owner         win32Receiver
+	// owner is the widget that receives the events of the native view, other
+	// than focus events.
+	owner         eventReceiver
 	role          ui.AccessibilityRole
-	eventHandle   cgo.Handle
 	accessibility ui.Accessibility
 	minimum       ui.Size
 	maximum       ui.Size
@@ -44,55 +35,46 @@ type widgetContract struct {
 	drops   listeners[ui.DropHandler]
 }
 
-// attachContract gives the native view a handle so that the native layer can report
-// focus and drop events for the widget.
+// attachContract makes the widget the receiver of the focus and drop events of
+// its native view.
 func (w *widgetBase) attachContract(role ui.AccessibilityRole) {
 	w.contract.role = role
-	w.contract.eventHandle = cgo.NewHandle(w)
-	C.gkWin32SetHandle(w.native, C.uintptr_t(w.contract.eventHandle))
+	w.native.receiver = w
 	if w.window != nil {
 		w.window.registerWidget(w)
 	}
 }
 
-// detachContract releases the handle before the native view is destroyed.
-func (w *widgetBase) detachContract(native unsafe.Pointer) {
-	if w.contract.eventHandle == 0 {
+// detachContract stops the events of the native view before it is destroyed.
+func (w *widgetBase) detachContract(native *nativeView) {
+	if native.receiver == nil {
 		return
 	}
-	handle := w.contract.eventHandle
-	w.contract.eventHandle = 0
-	C.gkWin32Disconnect(native)
-	C.gkWin32SetHandle(native, 0)
+	native.disconnect()
+	native.receiver = nil
 	if w.window != nil {
-		w.window.unregisterWidget(w, uintptr(handle))
+		w.window.unregisterWidget(w)
 	}
-	handle.Delete()
 }
 
-func (w *widgetBase) win32Event(event win32Event) {
-	switch event.kind {
-	case C.GK_EVENT_FOCUS:
+func (w *widgetBase) receiveEvent(event any) {
+	switch event.(type) {
+	case focusEvent:
 		for _, handler := range w.contract.focuses.snapshot() {
 			handler()
 		}
-	case C.GK_EVENT_BLUR:
+	case blurEvent:
 		for _, handler := range w.contract.blurs.snapshot() {
 			handler()
 		}
 	default:
-		if w.contract.owner != nil {
-			w.contract.owner.win32Event(event)
-		}
+		send(w.contract.owner, event)
 	}
 }
 
-// win32Query forwards decisions to the owning component.
-func (w *widgetBase) win32Query(event win32Event) bool {
-	if querier, ok := w.contract.owner.(win32Querier); ok {
-		return querier.win32Query(event)
-	}
-	return true
+// answerQuery forwards questions to the widget that owns the view.
+func (w *widgetBase) answerQuery(query any) bool {
+	return ask(w.contract.owner, query)
 }
 
 func (w *widgetBase) Accessibility() ui.Accessibility {
@@ -111,13 +93,11 @@ func (w *widgetBase) announceText(text string) {
 	w.mu.RLock()
 	live := w.contract.accessibility.Live
 	w.mu.RUnlock()
-	native := w.nativePointer()
+	native := w.nativeView()
 	if live == ui.LiveOff || native == nil {
 		return
 	}
-	value := cString(text)
-	defer freeCString(value)
-	C.gkWin32Announce(native, value, C.int(live))
+	native.announce(text)
 }
 
 func cloneWidgets(widgets []ui.Widget) []ui.Widget {
@@ -131,47 +111,27 @@ func (w *widgetBase) SetAccessibility(metadata ui.Accessibility) error {
 	if err := metadata.Validate(); err != nil {
 		return err
 	}
-	native := w.nativePointer()
+	native := w.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	var labeledBy unsafe.Pointer
-	if len(metadata.LabeledBy) > 0 {
-		view, err := w.relatedView(metadata.LabeledBy[0])
-		if err != nil {
+	// Windows names a control by its own label, so the labels are only
+	// checked.
+	for _, widget := range metadata.LabeledBy {
+		if _, err := w.relatedView(widget); err != nil {
 			return err
 		}
-		labeledBy = view
 	}
-	if len(metadata.LabeledBy) > 1 {
-		for _, widget := range metadata.LabeledBy[1:] {
-			if _, err := w.relatedView(widget); err != nil {
-				return err
-			}
-		}
-	}
-	describedBy := C.malloc(C.size_t(max(1, len(metadata.DescribedBy))) * C.size_t(unsafe.Sizeof(uintptr(0))))
-	defer C.free(describedBy)
-	views := unsafe.Slice((*unsafe.Pointer)(describedBy), max(1, len(metadata.DescribedBy)))
+	describedBy := make([]*nativeView, len(metadata.DescribedBy))
 	for i, widget := range metadata.DescribedBy {
 		view, err := w.relatedView(widget)
 		if err != nil {
 			return err
 		}
-		views[i] = view
+		describedBy[i] = view
 	}
-
-	identifier := cString(metadata.ID)
-	name := cString(metadata.Name)
-	description := cString(metadata.Description)
-	value := cString(metadata.ValueText)
-	defer freeCString(identifier)
-	defer freeCString(name)
-	defer freeCString(description)
-	defer freeCString(value)
-	C.gkWin32SetAccessibility(native, identifier, name, description, value,
-		boolInt(metadata.IsRequired), boolInt(metadata.IsHidden), boolInt(metadata.IsInvalid),
-		labeledBy, (*unsafe.Pointer)(describedBy), C.int(len(metadata.DescribedBy)))
+	native.setAccessibility(metadata.ID, metadata.Name, metadata.Description, metadata.ValueText,
+		metadata.IsRequired, metadata.IsHidden, metadata.IsInvalid, describedBy)
 
 	metadata.LabeledBy = cloneWidgets(metadata.LabeledBy)
 	metadata.DescribedBy = cloneWidgets(metadata.DescribedBy)
@@ -182,12 +142,12 @@ func (w *widgetBase) SetAccessibility(metadata ui.Accessibility) error {
 }
 
 // relatedView returns the native view of a widget named in a relationship.
-func (w *widgetBase) relatedView(widget ui.Widget) (unsafe.Pointer, error) {
+func (w *widgetBase) relatedView(widget ui.Widget) (*nativeView, error) {
 	related, ok := widget.(nativeWidget)
 	if !ok || related.base().window != w.window {
 		return nil, errors.New("ui/win32: accessibility relationship names a widget from another window or backend")
 	}
-	view := related.base().nativePointer()
+	view := related.base().nativeView()
 	if view == nil {
 		return nil, ui.ErrClosed
 	}
@@ -199,14 +159,14 @@ func (w *widgetBase) AccessibilityRole() ui.AccessibilityRole {
 }
 
 func (w *widgetBase) Focus() error {
-	native := w.nativePointer()
+	native := w.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
 	if !w.IsVisible() || !w.IsEnabled() {
 		return errors.New("ui/win32: hidden or disabled widgets cannot take focus")
 	}
-	if C.gkWin32Focus(native) == 0 {
+	if !native.focus() {
 		return errors.New("ui/win32: widget cannot take keyboard focus")
 	}
 	if w.window != nil {
@@ -216,8 +176,8 @@ func (w *widgetBase) Focus() error {
 }
 
 func (w *widgetBase) IsFocused() bool {
-	native := w.nativePointer()
-	return native != nil && C.gkWin32IsFocused(native) != 0
+	native := w.nativeView()
+	return native != nil && native.isFocused()
 }
 
 func (w *widgetBase) OnFocus(handler ui.FocusHandler) ui.Unsubscribe {
@@ -300,13 +260,11 @@ func (w *widgetBase) Tooltip() string {
 }
 
 func (w *widgetBase) SetTooltip(text string) {
-	native := w.nativePointer()
+	native := w.nativeView()
 	if native == nil {
 		return
 	}
-	value := cString(text)
-	defer freeCString(value)
-	C.gkWin32SetTooltip(native, value)
+	native.setTooltip(text)
 	w.mu.Lock()
 	w.contract.tooltip = text
 	w.mu.Unlock()
@@ -322,11 +280,11 @@ func (w *widgetBase) SetCursor(cursor ui.Cursor) error {
 	if err := cursor.Validate(); err != nil {
 		return err
 	}
-	native := w.nativePointer()
+	native := w.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkWin32SetCursor(native, C.int(cursor))
+	native.setCursor(int(cursor))
 	w.mu.Lock()
 	w.contract.cursor = cursor
 	w.mu.Unlock()
@@ -343,24 +301,22 @@ func (w *widgetBase) SetStyle(style ui.WidgetStyle) error {
 	if err := style.Validate(); err != nil {
 		return err
 	}
-	native := w.nativePointer()
+	native := w.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	family := cString(style.Font.Family)
-	defer freeCString(family)
 	foreground, hasForeground := rgba(style.ForegroundColor)
 	background, hasBackground := rgba(style.BackgroundColor)
-	var foregroundPointer, backgroundPointer *C.double
+	var foregroundRGBA, backgroundRGBA *[4]float64
 	if hasForeground {
-		foregroundPointer = &foreground[0]
+		foregroundRGBA = &foreground
 	}
 	if hasBackground {
-		backgroundPointer = &background[0]
+		backgroundRGBA = &background
 	}
-	if C.gkWin32SetStyle(native, family, C.double(style.Font.Size), C.int(style.Font.Weight),
-		boolInt(style.Font.Italic), C.int(style.Foreground), C.int(style.Background),
-		foregroundPointer, backgroundPointer, C.double(style.CornerRadius)) == 0 {
+	if !native.setStyle(style.Font.Family, style.Font.Size, int(style.Font.Weight), style.Font.Italic,
+		int(style.Foreground), int(style.Background), foregroundRGBA, backgroundRGBA,
+		float64(style.CornerRadius)) {
 		return errors.New("ui/win32: font family is not installed")
 	}
 	w.mu.Lock()
@@ -373,21 +329,21 @@ func (w *widgetBase) SetStyle(style ui.WidgetStyle) error {
 
 // rgba converts value to red, green, blue, and alpha from zero to one. It
 // reports false for a nil color.
-func rgba(value color.Color) ([4]C.double, bool) {
+func rgba(value color.Color) ([4]float64, bool) {
 	if value == nil {
-		return [4]C.double{}, false
+		return [4]float64{}, false
 	}
 	red, green, blue, alpha := value.RGBA()
 	if alpha == 0 {
-		return [4]C.double{}, true
+		return [4]float64{}, true
 	}
 	// RGBA returns premultiplied 16-bit components; CSS expects straight
 	// alpha.
-	return [4]C.double{
-		C.double(red) / C.double(alpha),
-		C.double(green) / C.double(alpha),
-		C.double(blue) / C.double(alpha),
-		C.double(alpha) / 0xffff,
+	return [4]float64{
+		float64(red) / float64(alpha),
+		float64(green) / float64(alpha),
+		float64(blue) / float64(alpha),
+		float64(alpha) / 0xffff,
 	}, true
 }
 
@@ -401,11 +357,11 @@ func (w *widgetBase) reapplyStyle() {
 }
 
 func (w *widgetBase) SetContextMenu(menu ui.ContextMenu) error {
-	native := w.nativePointer()
+	native := w.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
-	var nativeMenu unsafe.Pointer
+	var nativeMenu *nativeMenu
 	if menu != nil {
 		owned, ok := menu.(*contextMenu)
 		if !ok {
@@ -416,7 +372,7 @@ func (w *widgetBase) SetContextMenu(menu ui.ContextMenu) error {
 			return ui.ErrClosed
 		}
 	}
-	C.gkWin32SetMenu(native, nativeMenu)
+	native.setMenu(nativeMenu)
 	w.mu.Lock()
 	w.contract.contextMenu = menu
 	w.mu.Unlock()
@@ -424,39 +380,14 @@ func (w *widgetBase) SetContextMenu(menu ui.ContextMenu) error {
 }
 
 func (w *widgetBase) SetDragSource(source ui.DragSource) error {
-	native := w.nativePointer()
+	native := w.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
 	if source.Operations&^(ui.DragCopy|ui.DragMove|ui.DragLink) != 0 {
 		return errors.New("ui: invalid drag operations")
 	}
-	text := cString(source.Text)
-	defer freeCString(text)
-	files := joinNul(source.Files)
-	var pixels []byte
-	var width, height int
-	if source.Image != nil && !source.Image.Bounds().Empty() {
-		pixels, width, height = rgbaPixels(source.Image)
-	}
-	types := make([]string, 0, len(source.Custom))
-	var data []byte
-	var sizes []C.size_t
-	for mime, value := range source.Custom {
-		types = append(types, mime)
-		data = append(data, value...)
-		sizes = append(sizes, C.size_t(len(value)))
-	}
-	typeBuffer := joinNul(types)
-	var sizesPointer *C.size_t
-	if len(sizes) > 0 {
-		sizesPointer = &sizes[0]
-	}
-	C.gkWin32SetDragSource(native, C.int(source.Operations), text,
-		bytesPointer(files), C.size_t(len(files)),
-		(*C.uchar)(unsafe.Pointer(bytesPointer(pixels))), C.int(width), C.int(height),
-		bytesPointer(typeBuffer), C.size_t(len(typeBuffer)),
-		(*C.uchar)(unsafe.Pointer(bytesPointer(data))), sizesPointer, C.int(len(sizes)))
+	native.setDragSource(source)
 	w.mu.Lock()
 	w.contract.dragSource = source
 	w.mu.Unlock()
@@ -464,15 +395,14 @@ func (w *widgetBase) SetDragSource(source ui.DragSource) error {
 }
 
 func (w *widgetBase) SetDropTarget(target ui.DropTarget) error {
-	native := w.nativePointer()
+	native := w.nativeView()
 	if native == nil {
 		return ui.ErrClosed
 	}
 	if target.Operations&^(ui.DragCopy|ui.DragMove|ui.DragLink) != 0 {
 		return errors.New("ui: invalid drop operations")
 	}
-	types := joinNul(target.Formats)
-	C.gkWin32SetDropTarget(native, C.int(target.Operations), bytesPointer(types), C.size_t(len(types)))
+	native.setDropTarget(target)
 	target.Formats = append([]string(nil), target.Formats...)
 	w.mu.Lock()
 	w.contract.dropTarget = target
@@ -487,44 +417,8 @@ func (w *widgetBase) OnDrop(handler ui.DropHandler) ui.Unsubscribe {
 	return w.contract.drops.add(handler)
 }
 
-//export gkWin32GoDrop
-func gkWin32GoDrop(handle C.uintptr_t, operation C.int, x, y C.double, text *C.char, files *C.char,
-	filesSize C.size_t, pixels *C.uchar, width, height C.int, types *C.char, typesSize C.size_t,
-	data *C.uchar, sizes *C.size_t, count C.int) {
-	if handle == 0 {
-		return
-	}
-	widget, ok := cgo.Handle(handle).Value().(*widgetBase)
-	if !ok {
-		return
-	}
-	event := ui.DropEvent{
-		Operation: ui.DragOperation(operation),
-		Position:  ui.Point{X: int(x), Y: int(y)},
-		Files:     splitNul(unsafe.Pointer(files), filesSize),
-	}
-	if text != nil {
-		event.Text = C.GoString(text)
-	}
-	if pixels != nil && width > 0 && height > 0 {
-		image := stdimage.NewNRGBA(stdimage.Rect(0, 0, int(width), int(height)))
-		copy(image.Pix, unsafe.Slice((*byte)(unsafe.Pointer(pixels)), int(width)*int(height)*4))
-		event.Image = image
-	}
-	if count > 0 {
-		mimes := splitNul(unsafe.Pointer(types), typesSize)
-		lengths := unsafe.Slice(sizes, int(count))
-		offset := 0
-		event.Custom = make(map[string][]byte, len(mimes))
-		for i, mime := range mimes {
-			if i >= len(lengths) {
-				break
-			}
-			length := int(lengths[i])
-			event.Custom[mime] = C.GoBytes(unsafe.Add(unsafe.Pointer(data), offset), C.int(length))
-			offset += length
-		}
-	}
+// dispatchDrop reports data that the user dropped on the widget.
+func (widget *widgetBase) dispatchDrop(event ui.DropEvent) {
 	for _, handler := range widget.contract.drops.snapshot() {
 		handler(event)
 	}

@@ -1,18 +1,11 @@
-//go:build windows && cgo
+//go:build windows
 
 package win32
 
-/*
-#include "widget_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
-	"bytes"
 	"context"
 	"strings"
-	"unsafe"
+	"time"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -36,31 +29,9 @@ func (w *Window) SaveFile(ctx context.Context, options ui.SaveFileOptions) (stri
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	title := C.CString(options.Title)
-	directory := C.CString(options.Directory)
-	filename := C.CString(options.Filename)
-	extensions := C.CString(fileExtensions(options.Filters))
-	defaultExtension := C.CString(strings.TrimPrefix(options.DefaultExtension, "."))
-	defer C.free(unsafe.Pointer(title))
-	defer C.free(unsafe.Pointer(directory))
-	defer C.free(unsafe.Pointer(filename))
-	defer C.free(unsafe.Pointer(extensions))
-	defer C.free(unsafe.Pointer(defaultExtension))
-
-	var size C.size_t
-	var cancelled C.int
-	result := C.gkWin32UISavePanel(
-		w.nativeWindowHandle(),
-		title,
-		directory,
-		filename,
-		extensions,
-		boolInt(options.ShowHiddenFiles),
-		defaultExtension,
-		&size,
-		&cancelled,
-	)
-	paths, err := dialogPaths(result, size, cancelled)
+	paths, cancelled := w.nativeWindow().showSavePanel(options.Title, options.Directory, options.Filename,
+		fileExtensions(options.Filters), options.ShowHiddenFiles, strings.TrimPrefix(options.DefaultExtension, "."))
+	paths, err := dialogPaths(paths, cancelled)
 	if err != nil {
 		return "", err
 	}
@@ -83,50 +54,23 @@ func (w *Window) openPanel(ctx context.Context, options ui.OpenFileOptions, mult
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	title := C.CString(options.Title)
-	directory := C.CString(options.Directory)
-	filename := C.CString(options.Filename)
-	extensions := C.CString(fileExtensions(options.Filters))
-	defer C.free(unsafe.Pointer(title))
-	defer C.free(unsafe.Pointer(directory))
-	defer C.free(unsafe.Pointer(filename))
-	defer C.free(unsafe.Pointer(extensions))
-
-	var size C.size_t
-	var cancelled C.int
-	result := C.gkWin32UIOpenPanel(
-		w.nativeWindowHandle(),
-		title,
-		directory,
-		filename,
-		extensions,
-		boolInt(multiple),
-		boolInt(directories),
-		boolInt(options.ShowHiddenFiles),
-		boolInt(options.SelectPackages),
-		&size,
-		&cancelled,
-	)
-	return dialogPaths(result, size, cancelled)
+	// Windows has no packages, so SelectPackages has no effect.
+	paths, cancelled := w.nativeWindow().showOpenPanel(options.Title, options.Directory,
+		options.Filename, fileExtensions(options.Filters), multiple, directories, options.ShowHiddenFiles)
+	return dialogPaths(paths, cancelled)
 }
 
-func dialogPaths(result *C.char, size C.size_t, cancelled C.int) ([]string, error) {
-	if result != nil {
-		defer C.free(unsafe.Pointer(result))
-	}
-	if cancelled != 0 {
+func dialogPaths(result []string, cancelled bool) ([]string, error) {
+	if cancelled {
 		return nil, ui.ErrCancelled
 	}
-	if result == nil || size == 0 {
+	if result == nil {
 		return nil, ui.ErrNotSupported
 	}
-
-	data := C.GoBytes(unsafe.Pointer(result), C.int(size))
-	parts := bytes.Split(data, []byte{0})
-	paths := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if len(part) != 0 {
-			paths = append(paths, string(part))
+	paths := make([]string, 0, len(result))
+	for _, path := range result {
+		if path != "" {
+			paths = append(paths, path)
 		}
 	}
 	if len(paths) == 0 {
@@ -146,4 +90,145 @@ func fileExtensions(filters []ui.FileFilter) string {
 		}
 	}
 	return strings.Join(extensions, ",")
+}
+
+// runAlert shows a native alert, destroys it when it closes, and returns the
+// zero-based index of the chosen button and the text that a prompt holds. A
+// context that ends while the alert is visible closes it.
+func (w *Window) runAlert(ctx context.Context, alert *nativeAlert) (index int, answer string, err error) {
+	defer alert.destroy()
+	alert.beginModal(w.nativeWindow())
+	for {
+		if index := alert.stepModal(); index >= 0 {
+			alert.endModal(false)
+			return index, alert.promptText(), nil
+		}
+		if err := ctx.Err(); err != nil {
+			alert.endModal(true)
+			return -1, "", err
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func newAlert(severity ui.Severity, title, message, details string, buttons []string, cancel int,
+	destructive int, prompt *ui.PromptOptions) *nativeAlert {
+	var text, placeholder string
+	var isPrompt, secure bool
+	if prompt != nil {
+		isPrompt = true
+		secure = prompt.Secure
+		text = prompt.Text
+		placeholder = prompt.Placeholder
+	}
+	return newNativeAlert(int(severity), title, message, details, buttons, cancel, destructive, isPrompt, secure,
+		text, placeholder)
+}
+
+// ShowAlert shows a modal message and returns the acknowledgement action ID.
+func (w *Window) ShowAlert(ctx context.Context, options ui.AlertOptions) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := options.Validate(); err != nil {
+		return "", err
+	}
+	acknowledge := options.Acknowledge
+	if acknowledge.Text == "" {
+		acknowledge.Text = "OK"
+	}
+	if acknowledge.ID == "" {
+		acknowledge.ID = "ok"
+	}
+	if w.nativeWindow() == nil {
+		return "", ui.ErrClosed
+	}
+	alert := newAlert(options.Severity, options.Title, options.Message, options.Details,
+		[]string{acknowledge.Text}, 0, 0, nil)
+	if _, _, err := w.runAlert(ctx, alert); err != nil {
+		return "", err
+	}
+	return acknowledge.ID, nil
+}
+
+// ShowConfirmation asks a question and returns the chosen action ID.
+func (w *Window) ShowConfirmation(ctx context.Context, options ui.ConfirmationOptions) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := options.Validate(); err != nil {
+		return "", err
+	}
+	if w.nativeWindow() == nil {
+		return "", ui.ErrClosed
+	}
+	// The default action comes first so that Return chooses it.
+	actions := make([]ui.DialogAction, 0, len(options.Actions)+1)
+	for _, action := range options.Actions {
+		if action.ID == options.DefaultAction {
+			actions = append(actions, action)
+		}
+	}
+	for _, action := range options.Actions {
+		if action.ID != options.DefaultAction {
+			actions = append(actions, action)
+		}
+	}
+	cancel := -1
+	for i, action := range actions {
+		if action.ID == options.CancelAction {
+			cancel = i
+		}
+	}
+	if cancel < 0 {
+		actions = append(actions, ui.DialogAction{ID: options.CancelAction, Text: "Cancel"})
+		cancel = len(actions) - 1
+	}
+	titles := make([]string, len(actions))
+	destructive := 0
+	for i, action := range actions {
+		titles[i] = action.Text
+		if action.Destructive {
+			destructive |= 1 << i
+		}
+	}
+	alert := newAlert(options.Severity, options.Title, options.Message, options.Details, titles, cancel, destructive, nil)
+	index, _, err := w.runAlert(ctx, alert)
+	if err != nil {
+		return "", err
+	}
+	if index < 0 || index >= len(actions) {
+		return options.CancelAction, nil
+	}
+	return actions[index].ID, nil
+}
+
+// ShowPrompt asks for one line of text.
+func (w *Window) ShowPrompt(ctx context.Context, options ui.PromptOptions) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if w.nativeWindow() == nil {
+		return "", ui.ErrClosed
+	}
+	alert := newAlert(ui.SeverityInformation, options.Title, options.Message, "", []string{"OK", "Cancel"}, 1, 0, &options)
+	index, answer, err := w.runAlert(ctx, alert)
+	if err != nil {
+		return "", err
+	}
+	if index != 0 {
+		return "", ui.ErrCancelled
+	}
+	return answer, nil
+}
+
+// ShowAbout shows the standard About panel. It returns once the panel is
+// visible; the panel is not modal.
+func (w *Window) ShowAbout(ctx context.Context, options ui.AboutOptions) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	icon := newIcon(options.Icon, 64)
+	showAbout(options.Name, options.Version, options.Copyright, options.Website, options.Credits, icon)
+	return nil
 }

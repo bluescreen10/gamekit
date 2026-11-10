@@ -1,8 +1,9 @@
 // Package win32 provides a Win32 implementation of ui.Backend for Windows.
 //
-// An import of this package registers the backend as "win32". Windows builds
-// require cgo and a Clang C++ compiler that targets MinGW, such as
-// llvm-mingw, because the native layer is written in C++.
+// An import of this package registers the backend as "win32". The package is
+// written in Go and calls Windows through its DLLs, so it builds without cgo
+// and needs no C or C++ compiler. win32.go declares every function, structure,
+// and COM interface of Windows that the package calls.
 //
 // The backend implements the complete ui contract with the native controls
 // of Windows: the common controls version 6 with visual styles, in the light
