@@ -2,61 +2,12 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-*/
-import "C"
-
 import (
 	"context"
-	"time"
 	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
-
-// runAlert shows a native alert and returns the zero-based index of the
-// chosen button. A context that ends while the alert is visible closes it.
-func (w *Window) runAlert(ctx context.Context, alert unsafe.Pointer) (int, error) {
-	defer C.gkGTKRelease(alert)
-	modal := C.gkGTKModalBegin(alert, w.nativeWindowPointer())
-	for {
-		index := int(C.gkGTKModalStep(modal))
-		if index >= 0 {
-			C.gkGTKModalEnd(modal, 0)
-			return index, nil
-		}
-		if err := ctx.Err(); err != nil {
-			C.gkGTKModalEnd(modal, 1)
-			return -1, err
-		}
-		time.Sleep(time.Millisecond)
-	}
-}
-
-func newAlert(severity ui.Severity, title, message, details string, buttons []string, cancel int,
-	destructive int, prompt *ui.PromptOptions) unsafe.Pointer {
-	titleValue := cString(title)
-	messageValue := cString(message)
-	detailsValue := cString(details)
-	defer freeCString(titleValue)
-	defer freeCString(messageValue)
-	defer freeCString(detailsValue)
-	buttonBuffer := joinNul(buttons)
-	var text, placeholder *C.char
-	var isPrompt, secure C.int
-	if prompt != nil {
-		isPrompt = 1
-		secure = boolInt(prompt.Secure)
-		text = cString(prompt.Text)
-		placeholder = cString(prompt.Placeholder)
-		defer freeCString(text)
-		defer freeCString(placeholder)
-	}
-	return C.gkGTKAlertCreate(C.int(severity), titleValue, messageValue, detailsValue,
-		bytesPointer(buttonBuffer), C.size_t(len(buttonBuffer)), C.int(cancel), C.int(destructive),
-		isPrompt, secure, text, placeholder)
-}
 
 // ShowAlert shows a modal message and returns the acknowledgement action ID.
 func (w *Window) ShowAlert(ctx context.Context, options ui.AlertOptions) (string, error) {
@@ -77,7 +28,8 @@ func (w *Window) ShowAlert(ctx context.Context, options ui.AlertOptions) (string
 		return "", ui.ErrClosed
 	}
 	alert := newAlert(options.Severity, options.Title, options.Message, options.Details,
-		[]string{acknowledge.Text}, 0, 0, nil)
+		[]string{acknowledge.Text}, 0, nil, nil)
+	defer alert.close()
 	if _, err := w.runAlert(ctx, alert); err != nil {
 		return "", err
 	}
@@ -118,14 +70,13 @@ func (w *Window) ShowConfirmation(ctx context.Context, options ui.ConfirmationOp
 		cancel = len(actions) - 1
 	}
 	titles := make([]string, len(actions))
-	destructive := 0
+	destructive := make([]bool, len(actions))
 	for i, action := range actions {
 		titles[i] = action.Text
-		if action.Destructive {
-			destructive |= 1 << i
-		}
+		destructive[i] = action.Destructive
 	}
 	alert := newAlert(options.Severity, options.Title, options.Message, options.Details, titles, cancel, destructive, nil)
+	defer alert.close()
 	index, err := w.runAlert(ctx, alert)
 	if err != nil {
 		return "", err
@@ -144,9 +95,8 @@ func (w *Window) ShowPrompt(ctx context.Context, options ui.PromptOptions) (stri
 	if w.nativePointer() == nil {
 		return "", ui.ErrClosed
 	}
-	alert := newAlert(ui.SeverityInformation, options.Title, options.Message, "", []string{"OK", "Cancel"}, 1, 0, &options)
-	C.gkGTKRetain(alert)
-	defer C.gkGTKRelease(alert)
+	alert := newAlert(ui.SeverityInformation, options.Title, options.Message, "", []string{"OK", "Cancel"}, 1, nil, &options)
+	defer alert.close()
 	index, err := w.runAlert(ctx, alert)
 	if err != nil {
 		return "", err
@@ -154,7 +104,7 @@ func (w *Window) ShowPrompt(ctx context.Context, options ui.PromptOptions) (stri
 	if index != 0 {
 		return "", ui.ErrCancelled
 	}
-	return goStringFree(C.gkGTKAlertText(alert)), nil
+	return goString(gtkEditableGetText((*gtkEditable)(unsafe.Pointer(alert.entry)))), nil
 }
 
 // ShowAbout shows the standard About panel. It returns once the panel is
@@ -163,18 +113,6 @@ func (w *Window) ShowAbout(ctx context.Context, options ui.AboutOptions) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	name := cString(options.Name)
-	version := cString(options.Version)
-	copyright := cString(options.Copyright)
-	website := cString(options.Website)
-	credits := cString(options.Credits)
-	defer freeCString(name)
-	defer freeCString(version)
-	defer freeCString(copyright)
-	defer freeCString(website)
-	defer freeCString(credits)
-	icon := nativeIcon(options.Icon, 64)
-	defer C.gkGTKRelease(icon)
-	C.gkGTKShowAbout(name, version, copyright, website, credits, icon)
+	showNativeAbout(options)
 	return nil
 }

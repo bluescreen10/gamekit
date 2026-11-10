@@ -2,12 +2,8 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-*/
-import "C"
-
 import (
+	"math"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -87,23 +83,41 @@ func symbolCandidates(name string) []string {
 
 // nativeIcon returns a referenced GdkPaintable for source, or nil. pointSize
 // scales symbols and images; zero keeps their natural size.
-func nativeIcon(source ui.IconSource, pointSize float64) unsafe.Pointer {
+func nativeIcon(source ui.IconSource, pointSize float64) *gdkPaintable {
 	if source.IsZero() {
 		return nil
 	}
-	symbol := cString("")
-	if source.SystemName != "" {
-		freeCString(symbol)
-		symbol = cString(strings.Join(symbolCandidates(source.SystemName), "\n"))
-	}
-	defer freeCString(symbol)
-	var pixels []byte
-	var width, height int
 	if source.Image != nil && !source.Image.Bounds().Empty() {
-		pixels, width, height = rgbaPixels(source.Image)
+		pixels, width, height := rgbaPixels(source.Image)
+		bytes := gBytesNew(unsafe.Pointer(unsafe.SliceData(pixels)), gSize(len(pixels)))
+		defer gBytesUnref(bytes)
+		return (*gdkPaintable)(gdkMemoryTextureNew(cInt(width), cInt(height), gdkMemoryR8G8B8A8, bytes, gSize(width*4)))
 	}
-	return C.gkGTKIcon(symbol, (*C.uchar)(unsafe.Pointer(bytesPointer(pixels))),
-		C.int(width), C.int(height), C.double(pointSize))
+	if source.SystemName == "" {
+		return nil
+	}
+	display := gdkDisplayGetDefault()
+	if display == nil {
+		return nil
+	}
+	theme := gtkIconThemeGetForDisplay(display)
+	if theme == nil {
+		return nil
+	}
+
+	names := symbolCandidates(source.SystemName)
+	name := names[0]
+	for _, candidate := range names {
+		if gtkIconThemeHasIcon(theme, stringPointer(candidate)) != 0 {
+			name = candidate
+			break
+		}
+	}
+	size := cInt(16)
+	if pointSize > 0 {
+		size = cInt(math.Ceil(pointSize))
+	}
+	return (*gdkPaintable)(gtkIconThemeLookupIcon(theme, stringPointer(name), nil, size, 1, gtkTextDirNone, 0))
 }
 
 // acceleratorKeys maps shortcut key names to GDK key names.

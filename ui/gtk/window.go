@@ -61,7 +61,7 @@ type Window struct {
 	children  map[*Window]struct{}
 	destroyed bool
 
-	// handle identifies this window to the C layer, which cannot hold a Go pointer.
+	// handle identifies this window to the native callbacks, which cannot hold a Go pointer.
 	// Released by Destroy; see callbacks.go.
 	handle uintptr
 
@@ -150,7 +150,7 @@ func CreateWindow(title string, width, height int, opts *WindowOptions) (*Window
 		w.owner.children[w] = struct{}{}
 		w.owner.mu.Unlock()
 	}
-	// Give the C layer a way to name this window when it dispatches an event.
+	// Give the native callbacks a way to name this window when it dispatches an event.
 	w.handle = newWindowHandle(w)
 	setNativeWindowHandle(native, w.handle)
 	setNativeWindowTheme(native, options.Theme)

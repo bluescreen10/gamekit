@@ -2,17 +2,9 @@
 
 package gtk
 
-/*
-#include "widget_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
-	"bytes"
 	"context"
 	"strings"
-	"unsafe"
 
 	"github.com/bluescreen10/gamekit/ui"
 )
@@ -36,31 +28,12 @@ func (w *Window) SaveFile(ctx context.Context, options ui.SaveFileOptions) (stri
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	title := C.CString(options.Title)
-	directory := C.CString(options.Directory)
-	filename := C.CString(options.Filename)
-	extensions := C.CString(fileExtensions(options.Filters))
-	defaultExtension := C.CString(strings.TrimPrefix(options.DefaultExtension, "."))
-	defer C.free(unsafe.Pointer(title))
-	defer C.free(unsafe.Pointer(directory))
-	defer C.free(unsafe.Pointer(filename))
-	defer C.free(unsafe.Pointer(extensions))
-	defer C.free(unsafe.Pointer(defaultExtension))
-
-	var size C.size_t
-	var cancelled C.int
-	result := C.gkGTKUISavePanel(
-		w.nativeWindowHandle(),
-		title,
-		directory,
-		filename,
-		extensions,
-		boolInt(options.ShowHiddenFiles),
-		defaultExtension,
-		&size,
-		&cancelled,
-	)
-	paths, err := dialogPaths(result, size, cancelled)
+	filename := options.Filename
+	if filename != "" && options.DefaultExtension != "" && !strings.Contains(filename, ".") {
+		filename += "." + strings.TrimPrefix(options.DefaultExtension, ".")
+	}
+	dialog := newFileDialog(options.Title, options.Directory, filename, options.Filters)
+	paths, err := w.runFilePanel(ctx, dialog, saveFilePanel)
 	if err != nil {
 		return "", err
 	}
@@ -83,56 +56,15 @@ func (w *Window) openPanel(ctx context.Context, options ui.OpenFileOptions, mult
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	title := C.CString(options.Title)
-	directory := C.CString(options.Directory)
-	filename := C.CString(options.Filename)
-	extensions := C.CString(fileExtensions(options.Filters))
-	defer C.free(unsafe.Pointer(title))
-	defer C.free(unsafe.Pointer(directory))
-	defer C.free(unsafe.Pointer(filename))
-	defer C.free(unsafe.Pointer(extensions))
-
-	var size C.size_t
-	var cancelled C.int
-	result := C.gkGTKUIOpenPanel(
-		w.nativeWindowHandle(),
-		title,
-		directory,
-		filename,
-		extensions,
-		boolInt(multiple),
-		boolInt(directories),
-		boolInt(options.ShowHiddenFiles),
-		boolInt(options.SelectPackages),
-		&size,
-		&cancelled,
-	)
-	return dialogPaths(result, size, cancelled)
-}
-
-func dialogPaths(result *C.char, size C.size_t, cancelled C.int) ([]string, error) {
-	if result != nil {
-		defer C.free(unsafe.Pointer(result))
+	mode := openFilePanel
+	filters := options.Filters
+	if directories {
+		mode = selectFolderPanel
+		filters = nil
+	} else if multiple {
+		mode = openFilesPanel
 	}
-	if cancelled != 0 {
-		return nil, ui.ErrCancelled
-	}
-	if result == nil || size == 0 {
-		return nil, ui.ErrNotSupported
-	}
-
-	data := C.GoBytes(unsafe.Pointer(result), C.int(size))
-	parts := bytes.Split(data, []byte{0})
-	paths := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if len(part) != 0 {
-			paths = append(paths, string(part))
-		}
-	}
-	if len(paths) == 0 {
-		return nil, ui.ErrCancelled
-	}
-	return paths, nil
+	return w.runFilePanel(ctx, newFileDialog(options.Title, options.Directory, options.Filename, filters), mode)
 }
 
 func fileExtensions(filters []ui.FileFilter) string {

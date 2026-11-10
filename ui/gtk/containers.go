@@ -2,12 +2,6 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-#include "widget_bridge.h"
-*/
-import "C"
-
 import (
 	"errors"
 	"runtime/cgo"
@@ -66,7 +60,7 @@ func validateContainerChildren(container nativeWidget, children []ui.Widget) ([]
 // attach moves the view of a validated child into into.
 func attach(container nativeWidget, child nativeWidget, into unsafe.Pointer) {
 	child.base().parent = container
-	C.gkGTKAddChild(into, child.base().nativePointer())
+	gkGTKAddChild(into, child.base().nativePointer())
 }
 
 // orphan returns a child to the window when its container lets it go.
@@ -74,7 +68,7 @@ func orphan(child nativeWidget) {
 	base := child.base()
 	base.parent = nil
 	if view := base.nativePointer(); view != nil && base.window != nil {
-		C.gkGTKUIAttachToWindow(base.window.nativeWindowHandle(), view)
+		gkGTKUIAttachToWindow(base.window.nativeWindowHandle(), view)
 		base.SetVisible(false)
 	}
 }
@@ -98,7 +92,7 @@ func (w *Window) newFrameContainer(role ui.AccessibilityRole, owner gtkReceiver)
 	if owner == nil {
 		owner = result
 	}
-	result.widgetBase, err = w.newComponent(C.gkGTKClipViewCreate(window), role, owner)
+	result.widgetBase, err = w.newComponent(gkGTKClipViewCreate(window), role, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +333,7 @@ func (w *Window) CreateGroupBox(options ui.GroupBoxOptions) (ui.GroupBox, error)
 	defer freeCString(title)
 	defer freeCString(subtitle)
 	result := &groupBox{title: options.Title, subtitle: options.Subtitle}
-	if result.widgetBase, err = w.newComponent(C.gkGTKGroupBoxCreate(window, title, subtitle), ui.RoleGroup, result); err != nil {
+	if result.widgetBase, err = w.newComponent(gkGTKGroupBoxCreate(window, title, subtitle), ui.RoleGroup, result); err != nil {
 		return nil, err
 	}
 	if result.content, err = adopt(result, options.Content, result.nativePointer()); err != nil {
@@ -374,7 +368,7 @@ func (g *groupBox) apply() {
 		title, subtitle := cString(g.title), cString(g.subtitle)
 		defer freeCString(title)
 		defer freeCString(subtitle)
-		C.gkGTKGroupBoxSet(native, title, subtitle)
+		gkGTKGroupBoxSet(native, title, subtitle)
 		g.relayout()
 	}
 }
@@ -393,8 +387,8 @@ func (g *groupBox) relayout() {
 	if native == nil || g.content == nil {
 		return
 	}
-	var width, height, top C.int
-	C.gkGTKGroupBoxBody(native, &width, &height, &top)
+	var width, height, top cInt
+	gkGTKGroupBoxBody(native, &width, &height, &top)
 	g.contentTop = int(top)
 	g.content.SetBounds(ui.Rect{
 		Position: ui.Point{Y: int(top)},
@@ -406,14 +400,14 @@ func (g *groupBox) PreferredSize() ui.Size {
 	if native == nil || g.content == nil {
 		return ui.Size{}
 	}
-	var chromeWidth, chromeHeight, width, height, top C.int
-	C.gkGTKGroupBoxChrome(native, &chromeWidth, &chromeHeight)
-	C.gkGTKGroupBoxBody(native, &width, &height, &top)
+	var chromeWidth, chromeHeight, width, height, top cInt
+	gkGTKGroupBoxChrome(native, &chromeWidth, &chromeHeight)
+	gkGTKGroupBoxBody(native, &width, &height, &top)
 	content := preferredOf(g.content)
 	// Before the first layout the box has no width, and a subtitle measured
 	// at that width wraps after every word. Measure it at the width that the
 	// content asks for instead.
-	top = C.gkGTKGroupBoxSubtitleHeight(native, C.int(max(int(width), content.Width)))
+	top = gkGTKGroupBoxSubtitleHeight(native, cInt(max(int(width), content.Width)))
 	return ui.Size{Width: content.Width + int(chromeWidth), Height: content.Height + int(chromeHeight) + int(top)}
 }
 func (g *groupBox) Close() {
@@ -449,7 +443,7 @@ func (w *Window) CreateSplitView(options ui.SplitViewOptions) (ui.SplitView, err
 		panes:     append([]ui.SplitPane(nil), options.Panes...),
 		pending:   append([]int(nil), options.Dividers...),
 	}
-	native := C.gkGTKSplitViewCreate(window, boolInt(options.Direction == ui.Horizontal), C.int(len(options.Panes)))
+	native := gkGTKSplitViewCreate(window, boolInt(options.Direction == ui.Horizontal), cInt(len(options.Panes)))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSplitView, result); err != nil {
 		return nil, err
 	}
@@ -464,15 +458,15 @@ func (w *Window) CreateSplitView(options ui.SplitViewOptions) (ui.SplitView, err
 		return nil, err
 	}
 	for i, pane := range options.Panes {
-		attach(result, children[i], C.gkGTKSplitViewPane(native, C.int(i)))
-		C.gkGTKSplitViewSetPane(native, C.int(i), C.double(pane.Minimum), boolInt(pane.Collapsible))
+		attach(result, children[i], gkGTKSplitViewPane(native, cInt(i)))
+		gkGTKSplitViewSetPane(native, cInt(i), cDouble(pane.Minimum), boolInt(pane.Collapsible))
 	}
 	result.children = children
 	return result, nil
 }
 
 func (s *splitView) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_RESIZE {
+	if event.kind == gkEventResize {
 		s.layoutPanes()
 		positions := s.Dividers()
 		each(&s.changes, func(handler func([]int)) {
@@ -501,8 +495,8 @@ func (s *splitView) layoutPanes() {
 		return
 	}
 	for i, child := range s.children {
-		var x, y, width, height C.int
-		C.gkGTKSplitViewPaneFrame(native, C.int(i), &x, &y, &width, &height)
+		var x, y, width, height cInt
+		gkGTKSplitViewPaneFrame(native, cInt(i), &x, &y, &width, &height)
 		child.SetBounds(ui.Rect{Size: ui.Size{Width: int(width), Height: int(height)}})
 	}
 }
@@ -533,7 +527,7 @@ func (s *splitView) Dividers() []int {
 	}
 	positions := make([]int, max(0, len(s.panes)-1))
 	for i := range positions {
-		positions[i] = int(C.gkGTKSplitViewDivider(native, C.int(i)))
+		positions[i] = int(gkGTKSplitViewDivider(native, cInt(i)))
 	}
 	return positions
 }
@@ -554,7 +548,7 @@ func (s *splitView) SetDividers(positions []int) error {
 		return nil
 	}
 	for i, position := range positions {
-		C.gkGTKSplitViewSetDivider(native, C.int(i), C.double(position))
+		gkGTKSplitViewSetDivider(native, cInt(i), cDouble(position))
 	}
 	s.layoutPanes()
 	return nil
@@ -576,7 +570,7 @@ func (s *splitView) Close() {
 
 type popover struct {
 	window  *Window
-	native  unsafe.Pointer
+	native  *nativePopover
 	handle  cgo.Handle
 	body    *frameContainer
 	anchor  nativeWidget
@@ -596,14 +590,14 @@ func (w *Window) CreatePopover(options ui.PopoverOptions) (ui.Popover, error) {
 	}
 	result := &popover{window: w, anchor: anchor, edge: options.PreferredEdge}
 	result.handle = cgo.NewHandle(result)
-	result.native = C.gkGTKPopoverCreate(C.uintptr_t(result.handle), boolInt(options.Transient))
+	result.native = newNativePopover(uintptr(result.handle), options.Transient)
 	body := &frameContainer{}
-	body.widgetBase = newWidgetBase(w, C.gkGTKPopoverBody(result.native), ui.RoleDialog)
-	C.gkGTKRetain(body.nativePointer())
+	body.widgetBase = newWidgetBase(w, unsafe.Pointer(result.native.body), ui.RoleDialog)
+	gkGTKRetain(body.nativePointer())
 	body.contract.owner = body
 	if err := body.setChildren([]ui.Widget{options.Content}); err != nil {
 		body.Close()
-		C.gkGTKPopoverRelease(result.native)
+		result.native.close()
 		result.handle.Delete()
 		return nil, err
 	}
@@ -617,7 +611,7 @@ func (w *Window) CreatePopover(options ui.PopoverOptions) (ui.Popover, error) {
 }
 
 func (p *popover) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_CLOSE {
+	if event.kind == gkEventClose {
 		each(&p.hides, func(handler ui.FocusHandler) {
 			handler()
 		})
@@ -633,7 +627,7 @@ func (p *popover) Close() {
 	if p.body != nil {
 		p.body.Close()
 	}
-	C.gkGTKPopoverRelease(native)
+	native.close()
 	p.handle.Delete()
 	p.window.releaseResource(p)
 }
@@ -648,7 +642,7 @@ func (p *popover) Show() error {
 	}
 	size := preferredOf(p.content)
 	size.Width, size.Height = max(size.Width, 1), max(size.Height, 1)
-	if C.gkGTKPopoverShow(p.native, view, C.int(p.edge), C.int(size.Width), C.int(size.Height)) == 0 {
+	if !p.native.show((*gtkWidget)(view), int(p.edge), size.Width, size.Height) {
 		return errors.New("ui/gtk: a popover's anchor must be in a visible window")
 	}
 	p.body.SetBounds(ui.Rect{Size: size})
@@ -657,12 +651,12 @@ func (p *popover) Show() error {
 
 func (p *popover) Hide() {
 	if p.native != nil {
-		C.gkGTKPopoverHide(p.native)
+		gtkPopoverPopdown((*gtkPopover)(unsafe.Pointer(p.native.widget)))
 	}
 }
 
 func (p *popover) IsShown() bool {
-	return p.native != nil && C.gkGTKPopoverShown(p.native) != 0
+	return p.native != nil && gtkWidgetGetVisible(p.native.widget) != 0
 }
 
 func (p *popover) Content() ui.Widget {
@@ -1034,7 +1028,7 @@ func (o *overlayLayout) SetItems(items []ui.OverlayItem) error {
 	}
 	// Later items are drawn on top.
 	for _, child := range o.frameContainer.children {
-		C.gkGTKUIBringToFront(child.base().nativePointer())
+		gkGTKUIBringToFront(child.base().nativePointer())
 	}
 	return nil
 }
@@ -1429,7 +1423,7 @@ type titleBarAccessory struct {
 	window     *Window
 	body       *frameContainer
 	content    nativeWidget
-	controller unsafe.Pointer
+	controller *nativeAccessory
 }
 
 // CreateTitleBarAccessory implements ui.Window.CreateTitleBarAccessory.
@@ -1465,9 +1459,8 @@ func (w *Window) CreateTitleBarAccessory(options ui.TitleBarAccessoryOptions) (u
 	if alignment != 0 {
 		height = max(height, 28)
 	}
-	var controller unsafe.Pointer
-	if C.gkGTKTitleAccessoryAdd(window, body.nativePointer(), C.int(alignment), C.int(preferred.Width),
-		C.int(height), &controller) == 0 {
+	controller := addNativeAccessory(w, (*gtkWidget)(body.nativePointer()), alignment, preferred.Width, height)
+	if controller == nil {
 		body.Close()
 		return nil, errors.New("ui/gtk: title bar accessories need a titled window")
 	}
@@ -1485,7 +1478,7 @@ func (t *titleBarAccessory) Close() {
 	}
 	controller := t.controller
 	t.controller = nil
-	C.gkGTKTitleAccessoryRemove(controller)
+	controller.close()
 	t.body.Close()
 }
 

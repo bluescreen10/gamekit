@@ -2,12 +2,6 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"errors"
 	stdimage "image"
@@ -49,7 +43,7 @@ type widgetContract struct {
 func (w *widgetBase) attachContract(role ui.AccessibilityRole) {
 	w.contract.role = role
 	w.contract.eventHandle = cgo.NewHandle(w)
-	C.gkGTKSetHandle(w.native, C.uintptr_t(w.contract.eventHandle))
+	gkGTKSetHandle(w.native, cUintptr(w.contract.eventHandle))
 	if w.window != nil {
 		w.window.registerWidget(w)
 	}
@@ -62,8 +56,8 @@ func (w *widgetBase) detachContract(native unsafe.Pointer) {
 	}
 	handle := w.contract.eventHandle
 	w.contract.eventHandle = 0
-	C.gkGTKDisconnect(native)
-	C.gkGTKSetHandle(native, 0)
+	gkGTKDisconnect(native)
+	gkGTKSetHandle(native, 0)
 	if w.window != nil {
 		w.window.unregisterWidget(w, uintptr(handle))
 	}
@@ -72,11 +66,11 @@ func (w *widgetBase) detachContract(native unsafe.Pointer) {
 
 func (w *widgetBase) gtkEvent(event gtkEvent) {
 	switch event.kind {
-	case C.GK_EVENT_FOCUS:
+	case gkEventFocus:
 		for _, handler := range w.contract.focuses.snapshot() {
 			handler()
 		}
-	case C.GK_EVENT_BLUR:
+	case gkEventBlur:
 		for _, handler := range w.contract.blurs.snapshot() {
 			handler()
 		}
@@ -117,7 +111,7 @@ func (w *widgetBase) announceText(text string) {
 	}
 	value := cString(text)
 	defer freeCString(value)
-	C.gkGTKAnnounce(native, value, C.int(live))
+	gkGTKAnnounce(native, value, cInt(live))
 }
 
 func cloneWidgets(widgets []ui.Widget) []ui.Widget {
@@ -150,8 +144,8 @@ func (w *widgetBase) SetAccessibility(metadata ui.Accessibility) error {
 			}
 		}
 	}
-	describedBy := C.malloc(C.size_t(max(1, len(metadata.DescribedBy))) * C.size_t(unsafe.Sizeof(uintptr(0))))
-	defer C.free(describedBy)
+	describedBy := gMalloc(cSize(max(1, len(metadata.DescribedBy))) * cSize(unsafe.Sizeof(uintptr(0))))
+	defer gFree(describedBy)
 	views := unsafe.Slice((*unsafe.Pointer)(describedBy), max(1, len(metadata.DescribedBy)))
 	for i, widget := range metadata.DescribedBy {
 		view, err := w.relatedView(widget)
@@ -169,9 +163,9 @@ func (w *widgetBase) SetAccessibility(metadata ui.Accessibility) error {
 	defer freeCString(name)
 	defer freeCString(description)
 	defer freeCString(value)
-	C.gkGTKSetAccessibility(native, identifier, name, description, value,
+	gkGTKSetAccessibility(native, identifier, name, description, value,
 		boolInt(metadata.IsRequired), boolInt(metadata.IsHidden), boolInt(metadata.IsInvalid),
-		labeledBy, (*unsafe.Pointer)(describedBy), C.int(len(metadata.DescribedBy)))
+		labeledBy, (*unsafe.Pointer)(describedBy), cInt(len(metadata.DescribedBy)))
 
 	metadata.LabeledBy = cloneWidgets(metadata.LabeledBy)
 	metadata.DescribedBy = cloneWidgets(metadata.DescribedBy)
@@ -206,7 +200,7 @@ func (w *widgetBase) Focus() error {
 	if !w.IsVisible() || !w.IsEnabled() {
 		return errors.New("ui/gtk: hidden or disabled widgets cannot take focus")
 	}
-	if C.gkGTKFocus(native) == 0 {
+	if gkGTKFocus(native) == 0 {
 		return errors.New("ui/gtk: widget cannot take keyboard focus")
 	}
 	if w.window != nil {
@@ -217,7 +211,7 @@ func (w *widgetBase) Focus() error {
 
 func (w *widgetBase) IsFocused() bool {
 	native := w.nativePointer()
-	return native != nil && C.gkGTKIsFocused(native) != 0
+	return native != nil && gkGTKIsFocused(native) != 0
 }
 
 func (w *widgetBase) OnFocus(handler ui.FocusHandler) ui.Unsubscribe {
@@ -306,7 +300,7 @@ func (w *widgetBase) SetTooltip(text string) {
 	}
 	value := cString(text)
 	defer freeCString(value)
-	C.gkGTKSetTooltip(native, value)
+	gkGTKSetTooltip(native, value)
 	w.mu.Lock()
 	w.contract.tooltip = text
 	w.mu.Unlock()
@@ -326,7 +320,7 @@ func (w *widgetBase) SetCursor(cursor ui.Cursor) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKSetCursor(native, C.int(cursor))
+	gkGTKSetCursor(native, cInt(cursor))
 	w.mu.Lock()
 	w.contract.cursor = cursor
 	w.mu.Unlock()
@@ -351,16 +345,16 @@ func (w *widgetBase) SetStyle(style ui.WidgetStyle) error {
 	defer freeCString(family)
 	foreground, hasForeground := rgba(style.ForegroundColor)
 	background, hasBackground := rgba(style.BackgroundColor)
-	var foregroundPointer, backgroundPointer *C.double
+	var foregroundPointer, backgroundPointer *cDouble
 	if hasForeground {
 		foregroundPointer = &foreground[0]
 	}
 	if hasBackground {
 		backgroundPointer = &background[0]
 	}
-	if C.gkGTKSetStyle(native, family, C.double(style.Font.Size), C.int(style.Font.Weight),
-		boolInt(style.Font.Italic), C.int(style.Foreground), C.int(style.Background),
-		foregroundPointer, backgroundPointer, C.double(style.CornerRadius)) == 0 {
+	if gkGTKSetStyle(native, family, cDouble(style.Font.Size), cInt(style.Font.Weight),
+		boolInt(style.Font.Italic), cInt(style.Foreground), cInt(style.Background),
+		foregroundPointer, backgroundPointer, cDouble(style.CornerRadius)) == 0 {
 		return errors.New("ui/gtk: font family is not installed")
 	}
 	w.mu.Lock()
@@ -373,21 +367,21 @@ func (w *widgetBase) SetStyle(style ui.WidgetStyle) error {
 
 // rgba converts value to red, green, blue, and alpha from zero to one. It
 // reports false for a nil color.
-func rgba(value color.Color) ([4]C.double, bool) {
+func rgba(value color.Color) ([4]cDouble, bool) {
 	if value == nil {
-		return [4]C.double{}, false
+		return [4]cDouble{}, false
 	}
 	red, green, blue, alpha := value.RGBA()
 	if alpha == 0 {
-		return [4]C.double{}, true
+		return [4]cDouble{}, true
 	}
 	// RGBA returns premultiplied 16-bit components; CSS expects straight
 	// alpha.
-	return [4]C.double{
-		C.double(red) / C.double(alpha),
-		C.double(green) / C.double(alpha),
-		C.double(blue) / C.double(alpha),
-		C.double(alpha) / 0xffff,
+	return [4]cDouble{
+		cDouble(red) / cDouble(alpha),
+		cDouble(green) / cDouble(alpha),
+		cDouble(blue) / cDouble(alpha),
+		cDouble(alpha) / 0xffff,
 	}, true
 }
 
@@ -416,7 +410,7 @@ func (w *widgetBase) SetContextMenu(menu ui.ContextMenu) error {
 			return ui.ErrClosed
 		}
 	}
-	C.gkGTKSetMenu(native, nativeMenu)
+	attachNativeContextMenu((*gtkWidget)(native), nativeMenu)
 	w.mu.Lock()
 	w.contract.contextMenu = menu
 	w.mu.Unlock()
@@ -441,22 +435,22 @@ func (w *widgetBase) SetDragSource(source ui.DragSource) error {
 	}
 	types := make([]string, 0, len(source.Custom))
 	var data []byte
-	var sizes []C.size_t
+	var sizes []cSize
 	for mime, value := range source.Custom {
 		types = append(types, mime)
 		data = append(data, value...)
-		sizes = append(sizes, C.size_t(len(value)))
+		sizes = append(sizes, cSize(len(value)))
 	}
 	typeBuffer := joinNul(types)
-	var sizesPointer *C.size_t
+	var sizesPointer *cSize
 	if len(sizes) > 0 {
 		sizesPointer = &sizes[0]
 	}
-	C.gkGTKSetDragSource(native, C.int(source.Operations), text,
-		bytesPointer(files), C.size_t(len(files)),
-		(*C.uchar)(unsafe.Pointer(bytesPointer(pixels))), C.int(width), C.int(height),
-		bytesPointer(typeBuffer), C.size_t(len(typeBuffer)),
-		(*C.uchar)(unsafe.Pointer(bytesPointer(data))), sizesPointer, C.int(len(sizes)))
+	gkGTKSetDragSource(native, cInt(source.Operations), text,
+		bytesPointer(files), cSize(len(files)),
+		(*cUchar)(unsafe.Pointer(bytesPointer(pixels))), cInt(width), cInt(height),
+		bytesPointer(typeBuffer), cSize(len(typeBuffer)),
+		(*cUchar)(unsafe.Pointer(bytesPointer(data))), sizesPointer, cInt(len(sizes)))
 	w.mu.Lock()
 	w.contract.dragSource = source
 	w.mu.Unlock()
@@ -472,7 +466,7 @@ func (w *widgetBase) SetDropTarget(target ui.DropTarget) error {
 		return errors.New("ui: invalid drop operations")
 	}
 	types := joinNul(target.Formats)
-	C.gkGTKSetDropTarget(native, C.int(target.Operations), bytesPointer(types), C.size_t(len(types)))
+	gkGTKSetDropTarget(native, cInt(target.Operations), bytesPointer(types), cSize(len(types)))
 	target.Formats = append([]string(nil), target.Formats...)
 	w.mu.Lock()
 	w.contract.dropTarget = target
@@ -485,49 +479,6 @@ func (w *widgetBase) OnDrop(handler ui.DropHandler) ui.Unsubscribe {
 		return noOpUnsubscribe
 	}
 	return w.contract.drops.add(handler)
-}
-
-//export gkGTKGoDrop
-func gkGTKGoDrop(handle C.uintptr_t, operation C.int, x, y C.double, text *C.char, files *C.char,
-	filesSize C.size_t, pixels *C.uchar, width, height C.int, types *C.char, typesSize C.size_t,
-	data *C.uchar, sizes *C.size_t, count C.int) {
-	if handle == 0 {
-		return
-	}
-	widget, ok := cgo.Handle(handle).Value().(*widgetBase)
-	if !ok {
-		return
-	}
-	event := ui.DropEvent{
-		Operation: ui.DragOperation(operation),
-		Position:  ui.Point{X: int(x), Y: int(y)},
-		Files:     splitNul(unsafe.Pointer(files), filesSize),
-	}
-	if text != nil {
-		event.Text = C.GoString(text)
-	}
-	if pixels != nil && width > 0 && height > 0 {
-		image := stdimage.NewNRGBA(stdimage.Rect(0, 0, int(width), int(height)))
-		copy(image.Pix, unsafe.Slice((*byte)(unsafe.Pointer(pixels)), int(width)*int(height)*4))
-		event.Image = image
-	}
-	if count > 0 {
-		mimes := splitNul(unsafe.Pointer(types), typesSize)
-		lengths := unsafe.Slice(sizes, int(count))
-		offset := 0
-		event.Custom = make(map[string][]byte, len(mimes))
-		for i, mime := range mimes {
-			if i >= len(lengths) {
-				break
-			}
-			length := int(lengths[i])
-			event.Custom[mime] = C.GoBytes(unsafe.Add(unsafe.Pointer(data), offset), C.int(length))
-			offset += length
-		}
-	}
-	for _, handler := range widget.contract.drops.snapshot() {
-		handler(event)
-	}
 }
 
 // rgbaPixels converts an image to tightly packed non-premultiplied RGBA.

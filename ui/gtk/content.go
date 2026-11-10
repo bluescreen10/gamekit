@@ -2,12 +2,6 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"errors"
 	"fmt"
@@ -35,7 +29,7 @@ func (w *Window) CreateIcon(options ui.IconOptions) (ui.Icon, error) {
 		return nil, err
 	}
 	result := &icon{options: options}
-	if result.widgetBase, err = w.newComponent(C.gkGTKIconCreate(window), ui.RoleImage, result); err != nil {
+	if result.widgetBase, err = w.newComponent(gkGTKIconCreate(window), ui.RoleImage, result); err != nil {
 		return nil, err
 	}
 	result.apply()
@@ -54,10 +48,10 @@ func (i *icon) apply() {
 	size := i.options.Size
 	pointSize := float64(max(size.Width, size.Height))
 	image := nativeIcon(i.Source(), pointSize)
-	defer C.gkGTKRelease(image)
+	defer gkGTKRelease(unsafe.Pointer(image))
 	name := cString(i.options.AccessibilityName)
 	defer freeCString(name)
-	C.gkGTKIconSet(native, image, C.int(size.Width), C.int(size.Height), C.int(i.options.Tint), name)
+	gkGTKIconSet(native, unsafe.Pointer(image), cInt(size.Width), cInt(size.Height), cInt(i.options.Tint), name)
 }
 
 func (i *icon) Source() ui.IconSource {
@@ -85,7 +79,7 @@ type document struct {
 }
 
 func (d *document) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_TEXT_CHANGE {
+	if event.kind == gkEventTextChange {
 		each(&d.changes, func(handler ui.FocusHandler) {
 			handler()
 		})
@@ -95,7 +89,7 @@ func (d *document) gtkEvent(event gtkEvent) {
 // gtkQuery reports whether a link click was handled; without handlers the
 // text view opens the link itself.
 func (d *document) gtkQuery(event gtkEvent) bool {
-	if event.kind != C.GK_EVENT_LINK {
+	if event.kind != gkEventLink {
 		return false
 	}
 	handlers := d.links.snapshot()
@@ -110,14 +104,14 @@ func (d *document) Text() string {
 	if native == nil {
 		return ""
 	}
-	return goStringFree(C.gkGTKDocumentText(native))
+	return goStringFree(gkGTKDocumentText(native))
 }
 
 func (d *document) SetText(text string) {
 	if native := d.nativePointer(); native != nil {
 		value := cString(text)
 		defer freeCString(value)
-		C.gkGTKDocumentSetText(native, value)
+		gkGTKDocumentSetText(native, value)
 	}
 }
 
@@ -130,7 +124,7 @@ func (w *Window) CreateRichText(options ui.RichTextOptions) (ui.RichText, error)
 		return nil, err
 	}
 	result := &richText{}
-	if result.widgetBase, err = w.newComponent(C.gkGTKDocumentCreate(window, boolInt(options.Editable), 0), ui.RoleTextArea, result); err != nil {
+	if result.widgetBase, err = w.newComponent(gkGTKDocumentCreate(window, boolInt(options.Editable), 0), ui.RoleTextArea, result); err != nil {
 		return nil, err
 	}
 	result.SetText(options.Text)
@@ -152,10 +146,10 @@ func (r *richText) RTF() ([]byte, error) {
 	if native == nil {
 		return nil, ui.ErrClosed
 	}
-	var size C.size_t
-	data := C.gkGTKDocumentRTF(native, &size)
-	defer C.free(unsafe.Pointer(data))
-	return C.GoBytes(unsafe.Pointer(data), C.int(size)), nil
+	var size cSize
+	data := gkGTKDocumentRTF(native, &size)
+	defer gFree(unsafe.Pointer(data))
+	return goBytes(unsafe.Pointer(data), cInt(size)), nil
 }
 
 func (r *richText) SetRTF(rtf []byte) error {
@@ -163,7 +157,7 @@ func (r *richText) SetRTF(rtf []byte) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	if len(rtf) == 0 || C.gkGTKDocumentSetRTF(native, (*C.uchar)(unsafe.Pointer(&rtf[0])), C.size_t(len(rtf))) == 0 {
+	if len(rtf) == 0 || gkGTKDocumentSetRTF(native, (*cUchar)(unsafe.Pointer(&rtf[0])), cSize(len(rtf))) == 0 {
 		return errors.New("ui/gtk: the data is not valid RTF")
 	}
 	return nil
@@ -171,12 +165,12 @@ func (r *richText) SetRTF(rtf []byte) error {
 
 func (r *richText) IsEditable() bool {
 	native := r.nativePointer()
-	return native != nil && C.gkGTKDocumentEditable(native) != 0
+	return native != nil && gkGTKDocumentEditable(native) != 0
 }
 
 func (r *richText) SetEditable(editable bool) {
 	if native := r.nativePointer(); native != nil {
-		C.gkGTKDocumentSetEditable(native, boolInt(editable))
+		gkGTKDocumentSetEditable(native, boolInt(editable))
 	}
 }
 
@@ -198,7 +192,7 @@ func (w *Window) CreateMarkdown(options ui.MarkdownOptions) (ui.Markdown, error)
 		return nil, err
 	}
 	result := &markdown{}
-	if result.widgetBase, err = w.newComponent(C.gkGTKDocumentCreate(window, 0, 1), ui.RoleDocument, result); err != nil {
+	if result.widgetBase, err = w.newComponent(gkGTKDocumentCreate(window, 0, 1), ui.RoleDocument, result); err != nil {
 		return nil, err
 	}
 	if err := result.SetSource(options.Source); err != nil {
@@ -223,7 +217,7 @@ func (m *markdown) SetSource(source string) error {
 	}
 	value := cString(source)
 	defer freeCString(value)
-	if C.gkGTKMarkdownSet(native, value) == 0 {
+	if gkGTKMarkdownSet(native, value) == 0 {
 		return errors.New("ui/gtk: the Markdown source could not be parsed")
 	}
 	m.source = source
@@ -249,7 +243,7 @@ func (w *Window) CreateSVG(options ui.SVGOptions) (ui.SVG, error) {
 		return nil, err
 	}
 	result := &vector{text: options.AccessibilityText}
-	if result.widgetBase, err = w.newComponent(C.gkGTKVectorCreate(window), ui.RoleImage, result); err != nil {
+	if result.widgetBase, err = w.newComponent(gkGTKVectorCreate(window), ui.RoleImage, result); err != nil {
 		return nil, err
 	}
 	if err := result.SetSource(options.Source); err != nil {
@@ -273,8 +267,8 @@ func (v *vector) SetSource(source []byte) error {
 	}
 	label := cString(v.text)
 	defer freeCString(label)
-	var width, height C.double
-	if C.gkGTKVectorSet(native, (*C.uchar)(unsafe.Pointer(&source[0])), C.size_t(len(source)), label, &width, &height) == 0 {
+	var width, height cDouble
+	if gkGTKVectorSet(native, (*cUchar)(unsafe.Pointer(&source[0])), cSize(len(source)), label, &width, &height) == 0 {
 		return fmt.Errorf("ui/gtk: GTK could not decode the SVG: %w", ui.ErrNotSupported)
 	}
 	v.size = ui.Size{Width: int(width), Height: int(height)}
@@ -302,15 +296,15 @@ func (w *Window) CreateAnimatedImage(options ui.AnimatedImageOptions) (ui.Animat
 		return nil, err
 	}
 	sources := make([]ui.IconSource, len(options.Frames))
-	durations := make([]C.double, len(options.Frames))
+	durations := make([]cDouble, len(options.Frames))
 	for i, frame := range options.Frames {
 		sources[i] = ui.IconSource{Image: frame.Image}
-		durations[i] = C.double(frame.Duration.Seconds())
+		durations[i] = cDouble(frame.Duration.Seconds())
 	}
 	array := newIconArray(sources, 0)
 	defer array.free()
 	result := &animatedImage{}
-	native := C.gkGTKAnimationCreate(window, array.native(), &durations[0], C.int(len(options.Frames)), boolInt(options.Repeat))
+	native := gkGTKAnimationCreate(window, array.native(), &durations[0], cInt(len(options.Frames)), boolInt(options.Repeat))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleImage, result); err != nil {
 		return nil, err
 	}
@@ -327,19 +321,19 @@ func (a *animatedImage) gtkEvent(gtkEvent) {
 
 func (a *animatedImage) Play() {
 	if native := a.nativePointer(); native != nil {
-		C.gkGTKAnimationPlay(native, 1)
+		gkGTKAnimationPlay(native, 1)
 	}
 }
 
 func (a *animatedImage) Pause() {
 	if native := a.nativePointer(); native != nil {
-		C.gkGTKAnimationPlay(native, 0)
+		gkGTKAnimationPlay(native, 0)
 	}
 }
 
 func (a *animatedImage) IsPlaying() bool {
 	native := a.nativePointer()
-	return native != nil && C.gkGTKAnimationPlaying(native) != 0
+	return native != nil && gkGTKAnimationPlaying(native) != 0
 }
 
 // ---- Video ----
@@ -360,7 +354,7 @@ func (w *Window) CreateVideo(options ui.VideoOptions) (ui.Video, error) {
 	source := cString(options.Source)
 	defer freeCString(source)
 	result := &video{}
-	native := C.gkGTKVideoCreate(window, source, boolInt(options.ShowControls), boolInt(options.Autoplay), boolInt(options.Muted))
+	native := gkGTKVideoCreate(window, source, boolInt(options.ShowControls), boolInt(options.Autoplay), boolInt(options.Muted))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleVideo, result); err != nil {
 		return nil, err
 	}
@@ -373,29 +367,29 @@ func (v *video) gtkEvent(gtkEvent) {
 
 func (v *video) Close() {
 	if native := v.nativePointer(); native != nil {
-		C.gkGTKVideoRelease(native)
+		gkGTKVideoRelease(native)
 	}
 	v.widgetBase.Close()
 }
 
 func (v *video) Play() {
 	if native := v.nativePointer(); native != nil {
-		C.gkGTKVideoPlay(native, 1)
+		gkGTKVideoPlay(native, 1)
 	}
 }
 
 func (v *video) Pause() {
 	if native := v.nativePointer(); native != nil {
-		C.gkGTKVideoPlay(native, 0)
+		gkGTKVideoPlay(native, 0)
 	}
 }
 
 func (v *video) IsPlaying() bool {
 	native := v.nativePointer()
-	return native != nil && C.gkGTKVideoPlaying(native) != 0
+	return native != nil && gkGTKVideoPlaying(native) != 0
 }
 
-func seconds(value C.double) time.Duration {
+func seconds(value cDouble) time.Duration {
 	return time.Duration(float64(value) * float64(time.Second))
 }
 
@@ -404,7 +398,7 @@ func (v *video) Position() time.Duration {
 	if native == nil {
 		return 0
 	}
-	return seconds(C.gkGTKVideoPosition(native))
+	return seconds(gkGTKVideoPosition(native))
 }
 
 func (v *video) Duration() time.Duration {
@@ -412,7 +406,7 @@ func (v *video) Duration() time.Duration {
 	if native == nil {
 		return 0
 	}
-	return seconds(C.gkGTKVideoDuration(native))
+	return seconds(gkGTKVideoDuration(native))
 }
 
 func (v *video) Seek(position time.Duration) error {
@@ -423,7 +417,7 @@ func (v *video) Seek(position time.Duration) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKVideoSeek(native, C.double(position.Seconds()))
+	gkGTKVideoSeek(native, cDouble(position.Seconds()))
 	return nil
 }
 
@@ -441,7 +435,7 @@ func (w *Window) CreateWebView(options ui.WebViewOptions) (ui.WebView, error) {
 		return nil, err
 	}
 	result := &webView{}
-	if result.widgetBase, err = w.newComponent(C.gkGTKWebViewCreate(window, boolInt(options.AllowScripts)), ui.RoleWebView, result); err != nil {
+	if result.widgetBase, err = w.newComponent(gkGTKWebViewCreate(window, boolInt(options.AllowScripts)), ui.RoleWebView, result); err != nil {
 		return nil, err
 	}
 	switch {
@@ -458,7 +452,7 @@ func (w *Window) CreateWebView(options ui.WebViewOptions) (ui.WebView, error) {
 }
 
 func (v *webView) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_NAVIGATE {
+	if event.kind == gkEventNavigate {
 		url := event.text
 		each(&v.navigations, func(handler func(string)) {
 			handler(url)
@@ -468,7 +462,7 @@ func (v *webView) gtkEvent(event gtkEvent) {
 
 func (v *webView) Close() {
 	if native := v.nativePointer(); native != nil {
-		C.gkGTKWebViewRelease(native)
+		gkGTKWebViewRelease(native)
 	}
 	v.widgetBase.Close()
 }
@@ -478,7 +472,7 @@ func (v *webView) URL() string {
 	if native == nil {
 		return ""
 	}
-	return goStringFree(C.gkGTKWebViewURL(native))
+	return goStringFree(gkGTKWebViewURL(native))
 }
 
 func (v *webView) Load(url string) error {
@@ -488,7 +482,7 @@ func (v *webView) Load(url string) error {
 	}
 	value := cString(url)
 	defer freeCString(value)
-	if C.gkGTKWebViewLoad(native, value) == 0 {
+	if gkGTKWebViewLoad(native, value) == 0 {
 		return fmt.Errorf("ui: %q is not an absolute URL", url)
 	}
 	return nil
@@ -501,7 +495,7 @@ func (v *webView) LoadHTML(html string) error {
 	}
 	value := cString(html)
 	defer freeCString(value)
-	C.gkGTKWebViewLoadHTML(native, value)
+	gkGTKWebViewLoadHTML(native, value)
 	return nil
 }
 

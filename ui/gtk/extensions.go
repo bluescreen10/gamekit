@@ -2,12 +2,6 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-#include "widget_bridge.h"
-*/
-import "C"
-
 import (
 	"errors"
 	"math"
@@ -32,8 +26,8 @@ type labelState struct {
 func (l *label) apply() {
 	if native := l.nativePointer(); native != nil {
 		s := l.state
-		C.gkGTKLabelConfigure(native, C.int(s.alignment), C.int(s.wrap), C.int(s.truncation),
-			boolInt(s.selectable), C.int(s.style), C.int(s.maximumLines))
+		gkGTKLabelConfigure(native, cInt(s.alignment), cInt(s.wrap), cInt(s.truncation),
+			boolInt(s.selectable), cInt(s.style), cInt(s.maximumLines))
 	}
 }
 
@@ -83,7 +77,7 @@ func (l *label) SetMaximumLines(lines int) {
 // SetBounds lets a wrapping label measure its height for its width.
 func (l *label) SetBounds(bounds ui.Rect) {
 	if native := l.nativePointer(); native != nil && l.state.wrap != ui.WrapNone {
-		C.gkGTKLabelPreferredWidth(native, C.int(bounds.Size.Width))
+		gkGTKLabelPreferredWidth(native, cInt(bounds.Size.Width))
 	}
 	l.widgetBase.SetBounds(bounds)
 }
@@ -105,11 +99,11 @@ func (b *button) apply() {
 		return
 	}
 	icon := nativeIcon(b.state.icon, 0)
-	defer C.gkGTKRelease(icon)
+	defer gkGTKRelease(unsafe.Pointer(icon))
 	key, modifiers := keyEquivalent(b.state.shortcut)
 	value := cString(key)
 	defer freeCString(value)
-	C.gkGTKButtonConfigure(native, icon, C.int(b.state.placement), C.int(b.state.role), value, C.int(modifiers))
+	gkGTKButtonConfigure(native, unsafe.Pointer(icon), cInt(b.state.placement), cInt(b.state.role), value, cInt(modifiers))
 	// The icon and its placement change the preferred size.
 	b.relayoutParent()
 }
@@ -141,7 +135,7 @@ func (b *button) IsBusy() bool {
 func (b *button) SetBusy(busy bool) {
 	b.state.busy = busy
 	if native := b.nativePointer(); native != nil {
-		C.gkGTKButtonSetBusy(native, boolInt(busy))
+		gkGTKButtonSetBusy(native, boolInt(busy))
 	}
 }
 func (b *button) Badge() string {
@@ -152,7 +146,7 @@ func (b *button) SetBadge(badge string) {
 	if native := b.nativePointer(); native != nil {
 		value := cString(badge)
 		defer freeCString(value)
-		C.gkGTKButtonSetBadge(native, value)
+		gkGTKButtonSetBadge(native, value)
 	}
 }
 
@@ -172,8 +166,8 @@ func runeRange(text string, selection ui.TextRange) (start, length int) {
 }
 
 func selectionOf(native unsafe.Pointer, text string) ui.TextRange {
-	var start, length C.int
-	C.gkGTKTextSelection(native, &start, &length)
+	var start, length cInt
+	gkGTKTextSelection(native, &start, &length)
 	return utf16Range(text, int(start), int(length))
 }
 
@@ -199,8 +193,8 @@ func (t *textField) apply() {
 	suffix := cString(s.suffix)
 	defer freeCString(prefix)
 	defer freeCString(suffix)
-	C.gkGTKTextFieldConfigure(native, boolInt(s.readOnly), C.int(s.maximumLength), C.int(s.purpose),
-		C.int(s.alignment), prefix, suffix, boolInt(s.spellCheck))
+	gkGTKTextFieldConfigure(native, boolInt(s.readOnly), cInt(s.maximumLength), cInt(s.purpose),
+		cInt(s.alignment), prefix, suffix, boolInt(s.spellCheck))
 }
 
 func (t *textField) OnSubmit(handler ui.TextChangeHandler) ui.Unsubscribe {
@@ -223,7 +217,7 @@ func (t *textField) Selection() ui.TextRange {
 func (t *textField) SetSelection(selection ui.TextRange) {
 	if native := t.nativePointer(); native != nil {
 		start, length := runeRange(t.Text(), selection)
-		C.gkGTKSetTextSelection(native, C.int(start), C.int(length))
+		gkGTKSetTextSelection(native, cInt(start), cInt(length))
 	}
 }
 func (t *textField) MaximumLength() int {
@@ -295,7 +289,7 @@ type textAreaState struct {
 func (t *textArea) apply() {
 	if native := t.nativePointer(); native != nil {
 		s := t.state
-		C.gkGTKTextAreaConfigure(native, C.int(s.wrap), C.int(s.maximumLength),
+		gkGTKTextAreaConfigure(native, cInt(s.wrap), cInt(s.maximumLength),
 			boolInt(s.tabPolicy == ui.TabMovesFocus), boolInt(s.spellCheck))
 	}
 }
@@ -317,7 +311,7 @@ func (t *textArea) Selection() ui.TextRange {
 func (t *textArea) SetSelection(selection ui.TextRange) {
 	if native := t.nativePointer(); native != nil {
 		start, length := runeRange(t.Text(), selection)
-		C.gkGTKSetTextSelection(native, C.int(start), C.int(length))
+		gkGTKSetTextSelection(native, cInt(start), cInt(length))
 	}
 }
 func (t *textArea) ScrollPosition() ui.Point {
@@ -325,13 +319,13 @@ func (t *textArea) ScrollPosition() ui.Point {
 	if native == nil {
 		return ui.Point{}
 	}
-	var x, y C.int
-	C.gkGTKScrollPosition(native, &x, &y)
+	var x, y cInt
+	gkGTKScrollPosition(native, &x, &y)
 	return ui.Point{X: int(x), Y: int(y)}
 }
 func (t *textArea) SetScrollPosition(position ui.Point) {
 	if native := t.nativePointer(); native != nil {
-		C.gkGTKSetScrollPosition(native, C.int(position.X), C.int(position.Y), 0)
+		gkGTKSetScrollPosition(native, cInt(position.X), cInt(position.Y), 0)
 	}
 }
 func (t *textArea) MaximumLength() int {
@@ -373,7 +367,7 @@ func (c *checkBox) apply(state ui.CheckState) {
 	description := cString(c.state.description)
 	defer freeCString(text)
 	defer freeCString(description)
-	C.gkGTKCheckBoxConfigure(native, boolInt(c.state.allowsMixed), C.int(state),
+	gkGTKCheckBoxConfigure(native, boolInt(c.state.allowsMixed), cInt(state),
 		boolInt(c.state.placement == ui.LabelBeforeControl), text, description)
 }
 
@@ -382,7 +376,7 @@ func (c *checkBox) State() ui.CheckState {
 	if native == nil {
 		return ui.CheckOff
 	}
-	return ui.CheckState(C.gkGTKCheckBoxState(native))
+	return ui.CheckState(gkGTKCheckBoxState(native))
 }
 func (c *checkBox) SetState(state ui.CheckState) {
 	if state == ui.CheckMixed && !c.state.allowsMixed {
@@ -439,7 +433,7 @@ func (s *selection) applyChoices(choices []ui.Choice) error {
 		selectedID = s.choices[index].ID
 	}
 	titles := make([]string, len(choices))
-	enabled := make([]C.int, len(choices))
+	enabled := make([]cInt, len(choices))
 	items := make([]string, len(choices))
 	selected := -1
 	for i, choice := range choices {
@@ -451,13 +445,13 @@ func (s *selection) applyChoices(choices []ui.Choice) error {
 		}
 	}
 	buffer := joinNul(titles)
-	C.gkGTKSetChoices(native, bytesPointer(buffer), C.size_t(len(buffer)), &enabled[0], C.int(len(choices)))
+	gkGTKSetChoices(native, bytesPointer(buffer), cSize(len(buffer)), &enabled[0], cInt(len(choices)))
 	s.items = items
 	s.choices = append([]ui.Choice(nil), choices...)
 	if selected < 0 && len(choices) > 0 {
 		selected = 0
 	}
-	C.gkGTKUISetSelectionIndex(native, C.int(selected))
+	gkGTKUISetSelectionIndex(native, cInt(selected))
 	return nil
 }
 
@@ -477,7 +471,7 @@ func (r *radioGroup) applyLayout() {
 	if native := r.nativePointer(); native != nil {
 		value := cString(r.state.label)
 		defer freeCString(value)
-		C.gkGTKRadioGroupConfigure(native, boolInt(r.state.orientation == ui.Horizontal), value)
+		gkGTKRadioGroupConfigure(native, boolInt(r.state.orientation == ui.Horizontal), value)
 		r.relayoutParent()
 	}
 }
@@ -507,7 +501,7 @@ func (s *selectControl) applyPresentation() {
 	if native := s.nativePointer(); native != nil {
 		value := cString(s.state.placeholder)
 		defer freeCString(value)
-		C.gkGTKSelectConfigure(native, value, C.int(s.state.popupWidth))
+		gkGTKSelectConfigure(native, value, cInt(s.state.popupWidth))
 	}
 }
 
@@ -537,7 +531,7 @@ func (s *selectControl) VisibleRowCount() int {
 func (s *selectControl) SetVisibleRowCount(rows int) {
 	s.state.visibleRows = max(0, rows)
 	if native := s.nativePointer(); native != nil {
-		C.gkGTKSelectSetVisibleRows(native, C.int(s.state.visibleRows))
+		gkGTKSelectSetVisibleRows(native, cInt(s.state.visibleRows))
 	}
 }
 
@@ -551,8 +545,8 @@ type sliderState struct {
 
 func (s *slider) apply() {
 	if native := s.nativePointer(); native != nil {
-		C.gkGTKSliderConfigure(native, boolInt(s.state.orientation == ui.Vertical),
-			C.double(s.minimum), C.double(s.maximum), C.double(s.ticks().Frequency), boolInt(s.ticks().SnapToTicks))
+		gkGTKSliderConfigure(native, boolInt(s.state.orientation == ui.Vertical),
+			cDouble(s.minimum), cDouble(s.maximum), cDouble(s.ticks().Frequency), boolInt(s.ticks().SnapToTicks))
 	}
 }
 
@@ -582,7 +576,7 @@ func (s *slider) IsInverted() bool {
 func (s *slider) SetInverted(inverted bool) {
 	s.state.inverted = inverted
 	if native := s.nativePointer(); native != nil {
-		C.gkGTKSliderSetInverted(native, boolInt(inverted))
+		gkGTKSliderSetInverted(native, boolInt(inverted))
 	}
 }
 func (s *slider) Ticks() ui.SliderTicks {
@@ -607,8 +601,8 @@ func (p *progressBar) apply() {
 	if native := p.nativePointer(); native != nil {
 		text := cString(p.state.text)
 		defer freeCString(text)
-		C.gkGTKProgressConfigure(native, boolInt(p.state.mode == ui.ProgressIndeterminate),
-			boolInt(p.state.orientation == ui.Vertical), text, C.int(p.state.condition))
+		gkGTKProgressConfigure(native, boolInt(p.state.mode == ui.ProgressIndeterminate),
+			boolInt(p.state.orientation == ui.Vertical), text, cInt(p.state.condition))
 	}
 }
 
@@ -651,7 +645,7 @@ func (a *activityIndicator) apply() {
 	if native := a.nativePointer(); native != nil {
 		label := cString(a.state.label)
 		defer freeCString(label)
-		C.gkGTKActivityConfigure(native, C.int(a.state.size), label)
+		gkGTKActivityConfigure(native, cInt(a.state.size), label)
 	}
 }
 
@@ -682,8 +676,8 @@ func (s *separator) apply() {
 	if native := s.nativePointer(); native != nil {
 		label := cString(s.state.label)
 		defer freeCString(label)
-		C.gkGTKSeparatorConfigure(native, boolInt(s.direction == ui.Vertical), label,
-			boolInt(s.state.presentation == ui.SeparatorInset), C.int(s.Thickness()))
+		gkGTKSeparatorConfigure(native, boolInt(s.direction == ui.Vertical), label,
+			boolInt(s.state.presentation == ui.SeparatorInset), cInt(s.Thickness()))
 		s.relayoutParent()
 	}
 }
@@ -728,8 +722,8 @@ func (i *imageView) apply() {
 	if native := i.nativePointer(); native != nil {
 		alternative := cString(i.state.alternative)
 		defer freeCString(alternative)
-		C.gkGTKImageConfigure(native, C.int(i.state.alignment),
-			boolInt(i.state.interpolation == ui.InterpolationNearest), alternative, C.double(i.SourceScale()))
+		gkGTKImageConfigure(native, cInt(i.state.alignment),
+			boolInt(i.state.interpolation == ui.InterpolationNearest), alternative, cDouble(i.SourceScale()))
 	}
 	// The source scale changes the preferred size.
 	i.relayoutParent()
@@ -779,8 +773,8 @@ type linkState struct {
 func (l *link) apply() {
 	if native := l.nativePointer(); native != nil {
 		icon := nativeIcon(l.state.icon, 13)
-		defer C.gkGTKRelease(icon)
-		C.gkGTKLinkConfigure(native, boolInt(l.state.visited), icon)
+		defer gkGTKRelease(unsafe.Pointer(icon))
+		gkGTKLinkConfigure(native, boolInt(l.state.visited), unsafe.Pointer(icon))
 	}
 }
 
@@ -810,9 +804,7 @@ func (l *link) opened() {
 	if l.state.policy != ui.LinkOpenPlatform {
 		return
 	}
-	url := cString(l.URL())
-	defer freeCString(url)
-	if C.gkGTKOpenURL(url, 0) != 0 && !l.state.visited {
+	if openNativeURL(l.URL()) && !l.state.visited {
 		l.SetVisited(true)
 	}
 }
@@ -830,7 +822,7 @@ func (t *tabs) Placement() ui.TabPlacement {
 func (t *tabs) SetPlacement(placement ui.TabPlacement) {
 	t.state.placement = placement
 	if native := t.nativePointer(); native != nil {
-		C.gkGTKTabsConfigure(native, C.int(placement))
+		gkGTKTabsConfigure(native, cInt(placement))
 		t.layoutContent()
 	}
 }
@@ -846,7 +838,7 @@ func (t *tabs) OverflowPolicy() ui.TabOverflowPolicy {
 func (t *tabs) SetOverflowPolicy(policy ui.TabOverflowPolicy) {
 	t.state.overflow = policy
 	if native := t.nativePointer(); native != nil {
-		C.gkGTKTabsSetOverflow(native, C.int(policy))
+		gkGTKTabsSetOverflow(native, cInt(policy))
 	}
 }
 
@@ -860,8 +852,8 @@ type scrollState struct {
 func (s *scrollView) apply() {
 	if native := s.nativePointer(); native != nil {
 		i := s.state.insets
-		C.gkGTKScrollConfigure(native, C.int(s.axes), C.int(s.state.policy), C.int(i.Top), C.int(i.Right),
-			C.int(i.Bottom), C.int(i.Left), boolInt(s.state.overscroll == ui.OverscrollDisabled))
+		gkGTKScrollConfigure(native, cInt(s.axes), cInt(s.state.policy), cInt(i.Top), cInt(i.Right),
+			cInt(i.Bottom), cInt(i.Left), boolInt(s.state.overscroll == ui.OverscrollDisabled))
 		s.layoutContent()
 	}
 }
@@ -898,7 +890,7 @@ func (s *scrollView) Zoom() float64 {
 	if native == nil {
 		return 1
 	}
-	return float64(C.gkGTKScrollZoom(native))
+	return float64(gkGTKScrollZoom(native))
 }
 func (s *scrollView) SetZoom(zoom float64) error {
 	if math.IsNaN(zoom) || math.IsInf(zoom, 0) || zoom <= 0 {
@@ -908,7 +900,7 @@ func (s *scrollView) SetZoom(zoom float64) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKScrollSetZoom(native, C.double(zoom))
+	gkGTKScrollSetZoom(native, cDouble(zoom))
 	return nil
 }
 func (s *scrollView) ViewportSize() ui.Size {
@@ -916,8 +908,8 @@ func (s *scrollView) ViewportSize() ui.Size {
 	if native == nil {
 		return ui.Size{}
 	}
-	var width, height C.int
-	C.gkGTKScrollViewport(native, &width, &height)
+	var width, height cInt
+	gkGTKScrollViewport(native, &width, &height)
 	size := ui.Size{Width: int(width), Height: int(height)}
 	if !size.IsValid() {
 		bounds := s.Bounds().Size
@@ -935,7 +927,7 @@ func (s *scrollView) ScrollToWidget(widget ui.Widget) error {
 	if native == nil || view == nil {
 		return ui.ErrClosed
 	}
-	if C.gkGTKScrollToView(native, view, boolInt(s.state.behavior == ui.ScrollSmooth)) == 0 {
+	if gkGTKScrollToView(native, view, boolInt(s.state.behavior == ui.ScrollSmooth)) == 0 {
 		return errors.New("ui/gtk: widget is not inside the scroll view")
 	}
 	return nil
@@ -955,8 +947,8 @@ func (s *section) apply() {
 		defer freeCString(subtitle)
 		defer freeCString(badge)
 		icon := nativeIcon(s.state.icon, 13)
-		defer C.gkGTKRelease(icon)
-		C.gkGTKSectionConfigure(native, subtitle, icon, badge)
+		defer gkGTKRelease(unsafe.Pointer(icon))
+		gkGTKSectionConfigure(native, subtitle, unsafe.Pointer(icon), badge)
 	}
 }
 
@@ -993,6 +985,6 @@ func (s *section) IsAnimationEnabled() bool {
 func (s *section) SetAnimationEnabled(enabled bool) {
 	s.state.animated = enabled
 	if native := s.nativePointer(); native != nil {
-		C.gkGTKSectionSetAnimated(native, boolInt(enabled))
+		gkGTKSectionSetAnimated(native, boolInt(enabled))
 	}
 }

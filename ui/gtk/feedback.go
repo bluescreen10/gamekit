@@ -2,12 +2,6 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"errors"
 	"math"
@@ -22,14 +16,14 @@ import (
 // actionButtons converts actions to the buffers the GTK layer expects.
 type actionButtons struct {
 	ids, titles []byte
-	enabled     []C.int
+	enabled     []cInt
 	count       int
 }
 
 func newActionButtons(actions []ui.Action) actionButtons {
 	ids := make([]string, len(actions))
 	titles := make([]string, len(actions))
-	enabled := make([]C.int, max(1, len(actions)))
+	enabled := make([]cInt, max(1, len(actions)))
 	for i, action := range actions {
 		ids[i], titles[i], enabled[i] = action.ID, action.Text, boolInt(action.Enabled)
 	}
@@ -61,8 +55,8 @@ func (w *Window) CreateInfoBar(options ui.InfoBarOptions) (ui.InfoBar, error) {
 		return nil, err
 	}
 	buttons := newActionButtons(options.Actions)
-	native := C.gkGTKInfoBarCreate(window, boolInt(options.Closable), bytesPointer(buttons.ids), C.size_t(len(buttons.ids)),
-		bytesPointer(buttons.titles), C.size_t(len(buttons.titles)), &buttons.enabled[0], C.int(buttons.count))
+	native := gkGTKInfoBarCreate(window, boolInt(options.Closable), bytesPointer(buttons.ids), cSize(len(buttons.ids)),
+		bytesPointer(buttons.titles), cSize(len(buttons.titles)), &buttons.enabled[0], cInt(buttons.count))
 	result := &infoBar{severity: options.Severity, title: options.Title, detail: options.Detail, live: options.Live}
 	if result.widgetBase, err = w.newComponent(native, ui.RoleAlert, result); err != nil {
 		return nil, err
@@ -79,23 +73,23 @@ func (i *infoBar) apply() {
 	title, detail := cString(i.title), cString(i.detail)
 	defer freeCString(title)
 	defer freeCString(detail)
-	C.gkGTKInfoBarSet(native, C.int(i.severity), title, detail)
+	gkGTKInfoBarSet(native, cInt(i.severity), title, detail)
 	if i.live != ui.LiveOff {
 		message := cString(i.title + ". " + i.detail)
 		defer freeCString(message)
-		C.gkGTKAnnounce(native, message, C.int(i.live))
+		gkGTKAnnounce(native, message, cInt(i.live))
 	}
 	i.relayoutParent()
 }
 
 func (i *infoBar) gtkEvent(event gtkEvent) {
 	switch event.kind {
-	case C.GK_EVENT_ACTION:
+	case gkEventAction:
 		id := event.text
 		each(&i.actions, func(handler ui.ActionHandler) {
 			handler(id)
 		})
-	case C.GK_EVENT_CLOSE:
+	case gkEventClose:
 		i.SetVisible(false)
 		each(&i.closes, func(handler ui.FocusHandler) {
 			handler()
@@ -135,7 +129,7 @@ func (i *infoBar) OnClose(handler ui.FocusHandler) ui.Unsubscribe {
 
 type tooltip struct {
 	window    *Window
-	native    unsafe.Pointer
+	native    *nativeTooltip
 	text      string
 	delay     time.Duration
 	placement ui.Edge
@@ -149,7 +143,7 @@ func (w *Window) CreateTooltip(options ui.TooltipOptions) (ui.Tooltip, error) {
 	if w.nativePointer() == nil {
 		return nil, ui.ErrClosed
 	}
-	result := &tooltip{window: w, native: C.gkGTKTooltipCreate(), delay: options.Delay, placement: options.Placement}
+	result := &tooltip{window: w, native: newNativeTooltip(), delay: options.Delay, placement: options.Placement}
 	result.SetText(options.Text)
 	w.adoptResource(result)
 	return result, nil
@@ -157,7 +151,7 @@ func (w *Window) CreateTooltip(options ui.TooltipOptions) (ui.Tooltip, error) {
 
 func (t *tooltip) Close() {
 	if t.native != nil {
-		C.gkGTKRelease(t.native)
+		t.native.close()
 		t.native = nil
 		t.window.releaseResource(t)
 	}
@@ -170,7 +164,7 @@ func (t *tooltip) SetText(text string) {
 	if t.native != nil {
 		value := cString(text)
 		defer freeCString(value)
-		C.gkGTKTooltipSetText(t.native, value)
+		gtkLabelSetText((*gtkLabel)(unsafe.Pointer(t.native.label)), value)
 	}
 }
 func (t *tooltip) Show(anchor ui.Widget) error {
@@ -185,25 +179,25 @@ func (t *tooltip) Show(anchor ui.Widget) error {
 	if view == nil {
 		return ui.ErrClosed
 	}
-	if C.gkGTKTooltipShow(t.native, view, C.int(t.placement), C.double(t.delay.Seconds())) == 0 {
+	if !t.native.show((*gtkWidget)(view), int(t.placement), t.delay) {
 		return errors.New("ui/gtk: a tooltip's anchor must be in a visible window")
 	}
 	return nil
 }
 func (t *tooltip) Hide() {
 	if t.native != nil {
-		C.gkGTKTooltipHide(t.native)
+		t.native.hide()
 	}
 }
 func (t *tooltip) IsShown() bool {
-	return t.native != nil && C.gkGTKTooltipShown(t.native) != 0
+	return t.native != nil && (gtkWidgetGetVisible(t.native.widget) != 0 || t.native.timer != 0)
 }
 
 // ---- Toast ----
 
 type toast struct {
 	window  *Window
-	native  unsafe.Pointer
+	native  *nativeToast
 	handle  cgo.Handle
 	actions listeners[ui.ActionHandler]
 }
@@ -225,18 +219,13 @@ func (w *Window) CreateToast(options ui.ToastOptions) (ui.Toast, error) {
 	}
 	result := &toast{window: w}
 	result.handle = cgo.NewHandle(result)
-	message := cString(options.Message)
-	defer freeCString(message)
-	buttons := newActionButtons(options.Actions)
-	result.native = C.gkGTKToastCreate(C.uintptr_t(result.handle), message, bytesPointer(buttons.ids),
-		C.size_t(len(buttons.ids)), bytesPointer(buttons.titles), C.size_t(len(buttons.titles)),
-		&buttons.enabled[0], C.int(buttons.count), C.double(timeout.Seconds()))
+	result.native = newNativeToast(uintptr(result.handle), options.Message, options.Actions, timeout)
 	w.adoptResource(result)
 	return result, nil
 }
 
 func (t *toast) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_ACTION {
+	if event.kind == gkEventAction {
 		id := event.text
 		each(&t.actions, func(handler ui.ActionHandler) {
 			handler(id)
@@ -249,7 +238,7 @@ func (t *toast) Close() {
 	}
 	native := t.native
 	t.native = nil
-	C.gkGTKToastRelease(native)
+	native.close()
 	t.handle.Delete()
 	t.window.releaseResource(t)
 }
@@ -257,19 +246,20 @@ func (t *toast) Show() error {
 	if t.native == nil {
 		return ui.ErrClosed
 	}
-	window := t.window.nativeWindowPointer()
-	if window == nil || C.gkGTKToastShow(t.native, window) == 0 {
+	window := t.window.nativeGTKWindow()
+	if window == nil {
 		return ui.ErrClosed
 	}
+	t.native.show(window)
 	return nil
 }
 func (t *toast) Dismiss() {
 	if t.native != nil {
-		C.gkGTKToastDismiss(t.native)
+		t.native.dismiss()
 	}
 }
 func (t *toast) IsShown() bool {
-	return t.native != nil && C.gkGTKToastShown(t.native) != 0
+	return t.native != nil && t.native.overlay != nil
 }
 func (t *toast) OnAction(handler ui.ActionHandler) ui.Unsubscribe {
 	return subscribe(&t.actions, handler, handler == nil)
@@ -295,7 +285,7 @@ func (w *Window) CreateBadge(options ui.BadgeOptions) (ui.Badge, error) {
 		return nil, err
 	}
 	result := &badge{options: options}
-	if result.widgetBase, err = w.newComponent(C.gkGTKBadgeCreate(window), ui.RoleStatus, result); err != nil {
+	if result.widgetBase, err = w.newComponent(gkGTKBadgeCreate(window), ui.RoleStatus, result); err != nil {
 		return nil, err
 	}
 	result.apply()
@@ -311,7 +301,7 @@ func (b *badge) apply() {
 		text, accessible := cString(b.DisplayText()), cString(b.options.AccessibleValue)
 		defer freeCString(text)
 		defer freeCString(accessible)
-		C.gkGTKBadgeSet(native, text, C.int(b.options.Severity), accessible)
+		gkGTKBadgeSet(native, text, cInt(b.options.Severity), accessible)
 		b.relayoutParent()
 	}
 }
@@ -347,7 +337,7 @@ func (b *badge) DisplayText() string {
 
 type progressDialog struct {
 	window  *Window
-	native  unsafe.Pointer
+	native  *nativeProgressDialog
 	handle  cgo.Handle
 	value   float64
 	message string
@@ -364,15 +354,13 @@ func (w *Window) CreateProgressDialog(options ui.ProgressDialogOptions) (ui.Prog
 	}
 	result := &progressDialog{window: w, value: options.Value, message: options.Message}
 	result.handle = cgo.NewHandle(result)
-	title := cString(options.Title)
-	defer freeCString(title)
-	result.native = C.gkGTKProgressDialogCreate(C.uintptr_t(result.handle), title, boolInt(options.Cancellable))
+	result.native = newNativeProgressDialog(uintptr(result.handle), options.Title, options.Cancellable)
 	result.apply()
 	return result, nil
 }
 
 func (p *progressDialog) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_CLOSE {
+	if event.kind == gkEventClose {
 		each(&p.cancels, func(handler ui.FocusHandler) {
 			handler()
 		})
@@ -380,9 +368,7 @@ func (p *progressDialog) gtkEvent(event gtkEvent) {
 }
 func (p *progressDialog) apply() {
 	if p.native != nil {
-		message := cString(p.message)
-		defer freeCString(message)
-		C.gkGTKProgressDialogSet(p.native, message, C.double(p.value))
+		p.native.set(p.message, p.value)
 	}
 }
 func (p *progressDialog) Close() {
@@ -391,7 +377,7 @@ func (p *progressDialog) Close() {
 	}
 	native := p.native
 	p.native = nil
-	C.gkGTKProgressDialogRelease(native)
+	native.close()
 	p.handle.Delete()
 	p.window.releaseResource(p)
 }
@@ -399,7 +385,7 @@ func (p *progressDialog) Show() error {
 	if p.native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKProgressDialogShow(p.native, p.window.nativeWindowPointer())
+	p.native.show(p.window.nativeGTKWindow())
 	return nil
 }
 func (p *progressDialog) Value() float64 {
@@ -441,10 +427,10 @@ func (w *Window) CreateEmptyState(options ui.EmptyStateOptions) (ui.EmptyState, 
 		return nil, err
 	}
 	icon := nativeIcon(options.Icon, 0)
-	defer C.gkGTKRelease(icon)
+	defer gkGTKRelease(unsafe.Pointer(icon))
 	buttons := newActionButtons(options.Actions)
-	native := C.gkGTKEmptyStateCreate(window, icon, bytesPointer(buttons.ids), C.size_t(len(buttons.ids)),
-		bytesPointer(buttons.titles), C.size_t(len(buttons.titles)), &buttons.enabled[0], C.int(buttons.count))
+	native := gkGTKEmptyStateCreate(window, unsafe.Pointer(icon), bytesPointer(buttons.ids), cSize(len(buttons.ids)),
+		bytesPointer(buttons.titles), cSize(len(buttons.titles)), &buttons.enabled[0], cInt(buttons.count))
 	result := &emptyState{title: options.Title, detail: options.Detail}
 	if result.widgetBase, err = w.newComponent(native, ui.RoleGroup, result); err != nil {
 		return nil, err
@@ -458,11 +444,11 @@ func (e *emptyState) apply() {
 		title, detail := cString(e.title), cString(e.detail)
 		defer freeCString(title)
 		defer freeCString(detail)
-		C.gkGTKEmptyStateSet(native, title, detail)
+		gkGTKEmptyStateSet(native, title, detail)
 	}
 }
 func (e *emptyState) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_ACTION {
+	if event.kind == gkEventAction {
 		id := event.text
 		each(&e.actions, func(handler ui.ActionHandler) {
 			handler(id)
@@ -505,7 +491,7 @@ func (w *Window) CreateInlineValidation(options ui.InlineValidationOptions) (ui.
 		return nil, err
 	}
 	result := &inlineValidation{severity: options.Severity, text: options.Text}
-	if result.widgetBase, err = w.newComponent(C.gkGTKInlineValidationCreate(window), ui.RoleLabel, result); err != nil {
+	if result.widgetBase, err = w.newComponent(gkGTKInlineValidationCreate(window), ui.RoleLabel, result); err != nil {
 		return nil, err
 	}
 	result.apply(false)
@@ -522,9 +508,9 @@ func (v *inlineValidation) apply(announce bool) {
 	if native := v.nativePointer(); native != nil {
 		text := cString(v.text)
 		defer freeCString(text)
-		C.gkGTKInlineValidationSet(native, C.int(v.severity), text)
+		gkGTKInlineValidationSet(native, cInt(v.severity), text)
 		if announce {
-			C.gkGTKAnnounce(native, text, C.int(ui.LivePolite))
+			gkGTKAnnounce(native, text, cInt(ui.LivePolite))
 		}
 		v.relayoutParent()
 	}

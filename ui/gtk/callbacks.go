@@ -2,11 +2,6 @@
 
 package gtk
 
-/*
-#include "window_bridge.h"
-*/
-import "C"
-
 import (
 	"runtime/cgo"
 
@@ -91,17 +86,9 @@ func (w *Window) SetPointerButtonCallback(cb PointerButtonCallback) PointerButto
 	return previous
 }
 
-// windowFromHandle resolves the cgo.Handle the C layer was given back to its *Window.
-//
-// A handle rather than the native pointer, for two reasons: C may not store a Go
-// pointer at all, and handles are never reused, so one can never come to name a
-// different window the way a recycled address could.
-//
-// Note that Handle.Value panics on a handle that has been deleted — it does not return
-// nil. Destroy therefore clears the C-side handle to zero BEFORE releasing the Go one,
-// so anything still dispatching sees zero and stops here. That ordering is what makes
-// this safe, not any tolerance for stale handles.
-func windowFromHandle(h C.uintptr_t) *Window {
+// windowFromHandle resolves a live window's event handle. Destruction clears
+// the native state's handle before deleting it, so late callbacks see zero.
+func windowFromHandle(h cUintptr) *Window {
 	if h == 0 {
 		// Either the window is mid-construction and has no handle yet, or it has been
 		// destroyed and its handle was cleared.
@@ -111,13 +98,9 @@ func windowFromHandle(h C.uintptr_t) *Window {
 	return w
 }
 
-// The C layer calls these for every event, whether or not a callback is registered —
-// see the note in window_bridge.h. Key and button dispatch update Window's polling
-// state first. Every path releases the lock before invoking user code, so callbacks
-// are free to call back into the window.
-
-//export gkGTKGoKeyEvent
-func gkGTKGoKeyEvent(h C.uintptr_t, key, scancode, action, mods C.int) {
+// Key and button dispatch update polling state before invoking user callbacks.
+// They release the window lock first so callbacks can call back into the window.
+func gkGTKGoKeyEvent(h cUintptr, key, scancode, action, mods cInt) {
 	w := windowFromHandle(h)
 	if w == nil {
 		return
@@ -125,8 +108,7 @@ func gkGTKGoKeyEvent(h C.uintptr_t, key, scancode, action, mods C.int) {
 	w.dispatchKey(keyboard.Key(key), int(scancode), keyboard.KeyAction(action), keyboard.ModifierKey(mods))
 }
 
-//export gkGTKGoCharEvent
-func gkGTKGoCharEvent(h C.uintptr_t, codepoint C.uint) {
+func gkGTKGoCharEvent(h cUintptr, codepoint cUint) {
 	w := windowFromHandle(h)
 	if w == nil {
 		return
@@ -139,8 +121,7 @@ func gkGTKGoCharEvent(h C.uintptr_t, codepoint C.uint) {
 	}
 }
 
-//export gkGTKGoScrollEvent
-func gkGTKGoScrollEvent(h C.uintptr_t, x, y C.double) {
+func gkGTKGoScrollEvent(h cUintptr, x, y cDouble) {
 	w := windowFromHandle(h)
 	if w == nil {
 		return
@@ -153,8 +134,7 @@ func gkGTKGoScrollEvent(h C.uintptr_t, x, y C.double) {
 	}
 }
 
-//export gkGTKGoPointerButtonEvent
-func gkGTKGoPointerButtonEvent(h C.uintptr_t, button, action, mods C.int) {
+func gkGTKGoPointerButtonEvent(h cUintptr, button, action, mods cInt) {
 	w := windowFromHandle(h)
 	if w == nil {
 		return
@@ -162,15 +142,14 @@ func gkGTKGoPointerButtonEvent(h C.uintptr_t, button, action, mods C.int) {
 	w.dispatchPointerButton(pointer.Button(button), pointer.ButtonAction(action), keyboard.ModifierKey(mods))
 }
 
-//export gkGTKGoWindowMove
-func gkGTKGoWindowMove(h C.uintptr_t, x, y C.int) {
+func gkGTKGoWindowMove(h cUintptr, x, y cInt) {
 	w := windowFromHandle(h)
 	if w != nil {
 		w.dispatchMove(ui.Point{X: int(x), Y: int(y)})
 	}
 }
 
-// newWindowHandle allocates the cgo.Handle naming w to the C layer, and
+// newWindowHandle allocates the handle that native callbacks use to name w, and
 // deleteWindowHandle releases it. Split out so window.go stays free of cgo.
 func newWindowHandle(w *Window) uintptr {
 	return uintptr(cgo.NewHandle(w))

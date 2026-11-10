@@ -2,11 +2,6 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-*/
-import "C"
-
 import (
 	"errors"
 	"fmt"
@@ -22,7 +17,7 @@ import (
 type menu struct {
 	window  *Window
 	mu      sync.RWMutex
-	native  unsafe.Pointer
+	native  *nativeMenu
 	handle  cgo.Handle
 	actions []ui.Action
 	items   []ui.MenuItem
@@ -41,7 +36,7 @@ func newMenu(options ui.MenuOptions) (*menu, error) {
 		items:   cloneMenuItems(options.Items),
 	}
 	result.handle = cgo.NewHandle(result)
-	result.native = C.gkGTKMenuCreate(C.uintptr_t(result.handle), nil)
+	result.native = newNativeMenu(uintptr(result.handle))
 	if result.native == nil {
 		result.handle.Delete()
 		return nil, errors.New("ui/gtk: native backend could not create a menu")
@@ -63,7 +58,7 @@ func cloneMenuItems(items []ui.MenuItem) []ui.MenuItem {
 }
 
 func (m *menu) gtkEvent(event gtkEvent) {
-	if event.kind != C.GK_EVENT_ACTION {
+	if event.kind != gkEventAction {
 		return
 	}
 	for _, handler := range m.listeners.snapshot() {
@@ -77,7 +72,7 @@ func (m *menu) nativeMenu() unsafe.Pointer {
 	if m.closed {
 		return nil
 	}
-	return m.native
+	return unsafe.Pointer(m.native.model)
 }
 
 func (m *menu) Close() {
@@ -91,8 +86,8 @@ func (m *menu) Close() {
 	handle := m.handle
 	m.native = nil
 	m.mu.Unlock()
-	C.gkGTKMenuSetHandle(native, 0)
-	C.gkGTKRelease(native)
+	native.handle = 0
+	gObjectUnref(unsafe.Pointer(native.model))
 	handle.Delete()
 	m.window.releaseResource(m)
 }
@@ -177,53 +172,68 @@ func (m *menu) rebuild() {
 	if closed || native == nil {
 		return
 	}
-	C.gkGTKMenuClear(native)
-	m.build(native, items)
+	native.clear()
+	m.build(native, native.model, items)
+	native.items = items
+	native.definitions = make(map[string]ui.Action)
+	var collect func([]ui.MenuItem)
+	collect = func(items []ui.MenuItem) {
+		for _, item := range items {
+			if item.ActionID != "" {
+				action, ok := m.lookup(item.ActionID)
+				if !ok {
+					action = ui.Action{ID: item.ActionID, Text: item.ActionID}
+				}
+				native.definitions[item.ActionID] = action
+			}
+			collect(item.Items)
+		}
+	}
+	collect(items)
+	for _, changed := range native.changes.snapshot() {
+		changed()
+	}
 }
 
-func (m *menu) build(native unsafe.Pointer, items []ui.MenuItem) {
+func (m *menu) build(root *nativeMenu, model *gMenu, items []ui.MenuItem) {
+	var section *gMenu
+	newSection := func() {
+		section = gMenuNew()
+		gMenuAppendSection(model, nil, (*gMenuModel)(unsafe.Pointer(section)))
+		gObjectUnref(unsafe.Pointer(section))
+	}
 	for _, item := range items {
-		switch {
-		case item.Separator:
-			C.gkGTKMenuAddSeparator(native)
-		case item.ActionID != "":
+		if item.Separator {
+			newSection()
+			continue
+		}
+		if section == nil {
+			newSection()
+		}
+		if item.ActionID != "" {
 			action, ok := m.lookup(item.ActionID)
 			if !ok {
-				// The containing bar may supply the action later.
 				action = ui.Action{ID: item.ActionID, Text: item.ActionID}
 			}
-			addMenuAction(native, action)
-		default:
-			title := cString(item.Title)
-			submenu := C.gkGTKMenuAddSubmenu(native, title)
-			freeCString(title)
-			m.build(submenu, item.Items)
+			root.appendAction(section, action)
+		} else {
+			submenu := gMenuNew()
+			gMenuAppendSubmenu(section, stringPointer(item.Title), (*gMenuModel)(unsafe.Pointer(submenu)))
+			m.build(root, submenu, item.Items)
+			gObjectUnref(unsafe.Pointer(submenu))
 		}
 	}
 }
 
-func addMenuAction(native unsafe.Pointer, action ui.Action) {
-	id := cString(action.ID)
-	text := cString(action.Text)
-	tooltip := cString(action.Tooltip)
-	key, modifiers := keyEquivalent(action.Shortcut)
-	keyValue := cString(key)
-	defer freeCString(id)
-	defer freeCString(text)
-	defer freeCString(tooltip)
-	defer freeCString(keyValue)
-	icon := nativeIcon(action.Icon, 16)
-	C.gkGTKMenuAddItem(native, id, text, boolInt(action.Enabled), boolInt(action.Checked),
-		keyValue, C.int(modifiers), icon, tooltip)
-	C.gkGTKRelease(icon)
-}
-
-// setActionState updates every item for id; -1 leaves a field unchanged.
 func (m *menu) setActionState(id string, enabled, checked int) {
-	if native := m.nativeMenu(); native != nil {
-		value := cString(id)
-		defer freeCString(value)
-		C.gkGTKMenuSetActionState(native, value, C.int(enabled), C.int(checked))
+	m.mu.RLock()
+	native := m.native
+	m.mu.RUnlock()
+	if native != nil {
+		native.setActionState(id, enabled, checked)
+		for _, changed := range native.changes.snapshot() {
+			changed()
+		}
 	}
 }
 
@@ -242,7 +252,7 @@ func (c *contextMenu) Popup(widget ui.Widget, position ui.Point) error {
 	if view == nil || native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKMenuPopup(native, view, C.double(position.X), C.double(position.Y))
+	menuRecord(native).popup((*gtkWidget)(view), position)
 	return nil
 }
 

@@ -2,13 +2,6 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-#include "widget_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"errors"
 	stdimage "image"
@@ -75,10 +68,10 @@ func (w *widgetBase) Close() {
 
 	w.detachContract(native)
 	if handle != 0 {
-		C.gkGTKUIClearAction(native)
+		gkGTKUIClearAction(native)
 		cgo.Handle(handle).Delete()
 	}
-	C.gkGTKUIDestroy(native)
+	gkGTKUIDestroy(native)
 }
 
 // closeComponent closes the component that owns the widget, so that the
@@ -116,12 +109,12 @@ func (w *widgetBase) SetBounds(bounds ui.Rect) {
 	native := w.native
 	w.mu.Unlock()
 
-	C.gkGTKUISetFrame(
+	gkGTKUISetFrame(
 		native,
-		C.int(bounds.Position.X),
-		C.int(bounds.Position.Y),
-		C.int(bounds.Size.Width),
-		C.int(bounds.Size.Height),
+		cInt(bounds.Position.X),
+		cInt(bounds.Position.Y),
+		cInt(bounds.Size.Width),
+		cInt(bounds.Size.Height),
 	)
 	if bounds.Size != previous {
 		w.dispatchResize(bounds.Size)
@@ -133,8 +126,14 @@ func (w *widgetBase) PreferredSize() ui.Size {
 	if native == nil {
 		return ui.Size{}
 	}
-	var width, height C.int
-	C.gkGTKUIPreferredSize(native, &width, &height)
+	if data := gObjectGetQdata((*gObject)(native), componentStateKey); data != nil {
+		if state, ok := nativeCallback(data).(interface{ preferredNative() (int, int) }); ok {
+			width, height := state.preferredNative()
+			return ui.Size{Width: width, Height: height}
+		}
+	}
+	var width, height cInt
+	gkGTKUIPreferredSize(native, &width, &height)
 	return ui.Size{Width: int(width), Height: int(height)}
 }
 
@@ -161,7 +160,7 @@ func (w *widgetBase) SetVisible(visible bool) {
 	native := w.native
 	w.mu.Unlock()
 
-	C.gkGTKUISetVisible(native, boolInt(visible))
+	gkGTKUISetVisible(native, boolInt(visible))
 	if changed {
 		// A hidden widget measures as empty, so the parent must lay out
 		// again when the widget shows.
@@ -191,7 +190,7 @@ func (w *widgetBase) SetEnabled(enabled bool) {
 	native := w.native
 	w.mu.Unlock()
 
-	C.gkGTKUISetEnabled(native, boolInt(enabled))
+	gkGTKUISetEnabled(native, boolInt(enabled))
 }
 
 func (w *widgetBase) nativePointer() unsafe.Pointer {
@@ -203,7 +202,7 @@ func (w *widgetBase) nativePointer() unsafe.Pointer {
 	return w.native
 }
 
-func boolInt(value bool) C.int {
+func boolInt(value bool) cInt {
 	if value {
 		return 1
 	}
@@ -349,12 +348,12 @@ func (l *layout) SetSpec(spec ui.LayoutSpec) error {
 		}
 		base := child.base()
 		base.parent = nil
-		C.gkGTKUIAttachToWindow(l.window.nativeWindowHandle(), base.nativePointer())
+		gkGTKUIAttachToWindow(l.window.nativeWindowHandle(), base.nativePointer())
 	}
 	for _, child := range children {
 		base := child.base()
 		base.parent = l
-		C.gkGTKUISetParent(base.nativePointer(), l.nativePointer())
+		gkGTKUISetParent(base.nativePointer(), l.nativePointer())
 	}
 
 	l.applyLayout(l.Bounds().Size)
@@ -498,7 +497,7 @@ func (b *button) OnClick(handler ui.ClickHandler) ui.Unsubscribe {
 }
 
 func (b *button) nativeEvent(event int) {
-	if event != int(C.GK_UI_EVENT_CLICK) || b.state.busy {
+	if event != int(uiEventClick) || b.state.busy {
 		return
 	}
 	for _, handler := range b.clicks.snapshot() {
@@ -529,29 +528,29 @@ func (t *textArea) Placeholder() string {
 	if native == nil {
 		return ""
 	}
-	value := C.gkGTKUIPlaceholder(native)
+	value := gkGTKUIPlaceholder(native)
 	if value == nil {
 		return ""
 	}
-	defer C.free(unsafe.Pointer(value))
-	return C.GoString(value)
+	defer gFree(unsafe.Pointer(value))
+	return goString(value)
 }
 func (t *textArea) SetPlaceholder(placeholder string) {
 	native := t.nativePointer()
 	if native == nil {
 		return
 	}
-	value := C.CString(placeholder)
-	defer C.free(unsafe.Pointer(value))
-	C.gkGTKUISetPlaceholder(native, value)
+	value := cString(placeholder)
+	defer gFree(unsafe.Pointer(value))
+	gkGTKUISetPlaceholder(native, value)
 }
 func (t *textArea) IsReadOnly() bool {
 	native := t.nativePointer()
-	return native != nil && C.gkGTKUIReadOnly(native) != 0
+	return native != nil && gkGTKUIReadOnly(native) != 0
 }
 func (t *textArea) SetReadOnly(readOnly bool) {
 	if native := t.nativePointer(); native != nil {
-		C.gkGTKUISetReadOnly(native, boolInt(readOnly))
+		gkGTKUISetReadOnly(native, boolInt(readOnly))
 	}
 }
 func (t *textArea) OnChange(handler ui.TextChangeHandler) ui.Unsubscribe {
@@ -561,7 +560,7 @@ func (t *textArea) OnChange(handler ui.TextChangeHandler) ui.Unsubscribe {
 	return t.changes.add(handler)
 }
 func (t *textArea) nativeEvent(event int) {
-	if event != int(C.GK_UI_EVENT_TEXT_CHANGE) {
+	if event != int(uiEventTextChange) {
 		return
 	}
 	text := t.Text()
@@ -585,11 +584,11 @@ func (c *checkBox) SetText(text string) {
 }
 func (c *checkBox) IsChecked() bool {
 	native := c.nativePointer()
-	return native != nil && C.gkGTKUIChecked(native) != 0
+	return native != nil && gkGTKUIChecked(native) != 0
 }
 func (c *checkBox) SetChecked(checked bool) {
 	if native := c.nativePointer(); native != nil {
-		C.gkGTKUISetChecked(native, boolInt(checked))
+		gkGTKUISetChecked(native, boolInt(checked))
 	}
 }
 func (c *checkBox) OnChange(handler ui.ToggleHandler) ui.Unsubscribe {
@@ -599,7 +598,7 @@ func (c *checkBox) OnChange(handler ui.ToggleHandler) ui.Unsubscribe {
 	return c.changes.add(handler)
 }
 func (c *checkBox) nativeEvent(event int) {
-	if event != int(C.GK_UI_EVENT_TOGGLE_CHANGE) {
+	if event != int(uiEventToggleChange) {
 		return
 	}
 	checked := c.IsChecked()
@@ -623,7 +622,7 @@ func (s *selection) SelectedIndex() int {
 	if native == nil {
 		return -1
 	}
-	return int(C.gkGTKUISelectionIndex(native))
+	return int(gkGTKUISelectionIndex(native))
 }
 func (s *selection) SetSelectedIndex(index int) error {
 	if index < 0 || index >= len(s.items) {
@@ -633,7 +632,7 @@ func (s *selection) SetSelectedIndex(index int) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKUISetSelectionIndex(native, C.int(index))
+	gkGTKUISetSelectionIndex(native, cInt(index))
 	return nil
 }
 func (s *selection) OnChange(handler ui.SelectionChangeHandler) ui.Unsubscribe {
@@ -643,7 +642,7 @@ func (s *selection) OnChange(handler ui.SelectionChangeHandler) ui.Unsubscribe {
 	return s.changes.add(handler)
 }
 func (s *selection) nativeEvent(event int) {
-	if event != int(C.GK_UI_EVENT_SELECTION_CHANGE) {
+	if event != int(uiEventSelectionChange) {
 		return
 	}
 	index := s.SelectedIndex()
@@ -675,12 +674,12 @@ func (t *textField) Placeholder() string {
 	if native == nil {
 		return ""
 	}
-	value := C.gkGTKUIPlaceholder(native)
+	value := gkGTKUIPlaceholder(native)
 	if value == nil {
 		return ""
 	}
-	defer C.free(unsafe.Pointer(value))
-	return C.GoString(value)
+	defer gFree(unsafe.Pointer(value))
+	return goString(value)
 }
 
 func (t *textField) SetPlaceholder(placeholder string) {
@@ -688,9 +687,9 @@ func (t *textField) SetPlaceholder(placeholder string) {
 	if native == nil {
 		return
 	}
-	value := C.CString(placeholder)
-	defer C.free(unsafe.Pointer(value))
-	C.gkGTKUISetPlaceholder(native, value)
+	value := cString(placeholder)
+	defer gFree(unsafe.Pointer(value))
+	gkGTKUISetPlaceholder(native, value)
 }
 
 func (t *textField) OnChange(handler ui.TextChangeHandler) ui.Unsubscribe {
@@ -702,12 +701,12 @@ func (t *textField) OnChange(handler ui.TextChangeHandler) ui.Unsubscribe {
 
 func (t *textField) nativeEvent(event int) {
 	switch event {
-	case int(C.GK_UI_EVENT_SUBMIT):
+	case int(uiEventSubmit):
 		text := t.Text()
 		each(&t.state.submits, func(handler ui.TextChangeHandler) {
 			handler(text)
 		})
-	case int(C.GK_UI_EVENT_TEXT_CHANGE):
+	case int(uiEventTextChange):
 		t.enforceMaximumLength()
 		text := t.Text()
 		for _, handler := range t.changes.snapshot() {
@@ -743,11 +742,11 @@ func (p *progressBar) Value() float64 {
 	if native == nil {
 		return 0
 	}
-	return float64(C.gkGTKUIProgressValue(native))
+	return float64(gkGTKUIProgressValue(native))
 }
 func (p *progressBar) SetValue(value float64) {
 	if native := p.nativePointer(); native != nil {
-		C.gkGTKUISetProgressValue(native, C.double(value))
+		gkGTKUISetProgressValue(native, cDouble(value))
 	}
 }
 
@@ -758,11 +757,11 @@ type activityIndicator struct {
 
 func (a *activityIndicator) IsRunning() bool {
 	native := a.nativePointer()
-	return native != nil && C.gkGTKUIActivityRunning(native) != 0
+	return native != nil && gkGTKUIActivityRunning(native) != 0
 }
 func (a *activityIndicator) SetRunning(running bool) {
 	if native := a.nativePointer(); native != nil {
-		C.gkGTKUISetActivityRunning(native, boolInt(running))
+		gkGTKUISetActivityRunning(native, boolInt(running))
 	}
 }
 
@@ -793,8 +792,8 @@ func (i *imageView) SetImage(source stdimage.Image) error {
 	bounds := source.Bounds()
 	rgba := stdimage.NewRGBA(stdimage.Rect(0, 0, bounds.Dx(), bounds.Dy()))
 	draw.Draw(rgba, rgba.Bounds(), source, bounds.Min, draw.Src)
-	C.gkGTKUIImageSet(native, (*C.uchar)(unsafe.Pointer(&rgba.Pix[0])),
-		C.int(rgba.Rect.Dx()), C.int(rgba.Rect.Dy()), C.int(rgba.Stride))
+	gkGTKUIImageSet(native, (*cUchar)(unsafe.Pointer(&rgba.Pix[0])),
+		cInt(rgba.Rect.Dx()), cInt(rgba.Rect.Dy()), cInt(rgba.Stride))
 	// The size of the source changes the preferred size.
 	i.relayoutParent()
 	return nil
@@ -810,7 +809,7 @@ func (i *imageView) SetScaling(scaling ui.ImageScaling) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKUIImageSetScaling(native, C.int(scaling))
+	gkGTKUIImageSetScaling(native, cInt(scaling))
 	i.scaling = scaling
 	return nil
 }
@@ -833,21 +832,21 @@ func (l *link) URL() string {
 	if native == nil {
 		return ""
 	}
-	value := C.gkGTKUILinkURL(native)
+	value := gkGTKUILinkURL(native)
 	if value == nil {
 		return ""
 	}
-	defer C.free(unsafe.Pointer(value))
-	return C.GoString(value)
+	defer gFree(unsafe.Pointer(value))
+	return goString(value)
 }
 func (l *link) SetURL(url string) {
 	native := l.nativePointer()
 	if native == nil {
 		return
 	}
-	value := C.CString(url)
-	defer C.free(unsafe.Pointer(value))
-	C.gkGTKUISetLinkURL(native, value)
+	value := cString(url)
+	defer gFree(unsafe.Pointer(value))
+	gkGTKUISetLinkURL(native, value)
 }
 func (l *link) OnClick(handler ui.ClickHandler) ui.Unsubscribe {
 	if handler == nil {
@@ -856,7 +855,7 @@ func (l *link) OnClick(handler ui.ClickHandler) ui.Unsubscribe {
 	return l.clicks.add(handler)
 }
 func (l *link) nativeEvent(event int) {
-	if event != int(C.GK_UI_EVENT_CLICK) {
+	if event != int(uiEventClick) {
 		return
 	}
 	for _, handler := range l.clicks.snapshot() {
@@ -912,8 +911,8 @@ func (s *scrollView) ScrollOffset() ui.Point {
 	if native == nil {
 		return ui.Point{}
 	}
-	var x, y C.int
-	C.gkGTKUIScrollOffset(native, &x, &y)
+	var x, y cInt
+	gkGTKUIScrollOffset(native, &x, &y)
 	return ui.Point{X: int(x), Y: int(y)}
 }
 
@@ -926,7 +925,7 @@ func (s *scrollView) SetScrollOffset(offset ui.Point) {
 	}
 	if native := s.nativePointer(); native != nil {
 		smooth := boolInt(s.ScrollBehavior() == ui.ScrollSmooth)
-		C.gkGTKSetScrollPosition(native, C.int(max(0, offset.X)), C.int(max(0, offset.Y)), smooth)
+		gkGTKSetScrollPosition(native, cInt(max(0, offset.X)), cInt(max(0, offset.Y)), smooth)
 	}
 }
 
@@ -935,8 +934,8 @@ func (s *scrollView) layoutContent() {
 	if native == nil || s.content == nil {
 		return
 	}
-	var width, height C.int
-	C.gkGTKUIScrollViewportSize(native, &width, &height)
+	var width, height cInt
+	gkGTKUIScrollViewportSize(native, &width, &height)
 	viewport := ui.Size{Width: max(0, int(width)), Height: max(0, int(height))}
 	if viewport.Width <= 1 {
 		viewport.Width = s.Bounds().Size.Width
@@ -955,7 +954,7 @@ func (s *scrollView) layoutContent() {
 		contentSize.Width = max(viewport.Width, preferred.Width)
 		contentSize.Height = max(viewport.Height, preferred.Height)
 	}
-	C.gkGTKUIScrollSetContentSize(native, C.int(contentSize.Width), C.int(contentSize.Height))
+	gkGTKUIScrollSetContentSize(native, cInt(contentSize.Width), cInt(contentSize.Height))
 	s.content.SetBounds(ui.Rect{Size: contentSize})
 }
 
@@ -994,7 +993,7 @@ func (t *tabs) SelectedIndex() int {
 	if native == nil {
 		return -1
 	}
-	return int(C.gkGTKUITabsSelected(native))
+	return int(gkGTKUITabsSelected(native))
 }
 func (t *tabs) SetSelectedIndex(index int) error {
 	t.stateMu.RLock()
@@ -1007,7 +1006,7 @@ func (t *tabs) SetSelectedIndex(index int) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKUITabsSetSelected(native, C.int(index))
+	gkGTKUITabsSetSelected(native, cInt(index))
 	t.layoutContent()
 	return nil
 }
@@ -1018,7 +1017,7 @@ func (t *tabs) OnChange(handler ui.SelectionChangeHandler) ui.Unsubscribe {
 	return t.changes.add(handler)
 }
 func (t *tabs) nativeEvent(event int) {
-	if event != int(C.GK_UI_EVENT_TAB_CHANGE) {
+	if event != int(uiEventTabChange) {
 		return
 	}
 	index := t.SelectedIndex()
@@ -1032,8 +1031,8 @@ func (t *tabs) layoutContent() {
 	if native == nil {
 		return
 	}
-	var width, height C.int
-	C.gkGTKUITabsContentSize(native, &width, &height)
+	var width, height cInt
+	gkGTKUITabsContentSize(native, &width, &height)
 	selected := t.SelectedIndex()
 	for index, item := range t.Items() {
 		item.Content.SetVisible(index == selected)
@@ -1048,7 +1047,7 @@ func (s *slider) Value() float64 {
 	if native == nil {
 		return 0
 	}
-	return float64(C.gkGTKUISliderValue(native))
+	return float64(gkGTKUISliderValue(native))
 }
 
 func (s *slider) SetValue(value float64) error {
@@ -1059,7 +1058,7 @@ func (s *slider) SetValue(value float64) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKUISetSliderValue(native, C.double(value))
+	gkGTKUISetSliderValue(native, cDouble(value))
 	return nil
 }
 
@@ -1071,7 +1070,7 @@ func (s *slider) OnChange(handler ui.ValueChangeHandler) ui.Unsubscribe {
 }
 
 func (s *slider) nativeEvent(event int) {
-	if event != int(C.GK_UI_EVENT_VALUE_CHANGE) {
+	if event != int(uiEventValueChange) {
 		return
 	}
 	value := s.Value()
@@ -1102,8 +1101,8 @@ func (c *canvas) PointerPosition() (x, y float64) {
 	if native == nil {
 		return 0, 0
 	}
-	var nativeX, nativeY C.double
-	C.gkGTKUICanvasPointerPosition(native, &nativeX, &nativeY)
+	var nativeX, nativeY cDouble
+	gkGTKUICanvasPointerPosition(native, &nativeX, &nativeY)
 	return float64(nativeX), float64(nativeY)
 }
 
@@ -1112,8 +1111,8 @@ func (c *canvas) NativeSurface() gpu.NativeSurface {
 	if native == nil {
 		return gpu.NativeSurface{}
 	}
-	handle := uintptr(C.gkGTKUIControlHandle(native))
-	display := uintptr(C.gkGTKUICanvasXDisplay(native))
+	handle := uintptr(gkGTKUIControlHandle(native))
+	display := uintptr(gkGTKUICanvasXDisplay(native))
 	if handle == 0 || display == 0 {
 		return gpu.NativeSurface{}
 	}
@@ -1129,8 +1128,8 @@ func (c *canvas) FramebufferSize() ui.Size {
 	if native == nil {
 		return ui.Size{}
 	}
-	var width, height C.int
-	C.gkGTKUIFramebufferSize(native, &width, &height)
+	var width, height cInt
+	gkGTKUIFramebufferSize(native, &width, &height)
 	return ui.Size{Width: int(width), Height: int(height)}
 }
 
@@ -1220,7 +1219,7 @@ func (s *section) SetExpanded(expanded bool) {
 	s.expanded = expanded
 	s.stateMu.Unlock()
 	if native := s.nativePointer(); native != nil {
-		C.gkGTKUISectionSetExpanded(native, boolInt(expanded))
+		gkGTKUISectionSetExpanded(native, boolInt(expanded))
 	}
 	s.relayoutParent()
 }
@@ -1233,14 +1232,14 @@ func (s *section) OnChange(handler ui.ExpansionChangeHandler) ui.Unsubscribe {
 }
 
 func (s *section) nativeEvent(event int) {
-	if event != int(C.GK_UI_EVENT_SECTION_CHANGE) {
+	if event != int(uiEventSectionChange) {
 		return
 	}
 	native := s.nativePointer()
 	if native == nil {
 		return
 	}
-	expanded := C.gkGTKUISectionExpanded(native) != 0
+	expanded := gkGTKUISectionExpanded(native) != 0
 	s.stateMu.Lock()
 	s.expanded = expanded
 	s.stateMu.Unlock()
@@ -1304,8 +1303,7 @@ type nativeEventReceiver interface {
 	nativeEvent(event int)
 }
 
-//export gkGTKUIGoEvent
-func gkGTKUIGoEvent(handle C.uintptr_t, event C.int) {
+func gkGTKUIGoEvent(handle cUintptr, event cInt) {
 	if handle == 0 {
 		return
 	}
@@ -1334,7 +1332,7 @@ func (w *Window) SetContent(content ui.Widget) error {
 		w.content.SetVisible(false)
 	}
 
-	C.gkGTKUIAttachToWindow(w.nativeWindowHandle(), widget.base().nativePointer())
+	gkGTKUIAttachToWindow(w.nativeWindowHandle(), widget.base().nativePointer())
 	w.content = content
 	content.SetVisible(true)
 	content.SetBounds(ui.Rect{Size: w.Size()})
@@ -1346,7 +1344,7 @@ func (w *Window) CreateLayout(spec ui.LayoutSpec) (ui.Layout, error) {
 	if err := spec.Validate(); err != nil {
 		return nil, err
 	}
-	native := C.gkGTKUICreateLayout(w.nativeWindowHandle())
+	native := gkGTKUICreateLayout(w.nativeWindowHandle())
 	if native == nil {
 		return nil, errors.New("ui/gtk: native backend could not create a layout")
 	}
@@ -1360,9 +1358,9 @@ func (w *Window) CreateLayout(spec ui.LayoutSpec) (ui.Layout, error) {
 
 // CreateLabel creates a native label owned by the window.
 func (w *Window) CreateLabel(text string) (ui.Label, error) {
-	value := C.CString(text)
-	defer C.free(unsafe.Pointer(value))
-	native := C.gkGTKUICreateLabel(w.nativeWindowHandle(), value)
+	value := cString(text)
+	defer gFree(unsafe.Pointer(value))
+	native := gkGTKUICreateLabel(w.nativeWindowHandle(), value)
 	if native == nil {
 		return nil, errors.New("ui/gtk: native backend could not create a label")
 	}
@@ -1373,9 +1371,9 @@ func (w *Window) CreateLabel(text string) (ui.Label, error) {
 func (w *Window) CreateButton(text string) (ui.Button, error) {
 	result := &button{}
 	handle := cgo.NewHandle(result)
-	value := C.CString(text)
-	defer C.free(unsafe.Pointer(value))
-	native := C.gkGTKUICreateButton(w.nativeWindowHandle(), value, C.uintptr_t(handle))
+	value := cString(text)
+	defer gFree(unsafe.Pointer(value))
+	native := gkGTKUICreateButton(w.nativeWindowHandle(), value, cUintptr(handle))
 	if native == nil {
 		handle.Delete()
 		return nil, errors.New("ui/gtk: native backend could not create a button")
@@ -1389,7 +1387,7 @@ func (w *Window) CreateButton(text string) (ui.Button, error) {
 func (w *Window) CreateTextField() (ui.TextField, error) {
 	result := &textField{}
 	handle := cgo.NewHandle(result)
-	native := C.gkGTKUICreateTextField(w.nativeWindowHandle(), C.uintptr_t(handle))
+	native := gkGTKUICreateTextField(w.nativeWindowHandle(), cUintptr(handle))
 	if native == nil {
 		handle.Delete()
 		return nil, errors.New("ui/gtk: native backend could not create a text field")
@@ -1403,12 +1401,12 @@ func (w *Window) CreateTextField() (ui.TextField, error) {
 func (w *Window) CreateTextArea(options ui.TextAreaOptions) (ui.TextArea, error) {
 	result := &textArea{}
 	handle := cgo.NewHandle(result)
-	text := C.CString(options.Text)
-	placeholder := C.CString(options.Placeholder)
-	defer C.free(unsafe.Pointer(text))
-	defer C.free(unsafe.Pointer(placeholder))
-	native := C.gkGTKUICreateTextArea(w.nativeWindowHandle(), text, placeholder,
-		boolInt(options.ReadOnly), boolInt(options.Wrap), C.uintptr_t(handle))
+	text := cString(options.Text)
+	placeholder := cString(options.Placeholder)
+	defer gFree(unsafe.Pointer(text))
+	defer gFree(unsafe.Pointer(placeholder))
+	native := gkGTKUICreateTextArea(w.nativeWindowHandle(), text, placeholder,
+		boolInt(options.ReadOnly), boolInt(options.Wrap), cUintptr(handle))
 	if native == nil {
 		handle.Delete()
 		return nil, errors.New("ui/gtk: native backend could not create a text area")
@@ -1422,10 +1420,10 @@ func (w *Window) CreateTextArea(options ui.TextAreaOptions) (ui.TextArea, error)
 func (w *Window) CreateCheckBox(text string, checked bool) (ui.CheckBox, error) {
 	result := &checkBox{}
 	handle := cgo.NewHandle(result)
-	value := C.CString(text)
-	defer C.free(unsafe.Pointer(value))
-	native := C.gkGTKUICreateCheckBox(w.nativeWindowHandle(), value,
-		boolInt(checked), C.uintptr_t(handle))
+	value := cString(text)
+	defer gFree(unsafe.Pointer(value))
+	native := gkGTKUICreateCheckBox(w.nativeWindowHandle(), value,
+		boolInt(checked), cUintptr(handle))
 	if native == nil {
 		handle.Delete()
 		return nil, errors.New("ui/gtk: native backend could not create a check box")
@@ -1442,7 +1440,7 @@ func (w *Window) CreateRadioGroup(options ui.RadioGroupOptions) (ui.RadioGroup, 
 	}
 	result := &radioGroup{selection: &selection{items: append([]string(nil), options.Items...), choices: choicesFromItems(options.Items)}}
 	handle := cgo.NewHandle(result)
-	native := C.gkGTKUICreateRadioGroup(w.nativeWindowHandle(), C.uintptr_t(handle))
+	native := gkGTKUICreateRadioGroup(w.nativeWindowHandle(), cUintptr(handle))
 	if native == nil {
 		handle.Delete()
 		return nil, errors.New("ui/gtk: native backend could not create a radio group")
@@ -1450,7 +1448,7 @@ func (w *Window) CreateRadioGroup(options ui.RadioGroupOptions) (ui.RadioGroup, 
 	result.widgetBase = newWidgetBase(w, native, ui.RoleRadioGroup)
 	result.handle = uintptr(handle)
 	addSelectionItems(native, options.Items)
-	C.gkGTKUISetSelectionIndex(native, C.int(options.SelectedIndex))
+	gkGTKUISetSelectionIndex(native, cInt(options.SelectedIndex))
 	return result, nil
 }
 
@@ -1461,7 +1459,7 @@ func (w *Window) CreateSelect(options ui.SelectOptions) (ui.Select, error) {
 	}
 	result := &selectControl{selection: &selection{items: append([]string(nil), options.Items...), choices: choicesFromItems(options.Items)}}
 	handle := cgo.NewHandle(result)
-	native := C.gkGTKUICreateSelect(w.nativeWindowHandle(), C.uintptr_t(handle))
+	native := gkGTKUICreateSelect(w.nativeWindowHandle(), cUintptr(handle))
 	if native == nil {
 		handle.Delete()
 		return nil, errors.New("ui/gtk: native backend could not create a select control")
@@ -1469,15 +1467,15 @@ func (w *Window) CreateSelect(options ui.SelectOptions) (ui.Select, error) {
 	result.widgetBase = newWidgetBase(w, native, ui.RoleComboBox)
 	result.handle = uintptr(handle)
 	addSelectionItems(native, options.Items)
-	C.gkGTKUISetSelectionIndex(native, C.int(options.SelectedIndex))
+	gkGTKUISetSelectionIndex(native, cInt(options.SelectedIndex))
 	return result, nil
 }
 
 func addSelectionItems(native unsafe.Pointer, items []string) {
 	for _, item := range items {
-		value := C.CString(item)
-		C.gkGTKUISelectionAddItem(native, value)
-		C.free(unsafe.Pointer(value))
+		value := cString(item)
+		gkGTKUISelectionAddItem(native, value)
+		gFree(unsafe.Pointer(value))
 	}
 }
 
@@ -1488,13 +1486,13 @@ func (w *Window) CreateSlider(options ui.SliderOptions) (ui.Slider, error) {
 	}
 	result := &slider{minimum: options.Minimum, maximum: options.Maximum, step: options.Step}
 	handle := cgo.NewHandle(result)
-	native := C.gkGTKUICreateSlider(
+	native := gkGTKUICreateSlider(
 		w.nativeWindowHandle(),
-		C.double(options.Minimum),
-		C.double(options.Maximum),
-		C.double(options.Value),
-		C.double(options.Step),
-		C.uintptr_t(handle),
+		cDouble(options.Minimum),
+		cDouble(options.Maximum),
+		cDouble(options.Value),
+		cDouble(options.Step),
+		cUintptr(handle),
 	)
 	if native == nil {
 		handle.Delete()
@@ -1510,7 +1508,7 @@ func (w *Window) CreateProgressBar(value float64) (ui.ProgressBar, error) {
 	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1 {
 		return nil, errors.New("ui: progress value must be between zero and one")
 	}
-	native := C.gkGTKUICreateProgressBar(w.nativeWindowHandle(), C.double(value))
+	native := gkGTKUICreateProgressBar(w.nativeWindowHandle(), cDouble(value))
 	if native == nil {
 		return nil, errors.New("ui/gtk: native backend could not create a progress bar")
 	}
@@ -1519,7 +1517,7 @@ func (w *Window) CreateProgressBar(value float64) (ui.ProgressBar, error) {
 
 // CreateActivityIndicator creates a native indeterminate activity indicator.
 func (w *Window) CreateActivityIndicator(running bool) (ui.ActivityIndicator, error) {
-	native := C.gkGTKUICreateActivityIndicator(w.nativeWindowHandle(), boolInt(running))
+	native := gkGTKUICreateActivityIndicator(w.nativeWindowHandle(), boolInt(running))
 	if native == nil {
 		return nil, errors.New("ui/gtk: native backend could not create an activity indicator")
 	}
@@ -1531,7 +1529,7 @@ func (w *Window) CreateSeparator(direction ui.LayoutDirection) (ui.Separator, er
 	if direction != ui.Horizontal && direction != ui.Vertical {
 		return nil, errors.New("ui: invalid separator direction")
 	}
-	native := C.gkGTKUICreateSeparator(w.nativeWindowHandle(), C.int(direction))
+	native := gkGTKUICreateSeparator(w.nativeWindowHandle(), cInt(direction))
 	if native == nil {
 		return nil, errors.New("ui/gtk: native backend could not create a separator")
 	}
@@ -1543,7 +1541,7 @@ func (w *Window) CreateImage(options ui.ImageOptions) (ui.ImageView, error) {
 	if err := options.Validate(); err != nil {
 		return nil, err
 	}
-	native := C.gkGTKUICreateImage(w.nativeWindowHandle(), C.int(options.Scaling))
+	native := gkGTKUICreateImage(w.nativeWindowHandle(), cInt(options.Scaling))
 	if native == nil {
 		return nil, errors.New("ui/gtk: native backend could not create an image")
 	}
@@ -1559,11 +1557,11 @@ func (w *Window) CreateImage(options ui.ImageOptions) (ui.ImageView, error) {
 func (w *Window) CreateLink(text, url string) (ui.Link, error) {
 	result := &link{}
 	handle := cgo.NewHandle(result)
-	label := C.CString(text)
-	target := C.CString(url)
-	defer C.free(unsafe.Pointer(label))
-	defer C.free(unsafe.Pointer(target))
-	native := C.gkGTKUICreateLink(w.nativeWindowHandle(), label, target, C.uintptr_t(handle))
+	label := cString(text)
+	target := cString(url)
+	defer gFree(unsafe.Pointer(label))
+	defer gFree(unsafe.Pointer(target))
+	native := gkGTKUICreateLink(w.nativeWindowHandle(), label, target, cUintptr(handle))
 	if native == nil {
 		handle.Delete()
 		return nil, errors.New("ui/gtk: native backend could not create a link")
@@ -1580,7 +1578,7 @@ func (w *Window) CreateTabs(options ui.TabsOptions) (ui.Tabs, error) {
 	}
 	result := &tabs{}
 	handle := cgo.NewHandle(result)
-	native := C.gkGTKUICreateTabs(w.nativeWindowHandle(), C.uintptr_t(handle))
+	native := gkGTKUICreateTabs(w.nativeWindowHandle(), cUintptr(handle))
 	if native == nil {
 		handle.Delete()
 		return nil, errors.New("ui/gtk: native backend could not create tabs")
@@ -1600,9 +1598,9 @@ func (w *Window) CreateTabs(options ui.TabsOptions) (ui.Tabs, error) {
 	for i, item := range options.Items {
 		child := children[i]
 		child.base().parent = result
-		title := C.CString(item.Title)
-		added := C.gkGTKUITabsAdd(native, title, child.base().nativePointer()) != 0
-		C.free(unsafe.Pointer(title))
+		title := cString(item.Title)
+		added := gkGTKUITabsAdd(native, title, child.base().nativePointer()) != 0
+		gFree(unsafe.Pointer(title))
 		if !added {
 			for _, added := range children[:i+1] {
 				orphan(added)
@@ -1612,7 +1610,7 @@ func (w *Window) CreateTabs(options ui.TabsOptions) (ui.Tabs, error) {
 		}
 		result.items = append(result.items, item)
 	}
-	C.gkGTKUITabsSetSelected(native, C.int(options.SelectedIndex))
+	gkGTKUITabsSetSelected(native, cInt(options.SelectedIndex))
 	result.layoutContent()
 	return result, nil
 }
@@ -1623,7 +1621,7 @@ func (w *Window) CreateScrollView(options ui.ScrollViewOptions) (ui.ScrollView, 
 		return nil, err
 	}
 	result := &scrollView{axes: options.Axes}
-	native := C.gkGTKUICreateScrollView(w.nativeWindowHandle(), C.int(options.Axes))
+	native := gkGTKUICreateScrollView(w.nativeWindowHandle(), cInt(options.Axes))
 	if native == nil {
 		return nil, errors.New("ui/gtk: native backend could not create a scroll view")
 	}
@@ -1635,7 +1633,7 @@ func (w *Window) CreateScrollView(options ui.ScrollViewOptions) (ui.ScrollView, 
 	}
 	result.content = content
 	content.base().parent = result
-	C.gkGTKUISetParent(content.base().nativePointer(), native)
+	gkGTKUISetParent(content.base().nativePointer(), native)
 	result.layoutContent()
 	return result, nil
 }
@@ -1645,7 +1643,7 @@ func (w *Window) CreateScrollView(options ui.ScrollViewOptions) (ui.ScrollView, 
 func (w *Window) CreateCanvas() (ui.Canvas, error) {
 	result := &canvas{}
 	handle := cgo.NewHandle(result)
-	native := C.gkGTKUICreateCanvas(w.nativeWindowHandle(), C.uintptr_t(handle))
+	native := gkGTKUICreateCanvas(w.nativeWindowHandle(), cUintptr(handle))
 	if native == nil {
 		handle.Delete()
 		return nil, errors.New("ui/gtk: native backend could not create a canvas")
@@ -1663,13 +1661,13 @@ func (w *Window) CreateSection(options ui.SectionOptions) (ui.Section, error) {
 
 	result := &section{expanded: options.Expanded}
 	handle := cgo.NewHandle(result)
-	title := C.CString(options.Title)
-	defer C.free(unsafe.Pointer(title))
-	native := C.gkGTKUICreateSection(
+	title := cString(options.Title)
+	defer gFree(unsafe.Pointer(title))
+	native := gkGTKUICreateSection(
 		w.nativeWindowHandle(),
 		title,
 		boolInt(options.Expanded),
-		C.uintptr_t(handle),
+		cUintptr(handle),
 	)
 	if native == nil {
 		handle.Delete()
@@ -1684,35 +1682,34 @@ func (w *Window) CreateSection(options ui.SectionOptions) (ui.Section, error) {
 	}
 	result.content = child
 	child.base().parent = result
-	C.gkGTKUISetParent(child.base().nativePointer(), result.nativePointer())
+	gkGTKUISetParent(child.base().nativePointer(), result.nativePointer())
 	return result, nil
 }
 
-// nativeWindowHandle returns the native window record that the GTK layer
-// expects when it creates a widget for the window.
-func (w *Window) nativeWindowHandle() C.uintptr_t {
-	return C.uintptr_t(uintptr(w.nativePointer()))
+// nativeWindowHandle identifies the native GtkWindow during component creation.
+func (w *Window) nativeWindowHandle() cUintptr {
+	return cUintptr(uintptr(w.nativePointer()))
 }
 
 func nativeText(native unsafe.Pointer) string {
 	if native == nil {
 		return ""
 	}
-	value := C.gkGTKUIText(native)
+	value := gkGTKUIText(native)
 	if value == nil {
 		return ""
 	}
-	defer C.free(unsafe.Pointer(value))
-	return C.GoString(value)
+	defer gFree(unsafe.Pointer(value))
+	return goString(value)
 }
 
 func setNativeText(native unsafe.Pointer, text string) {
 	if native == nil {
 		return
 	}
-	value := C.CString(text)
-	defer C.free(unsafe.Pointer(value))
-	C.gkGTKUISetText(native, value)
+	value := cString(text)
+	defer gFree(unsafe.Pointer(value))
+	gkGTKUISetText(native, value)
 }
 
 var _ ui.Layout = (*layout)(nil)

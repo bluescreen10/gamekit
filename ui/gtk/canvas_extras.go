@@ -2,11 +2,6 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-*/
-import "C"
-
 import (
 	"errors"
 	"sync"
@@ -54,7 +49,7 @@ func (c *canvas) CapturePointer() error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	if C.gkGTKCanvasCapture(native, 1) == 0 {
+	if gkGTKCanvasCapture(native, 1) == 0 {
 		return errors.New("ui/gtk: a canvas must be in a window to capture the pointer")
 	}
 	return nil
@@ -62,13 +57,13 @@ func (c *canvas) CapturePointer() error {
 
 func (c *canvas) ReleasePointer() {
 	if native := c.nativePointer(); native != nil {
-		C.gkGTKCanvasCapture(native, 0)
+		gkGTKCanvasCapture(native, 0)
 	}
 }
 
 func (c *canvas) HasPointerCapture() bool {
 	native := c.nativePointer()
-	return native != nil && C.gkGTKCanvasHasCapture(native) != 0
+	return native != nil && gkGTKCanvasHasCapture(native) != 0
 }
 
 // OnFrameRequest delivers display-synchronized frame requests while at least
@@ -95,7 +90,7 @@ func (c *canvas) updateFrames() {
 	if native == nil {
 		return
 	}
-	C.gkGTKCanvasStartFrames(native, boolInt(len(c.events.frames.snapshot()) > 0))
+	gkGTKCanvasStartFrames(native, boolInt(len(c.events.frames.snapshot()) > 0))
 }
 
 func (c *canvas) OnOcclusionChange(handler ui.OcclusionHandler) ui.Unsubscribe {
@@ -111,12 +106,12 @@ func (c *canvas) ColorSpace() ui.ColorSpace {
 	if native == nil {
 		return ui.ColorSpaceUnknown
 	}
-	return ui.ColorSpace(C.gkGTKViewColorSpace(native))
+	return ui.ColorSpace(gkGTKViewColorSpace(native))
 }
 
 func (c *canvas) gtkEvent(event gtkEvent) {
 	switch event.kind {
-	case C.GK_EVENT_KEY:
+	case gkEventKey:
 		key := ui.KeyEvent{
 			Key:       keyboard.Key(event.a),
 			Scancode:  event.b,
@@ -127,12 +122,12 @@ func (c *canvas) gtkEvent(event gtkEvent) {
 		each(&c.events.keys, func(handler ui.KeyHandler) {
 			handler(key)
 		})
-	case C.GK_EVENT_TEXT:
+	case gkEventText:
 		text := rune(event.a)
 		each(&c.events.texts, func(handler ui.TextHandler) {
 			handler(text)
 		})
-	case C.GK_EVENT_POINTER_MOVE:
+	case gkEventPointerMove:
 		move := ui.PointerMoveEvent{
 			X: event.x, Y: event.y, DeltaX: event.z, DeltaY: event.w,
 			Modifiers: keyboard.ModifierKey(event.a),
@@ -140,17 +135,17 @@ func (c *canvas) gtkEvent(event gtkEvent) {
 		each(&c.events.moves, func(handler ui.PointerMoveHandler) {
 			handler(move)
 		})
-	case C.GK_EVENT_POINTER_ENTER:
+	case gkEventPointerEnter:
 		crossing := ui.PointerCrossingEvent{X: event.x, Y: event.y}
 		each(&c.events.enters, func(handler ui.PointerCrossingHandler) {
 			handler(crossing)
 		})
-	case C.GK_EVENT_POINTER_LEAVE:
+	case gkEventPointerLeave:
 		crossing := ui.PointerCrossingEvent{X: event.x, Y: event.y}
 		each(&c.events.leaves, func(handler ui.PointerCrossingHandler) {
 			handler(crossing)
 		})
-	case C.GK_EVENT_FRAME:
+	case gkEventFrame:
 		request := ui.FrameRequest{
 			Time:     time.Now().Add(time.Duration(event.x * float64(time.Second))),
 			Interval: time.Duration(event.y * float64(time.Second)),
@@ -158,12 +153,12 @@ func (c *canvas) gtkEvent(event gtkEvent) {
 		each(&c.events.frames, func(handler ui.FrameRequestHandler) {
 			handler(request)
 		})
-	case C.GK_EVENT_WINDOW_OCCLUSION:
+	case gkEventWindowOcclusion:
 		occluded := event.a != 0
 		each(&c.events.occlusions, func(handler ui.OcclusionHandler) {
 			handler(occluded)
 		})
-	case C.GK_EVENT_SURFACE:
+	case gkEventSurface:
 		kinds := [...]ui.SurfaceEventKind{ui.SurfaceResized, ui.SurfaceScaleChanged, ui.SurfaceColorSpaceChanged}
 		surface := ui.SurfaceEvent{
 			Kind:            ui.SurfaceResized,

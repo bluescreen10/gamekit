@@ -16,7 +16,9 @@ import (
 )
 
 var gtkWidgets struct {
-	err error
+	err           error
+	printingErr   error
+	serviceErrors map[string]error
 
 	rootBounds      ui.Rect
 	canvasBounds    ui.Rect
@@ -60,6 +62,17 @@ func TestMain(m *testing.M) {
 		err = checkBorderlessKeyWindows(backend, win)
 	}
 	gtkWidgets.err = err
+	if err == nil {
+		gtkWidgets.printingErr = checkGTKPrinting()
+		gtkWidgets.serviceErrors = map[string]error{
+			"clipboard":       checkGTKClipboard(win),
+			"Go native port":  gtk.CheckNativePort(),
+			"message dialogs": checkGTKMessageDialogs(win),
+			"sharing":         checkGTKSharing(win),
+			"notifications":   checkGTKNotifications(win),
+			"file dialogs":    checkGTKFileDialogs(win),
+		}
+	}
 	gtkTestWindow, gtkTestWindowError = gtk.CreateWindow("gamekit test", 320, 200, &gtk.WindowOptions{Hidden: true, Resizable: true})
 
 	code := m.Run()

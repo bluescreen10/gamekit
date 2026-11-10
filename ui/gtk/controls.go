@@ -2,13 +2,6 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-#include "widget_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"errors"
 	"fmt"
@@ -33,7 +26,7 @@ func (w *Window) newComponent(native unsafe.Pointer, role ui.AccessibilityRole, 
 	return base, nil
 }
 
-func (w *Window) windowHandle() (C.uintptr_t, error) {
+func (w *Window) windowHandle() (cUintptr, error) {
 	if w.nativePointer() == nil {
 		return 0, ui.ErrClosed
 	}
@@ -57,9 +50,9 @@ func (w *Window) CreateToggleButton(options ui.ToggleButtonOptions) (ui.ToggleBu
 	text := cString(options.Text)
 	defer freeCString(text)
 	icon := nativeIcon(options.Icon, 0)
-	defer C.gkGTKRelease(icon)
+	defer gkGTKRelease(unsafe.Pointer(icon))
 	result := &toggleButton{groupID: options.GroupID}
-	native := C.gkGTKToggleButtonCreate(window, text, icon, boolInt(options.Checked),
+	native := gkGTKToggleButtonCreate(window, text, unsafe.Pointer(icon), boolInt(options.Checked),
 		boolInt(options.Presentation == ui.ToggleButtonToolbar))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleToggleButton, result); err != nil {
 		return nil, err
@@ -79,11 +72,11 @@ func (t *toggleButton) SetText(text string) {
 }
 func (t *toggleButton) IsChecked() bool {
 	native := t.nativePointer()
-	return native != nil && C.gkGTKUIChecked(native) != 0
+	return native != nil && gkGTKUIChecked(native) != 0
 }
 func (t *toggleButton) SetChecked(checked bool) {
 	if native := t.nativePointer(); native != nil {
-		C.gkGTKUISetChecked(native, boolInt(checked))
+		gkGTKUISetChecked(native, boolInt(checked))
 		if checked {
 			t.uncheckGroup()
 		}
@@ -104,7 +97,7 @@ func (t *toggleButton) uncheckGroup() {
 	for _, widget := range t.window.liveWidgets() {
 		other, ok := widget.contract.owner.(*toggleButton)
 		if ok && other != t && other.groupID == t.groupID && other.IsChecked() {
-			C.gkGTKUISetChecked(other.nativePointer(), 0)
+			gkGTKUISetChecked(other.nativePointer(), 0)
 			checked := false
 			each(&other.changes, func(handler ui.ToggleHandler) {
 				handler(checked)
@@ -114,7 +107,7 @@ func (t *toggleButton) uncheckGroup() {
 }
 
 func (t *toggleButton) gtkEvent(event gtkEvent) {
-	if event.kind != C.GK_EVENT_VALUE {
+	if event.kind != gkEventValue {
 		return
 	}
 	checked := t.IsChecked()
@@ -156,7 +149,7 @@ func (w *Window) CreateSwitch(options ui.SwitchOptions) (ui.Switch, error) {
 	defer freeCString(on)
 	defer freeCString(off)
 	result := &switchControl{text: options.Text}
-	native := C.gkGTKSwitchCreate(window, text, on, off, boolInt(options.Checked), C.int(options.Size))
+	native := gkGTKSwitchCreate(window, text, on, off, boolInt(options.Checked), cInt(options.Size))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSwitch, result); err != nil {
 		return nil, err
 	}
@@ -173,7 +166,7 @@ func (s *switchControl) SetText(text string) {
 }
 func (s *switchControl) IsChecked() bool {
 	native := s.nativePointer()
-	return native != nil && C.gkGTKSwitchChecked(native) != 0
+	return native != nil && gkGTKSwitchChecked(native) != 0
 }
 func (s *switchControl) SetChecked(checked bool) {
 	s.set(checked)
@@ -182,14 +175,14 @@ func (s *switchControl) set(checked bool) {
 	if native := s.nativePointer(); native != nil {
 		text := cString(s.text)
 		defer freeCString(text)
-		C.gkGTKSwitchSet(native, text, boolInt(checked))
+		gkGTKSwitchSet(native, text, boolInt(checked))
 	}
 }
 func (s *switchControl) OnChange(handler ui.ToggleHandler) ui.Unsubscribe {
 	return subscribe(&s.changes, handler, handler == nil)
 }
 func (s *switchControl) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_VALUE {
+	if event.kind == gkEventValue {
 		checked := s.IsChecked()
 		s.set(checked)
 		each(&s.changes, func(handler ui.ToggleHandler) {
@@ -218,7 +211,7 @@ func (w *Window) CreatePasswordField(options ui.PasswordFieldOptions) (ui.Passwo
 	placeholder := cString(options.Placeholder)
 	defer freeCString(placeholder)
 	result := &passwordField{placeholder: options.Placeholder, reveal: options.Reveal}
-	native := C.gkGTKPasswordCreate(window, placeholder, boolInt(options.Reveal == ui.PasswordRevealButton))
+	native := gkGTKPasswordCreate(window, placeholder, boolInt(options.Reveal == ui.PasswordRevealButton))
 	if result.widgetBase, err = w.newComponent(native, ui.RolePasswordField, result); err != nil {
 		return nil, err
 	}
@@ -230,7 +223,7 @@ func (p *passwordField) Text() string {
 	if native == nil {
 		return ""
 	}
-	return goStringFree(C.gkGTKPasswordText(native))
+	return goStringFree(gkGTKPasswordText(native))
 }
 func (p *passwordField) SetText(text string) {
 	p.set(text)
@@ -240,7 +233,7 @@ func (p *passwordField) set(text string) {
 		value, placeholder := cString(text), cString(p.placeholder)
 		defer freeCString(value)
 		defer freeCString(placeholder)
-		C.gkGTKPasswordSet(native, value, placeholder, boolInt(p.revealed))
+		gkGTKPasswordSet(native, value, placeholder, boolInt(p.revealed))
 	}
 }
 func (p *passwordField) Placeholder() string {
@@ -273,17 +266,17 @@ func (p *passwordField) OnSubmit(handler ui.TextChangeHandler) ui.Unsubscribe {
 }
 func (p *passwordField) gtkEvent(event gtkEvent) {
 	switch event.kind {
-	case C.GK_EVENT_TEXT_CHANGE:
+	case gkEventTextChange:
 		text := p.Text()
 		each(&p.changes, func(handler ui.TextChangeHandler) {
 			handler(text)
 		})
-	case C.GK_EVENT_SUBMIT:
+	case gkEventSubmit:
 		text := p.Text()
 		each(&p.submits, func(handler ui.TextChangeHandler) {
 			handler(text)
 		})
-	case C.GK_EVENT_EXPAND:
+	case gkEventExpand:
 		p.revealed = event.a != 0
 	}
 }
@@ -307,7 +300,7 @@ func (w *Window) CreateSearchField(options ui.SearchFieldOptions) (ui.SearchFiel
 	defer freeCString(text)
 	defer freeCString(placeholder)
 	result := &searchField{}
-	native := C.gkGTKSearchCreate(window, text, placeholder)
+	native := gkGTKSearchCreate(window, text, placeholder)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSearchField, result); err != nil {
 		return nil, err
 	}
@@ -326,13 +319,13 @@ func (s *searchField) Placeholder() string {
 	if native == nil {
 		return ""
 	}
-	return goStringFree(C.gkGTKUIPlaceholder(native))
+	return goStringFree(gkGTKUIPlaceholder(native))
 }
 func (s *searchField) SetPlaceholder(placeholder string) {
 	if native := s.nativePointer(); native != nil {
 		value := cString(placeholder)
 		defer freeCString(value)
-		C.gkGTKUISetPlaceholder(native, value)
+		gkGTKUISetPlaceholder(native, value)
 	}
 }
 func (s *searchField) Suggestions() []string {
@@ -342,7 +335,7 @@ func (s *searchField) SetSuggestions(suggestions []string) {
 	s.suggestions = append([]string(nil), suggestions...)
 	if native := s.nativePointer(); native != nil {
 		buffer := joinNul(suggestions)
-		C.gkGTKSearchSetSuggestions(native, bytesPointer(buffer), C.size_t(len(buffer)))
+		gkGTKSearchSetSuggestions(native, bytesPointer(buffer), cSize(len(buffer)))
 	}
 }
 func (s *searchField) Clear() {
@@ -357,11 +350,11 @@ func (s *searchField) OnSubmit(handler ui.TextChangeHandler) ui.Unsubscribe {
 func (s *searchField) gtkEvent(event gtkEvent) {
 	text := s.Text()
 	switch event.kind {
-	case C.GK_EVENT_TEXT_CHANGE:
+	case gkEventTextChange:
 		each(&s.changes, func(handler ui.TextChangeHandler) {
 			handler(text)
 		})
-	case C.GK_EVENT_SUBMIT:
+	case gkEventSubmit:
 		each(&s.submits, func(handler ui.TextChangeHandler) {
 			handler(text)
 		})
@@ -386,8 +379,8 @@ func (w *Window) CreateNumberField(options ui.NumberFieldOptions) (ui.NumberFiel
 		return nil, err
 	}
 	result := &numberField{options: options}
-	native := C.gkGTKNumberCreate(window, C.double(options.Minimum), C.double(options.Maximum),
-		C.double(options.Value), C.double(options.Step), C.int(options.Decimals))
+	native := gkGTKNumberCreate(window, cDouble(options.Minimum), cDouble(options.Maximum),
+		cDouble(options.Value), cDouble(options.Step), cInt(options.Decimals))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSpinButton, result); err != nil {
 		return nil, err
 	}
@@ -399,7 +392,7 @@ func (n *numberField) Value() float64 {
 	if native == nil {
 		return 0
 	}
-	return float64(C.gkGTKNumberValue(native))
+	return float64(gkGTKNumberValue(native))
 }
 func (n *numberField) SetValue(value float64) error {
 	if math.IsNaN(value) || value < n.options.Minimum || value > n.options.Maximum {
@@ -409,7 +402,7 @@ func (n *numberField) SetValue(value float64) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKNumberSetValue(native, C.double(value))
+	gkGTKNumberSetValue(native, cDouble(value))
 	return nil
 }
 func (n *numberField) Minimum() float64 {
@@ -428,7 +421,7 @@ func (n *numberField) OnChange(handler ui.ValueChangeHandler) ui.Unsubscribe {
 	return subscribe(&n.changes, handler, handler == nil)
 }
 func (n *numberField) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_VALUE {
+	if event.kind == gkEventValue {
 		value := n.Value()
 		each(&n.changes, func(handler ui.ValueChangeHandler) {
 			handler(value)
@@ -459,7 +452,7 @@ func (w *Window) CreateEditableCombo(options ui.EditableComboOptions) (ui.Editab
 	defer freeCString(text)
 	items := joinNul(options.Items)
 	result := &editableCombo{items: append([]string(nil), options.Items...), freeText: options.AllowFreeText, lastValid: options.Text}
-	native := C.gkGTKComboCreate(window, text, bytesPointer(items), C.size_t(len(items)))
+	native := gkGTKComboCreate(window, text, bytesPointer(items), cSize(len(items)))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleComboBox, result); err != nil {
 		return nil, err
 	}
@@ -482,7 +475,7 @@ func (c *editableCombo) SetItems(items []string) {
 	c.items = append([]string(nil), items...)
 	if native := c.nativePointer(); native != nil {
 		buffer := joinNul(items)
-		C.gkGTKComboSetItems(native, bytesPointer(buffer), C.size_t(len(buffer)))
+		gkGTKComboSetItems(native, bytesPointer(buffer), cSize(len(buffer)))
 	}
 }
 func (c *editableCombo) SelectedIndex() int {
@@ -494,11 +487,11 @@ func (c *editableCombo) OnChange(handler ui.TextChangeHandler) ui.Unsubscribe {
 func (c *editableCombo) gtkEvent(event gtkEvent) {
 	text := c.Text()
 	switch event.kind {
-	case C.GK_EVENT_TEXT_CHANGE:
+	case gkEventTextChange:
 		if event.text != "" {
 			text = event.text
 		}
-	case C.GK_EVENT_SUBMIT:
+	case gkEventSubmit:
 		// Return or leaving the field commits the text; without free text an
 		// unknown entry reverts to the last valid one.
 		if !c.freeText && !slices.Contains(c.items, text) {
@@ -535,10 +528,10 @@ func (w *Window) CreateSegmentedControl(options ui.SegmentedControlOptions) (ui.
 		return nil, err
 	}
 	labels := make([]string, len(options.Items))
-	icons := C.malloc(C.size_t(len(options.Items)) * C.size_t(unsafe.Sizeof(uintptr(0))))
-	defer C.free(icons)
-	iconSlice := unsafe.Slice((*unsafe.Pointer)(icons), len(options.Items))
-	enabled := make([]C.int, len(options.Items))
+	icons := gMalloc(cSize(len(options.Items)) * cSize(unsafe.Sizeof(uintptr(0))))
+	defer gFree(icons)
+	iconSlice := unsafe.Slice((**gdkPaintable)(icons), len(options.Items))
+	enabled := make([]cInt, len(options.Items))
 	for i, item := range options.Items {
 		labels[i] = item.Text
 		iconSlice[i] = nativeIcon(item.Icon, 0)
@@ -546,13 +539,13 @@ func (w *Window) CreateSegmentedControl(options ui.SegmentedControlOptions) (ui.
 	}
 	defer func() {
 		for _, icon := range iconSlice {
-			C.gkGTKRelease(icon)
+			gkGTKRelease(unsafe.Pointer(icon))
 		}
 	}()
 	buffer := joinNul(labels)
 	result := &segmentedControl{items: append([]ui.Segment(nil), options.Items...), mode: options.Mode}
-	native := C.gkGTKSegmentedCreate(window, bytesPointer(buffer), C.size_t(len(buffer)),
-		(*unsafe.Pointer)(icons), &enabled[0], C.int(len(options.Items)), C.int(options.Mode))
+	native := gkGTKSegmentedCreate(window, bytesPointer(buffer), cSize(len(buffer)),
+		(*unsafe.Pointer)(icons), &enabled[0], cInt(len(options.Items)), cInt(options.Mode))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleRadioGroup, result); err != nil {
 		return nil, err
 	}
@@ -580,7 +573,7 @@ func (s *segmentedControl) SelectedIDs() []string {
 	}
 	var selected []string
 	for i, item := range s.items {
-		if C.gkGTKSegmentSelected(native, C.int(i)) != 0 {
+		if gkGTKSegmentSelected(native, cInt(i)) != 0 {
 			selected = append(selected, item.ID)
 		}
 	}
@@ -595,7 +588,7 @@ func (s *segmentedControl) SetSelectedIDs(ids []string) error {
 		return ui.ErrClosed
 	}
 	for i, item := range s.items {
-		C.gkGTKSegmentSetSelected(native, C.int(i), boolInt(slices.Contains(ids, item.ID)))
+		gkGTKSegmentSetSelected(native, cInt(i), boolInt(slices.Contains(ids, item.ID)))
 	}
 	return nil
 }
@@ -603,14 +596,14 @@ func (s *segmentedControl) OnChange(handler ui.SelectionIDsHandler) ui.Unsubscri
 	return subscribe(&s.changes, handler, handler == nil)
 }
 func (s *segmentedControl) gtkEvent(event gtkEvent) {
-	if event.kind != C.GK_EVENT_SELECTION {
+	if event.kind != gkEventSelection {
 		return
 	}
 	selected := s.SelectedIDs()
 	if s.mode == ui.SelectionNone {
 		// A momentary control reports the clicked segment.
 		if native := s.nativePointer(); native != nil {
-			index := int(C.gkGTKSegmentClicked(native))
+			index := int(gkGTKSegmentClicked(native))
 			if index >= 0 && index < len(s.items) {
 				selected = []string{s.items[index].ID}
 			}
@@ -636,7 +629,7 @@ func (r *rangedControl) Value() float64 {
 	if native == nil {
 		return 0
 	}
-	return float64(C.gkGTKControlValue(native))
+	return float64(gkGTKControlValue(native))
 }
 func (r *rangedControl) SetValue(value float64) error {
 	if math.IsNaN(value) || value < r.minimum || value > r.maximum {
@@ -646,14 +639,14 @@ func (r *rangedControl) SetValue(value float64) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKControlSetValue(native, C.double(value))
+	gkGTKControlSetValue(native, cDouble(value))
 	return nil
 }
 func (r *rangedControl) OnChange(handler ui.ValueChangeHandler) ui.Unsubscribe {
 	return subscribe(&r.changes, handler, handler == nil)
 }
 func (r *rangedControl) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_VALUE {
+	if event.kind == gkEventValue {
 		value := r.Value()
 		each(&r.changes, func(handler ui.ValueChangeHandler) {
 			handler(value)
@@ -694,8 +687,8 @@ func (w *Window) CreateStepper(options ui.StepperOptions) (ui.Stepper, error) {
 		return nil, err
 	}
 	result := &stepper{rangedControl{minimum: options.Minimum, maximum: options.Maximum, step: options.Step, wraps: options.Wrap}}
-	native := C.gkGTKStepperCreate(window, C.double(options.Minimum), C.double(options.Maximum),
-		C.double(options.Value), C.double(options.Step), boolInt(options.Wrap))
+	native := gkGTKStepperCreate(window, cDouble(options.Minimum), cDouble(options.Maximum),
+		cDouble(options.Value), cDouble(options.Step), boolInt(options.Wrap))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSpinButton, result); err != nil {
 		return nil, err
 	}
@@ -714,8 +707,8 @@ func (w *Window) CreateDial(options ui.DialOptions) (ui.Dial, error) {
 		return nil, err
 	}
 	result := &dial{rangedControl{minimum: options.Minimum, maximum: options.Maximum, step: options.Step, wraps: options.Wrap}}
-	native := C.gkGTKDialCreate(window, C.double(options.Minimum), C.double(options.Maximum),
-		C.double(options.Value), C.double(options.Step), boolInt(options.Wrap))
+	native := gkGTKDialCreate(window, cDouble(options.Minimum), cDouble(options.Maximum),
+		cDouble(options.Value), cDouble(options.Step), boolInt(options.Wrap))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSlider, result); err != nil {
 		return nil, err
 	}
@@ -740,8 +733,8 @@ func (w *Window) CreateRangeSlider(options ui.RangeSliderOptions) (ui.RangeSlide
 		return nil, err
 	}
 	result := &rangeSlider{options: options}
-	native := C.gkGTKRangeSliderCreate(window, C.double(options.Minimum), C.double(options.Maximum),
-		C.double(options.LowerValue), C.double(options.UpperValue), C.double(options.Step))
+	native := gkGTKRangeSliderCreate(window, cDouble(options.Minimum), cDouble(options.Maximum),
+		cDouble(options.LowerValue), cDouble(options.UpperValue), cDouble(options.Step))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleSlider, result); err != nil {
 		return nil, err
 	}
@@ -753,8 +746,8 @@ func (r *rangeSlider) values() (float64, float64) {
 	if native == nil {
 		return 0, 0
 	}
-	var lower, upper C.double
-	C.gkGTKRangeSliderValues(native, &lower, &upper)
+	var lower, upper cDouble
+	gkGTKRangeSliderValues(native, &lower, &upper)
 	return float64(lower), float64(upper)
 }
 func (r *rangeSlider) LowerValue() float64 {
@@ -775,14 +768,14 @@ func (r *rangeSlider) SetValues(lower, upper float64) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKRangeSliderSet(native, C.double(lower), C.double(upper))
+	gkGTKRangeSliderSet(native, cDouble(lower), cDouble(upper))
 	return nil
 }
 func (r *rangeSlider) OnChange(handler ui.RangeChangeHandler) ui.Unsubscribe {
 	return subscribe(&r.changes, handler, handler == nil)
 }
 func (r *rangeSlider) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_VALUE {
+	if event.kind == gkEventValue {
 		lower, upper := event.x, event.y
 		each(&r.changes, func(handler ui.RangeChangeHandler) {
 			handler(lower, upper)
@@ -841,8 +834,8 @@ func (w *Window) CreateDatePicker(options ui.DatePickerOptions) (ui.DatePicker, 
 		return nil, errors.New("ui: date picker minimum is after its maximum")
 	}
 	result := &datePicker{minimum: minimum, maximum: maximum}
-	native := C.gkGTKDatePickerCreate(window, 0, datePickerYearMonthDay, C.double(unixSeconds(value)),
-		C.double(unixSeconds(minimum)), C.double(unixSeconds(maximum)), 0, 0, 0)
+	native := gkGTKDatePickerCreate(window, 0, datePickerYearMonthDay, cDouble(unixSeconds(value)),
+		cDouble(unixSeconds(minimum)), cDouble(unixSeconds(maximum)), 0, 0, 0)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleDatePicker, result); err != nil {
 		return nil, err
 	}
@@ -854,8 +847,8 @@ func (d *datePicker) Value() time.Time {
 	if native == nil {
 		return time.Time{}
 	}
-	var value, interval C.double
-	C.gkGTKDatePickerValue(native, &value, &interval)
+	var value, interval cDouble
+	gkGTKDatePickerValue(native, &value, &interval)
 	return calendarDate(float64(value))
 }
 func (d *datePicker) SetValue(date time.Time) error {
@@ -867,14 +860,14 @@ func (d *datePicker) SetValue(date time.Time) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKDatePickerSet(native, C.double(unixSeconds(date)), 0)
+	gkGTKDatePickerSet(native, cDouble(unixSeconds(date)), 0)
 	return nil
 }
 func (d *datePicker) OnChange(handler ui.DateChangeHandler) ui.Unsubscribe {
 	return subscribe(&d.changes, handler, handler == nil)
 }
 func (d *datePicker) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_VALUE {
+	if event.kind == gkEventValue {
 		value := d.Value()
 		each(&d.changes, func(handler ui.DateChangeHandler) {
 			handler(value)
@@ -896,13 +889,13 @@ func (w *Window) CreateTimePicker(options ui.TimePickerOptions) (ui.TimePicker, 
 	if err != nil {
 		return nil, err
 	}
-	elements := C.int(datePickerHourMinute)
+	elements := cInt(datePickerHourMinute)
 	if options.ShowSeconds {
 		elements = datePickerHourMinuteSecond
 	}
 	result := &timePicker{}
-	native := C.gkGTKDatePickerCreate(window, 0, elements, C.double(options.Value.Seconds()), 0, 0, 0, 0,
-		C.int(options.Clock))
+	native := gkGTKDatePickerCreate(window, 0, elements, cDouble(options.Value.Seconds()), 0, 0, 0, 0,
+		cInt(options.Clock))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleTimePicker, result); err != nil {
 		return nil, err
 	}
@@ -914,8 +907,8 @@ func (t *timePicker) Value() time.Duration {
 	if native == nil {
 		return 0
 	}
-	var value, interval C.double
-	C.gkGTKDatePickerValue(native, &value, &interval)
+	var value, interval cDouble
+	gkGTKDatePickerValue(native, &value, &interval)
 	seconds := math.Mod(float64(value), 24*60*60)
 	if seconds < 0 {
 		seconds += 24 * 60 * 60
@@ -930,14 +923,14 @@ func (t *timePicker) SetValue(value time.Duration) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKDatePickerSet(native, C.double(value.Seconds()), 0)
+	gkGTKDatePickerSet(native, cDouble(value.Seconds()), 0)
 	return nil
 }
 func (t *timePicker) OnChange(handler ui.TimeChangeHandler) ui.Unsubscribe {
 	return subscribe(&t.changes, handler, handler == nil)
 }
 func (t *timePicker) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_VALUE {
+	if event.kind == gkEventValue {
 		value := t.Value()
 		each(&t.changes, func(handler ui.TimeChangeHandler) {
 			handler(value)
@@ -970,8 +963,8 @@ func (w *Window) CreateCalendar(options ui.CalendarOptions) (ui.Calendar, error)
 	}
 	seconds := calendarSeconds(dates)
 	result := &calendar{selection: options.Selection}
-	native := C.gkGTKCalendarCreate(window, C.int(options.Selection), doublesPointer(seconds), C.int(len(seconds)),
-		C.double(unixSeconds(monthOf(options.VisibleMonth))))
+	native := gkGTKCalendarCreate(window, cInt(options.Selection), doublesPointer(seconds), cInt(len(seconds)),
+		cDouble(unixSeconds(monthOf(options.VisibleMonth))))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleCalendar, result); err != nil {
 		return nil, err
 	}
@@ -1007,15 +1000,15 @@ func calendarDates(selection ui.CalendarSelection, dates []time.Time) ([]time.Ti
 	return result, nil
 }
 
-func calendarSeconds(dates []time.Time) []C.double {
-	seconds := make([]C.double, len(dates))
+func calendarSeconds(dates []time.Time) []cDouble {
+	seconds := make([]cDouble, len(dates))
 	for i, date := range dates {
-		seconds[i] = C.double(unixSeconds(date))
+		seconds[i] = cDouble(unixSeconds(date))
 	}
 	return seconds
 }
 
-func doublesPointer(values []C.double) *C.double {
+func doublesPointer(values []cDouble) *cDouble {
 	if len(values) == 0 {
 		return nil
 	}
@@ -1028,13 +1021,13 @@ func (c *calendar) VisibleMonth() time.Time {
 	if native == nil {
 		return time.Time{}
 	}
-	return calendarDate(float64(C.gkGTKCalendarVisibleMonth(native)))
+	return calendarDate(float64(gkGTKCalendarVisibleMonth(native)))
 }
 
 // SetVisibleMonth shows the month of month without changing the selection.
 func (c *calendar) SetVisibleMonth(month time.Time) {
 	if native := c.nativePointer(); native != nil && !month.IsZero() {
-		C.gkGTKCalendarSetVisibleMonth(native, C.double(unixSeconds(monthOf(month))))
+		gkGTKCalendarSetVisibleMonth(native, cDouble(unixSeconds(monthOf(month))))
 	}
 }
 
@@ -1044,12 +1037,12 @@ func (c *calendar) SelectedDates() []time.Time {
 	if native == nil {
 		return nil
 	}
-	count := int(C.gkGTKCalendarDates(native, nil, 0))
+	count := int(gkGTKCalendarDates(native, nil, 0))
 	if count == 0 {
 		return nil
 	}
-	seconds := make([]C.double, count)
-	C.gkGTKCalendarDates(native, &seconds[0], C.int(count))
+	seconds := make([]cDouble, count)
+	gkGTKCalendarDates(native, &seconds[0], cInt(count))
 	dates := make([]time.Time, count)
 	for i, value := range seconds {
 		dates[i] = calendarDate(float64(value))
@@ -1072,14 +1065,14 @@ func (c *calendar) SetSelectedDates(dates []time.Time) error {
 		return ui.ErrClosed
 	}
 	seconds := calendarSeconds(selected)
-	C.gkGTKCalendarSetDates(native, doublesPointer(seconds), C.int(len(seconds)))
+	gkGTKCalendarSetDates(native, doublesPointer(seconds), cInt(len(seconds)))
 	return nil
 }
 func (c *calendar) OnChange(handler ui.DatesChangeHandler) ui.Unsubscribe {
 	return subscribe(&c.changes, handler, handler == nil)
 }
 func (c *calendar) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_VALUE {
+	if event.kind == gkEventValue {
 		dates := c.SelectedDates()
 		each(&c.changes, func(handler ui.DatesChangeHandler) {
 			handler(append([]time.Time(nil), dates...))
@@ -1095,12 +1088,12 @@ type colorPicker struct {
 	changes     listeners[ui.ColorChangeHandler]
 }
 
-func colorComponents(value color.Color) [4]C.double {
+func colorComponents(value color.Color) [4]cDouble {
 	if value == nil {
 		value = color.Black
 	}
 	rgba := color.NRGBAModel.Convert(value).(color.NRGBA)
-	return [4]C.double{C.double(rgba.R) / 255, C.double(rgba.G) / 255, C.double(rgba.B) / 255, C.double(rgba.A) / 255}
+	return [4]cDouble{cDouble(rgba.R) / 255, cDouble(rgba.G) / 255, cDouble(rgba.B) / 255, cDouble(rgba.A) / 255}
 }
 
 // CreateColorPicker implements ui.Window.CreateColorPicker.
@@ -1114,7 +1107,7 @@ func (w *Window) CreateColorPicker(options ui.ColorPickerOptions) (ui.ColorPicke
 		c[3] = 1
 	}
 	result := &colorPicker{allowsAlpha: options.AllowAlpha}
-	native := C.gkGTKColorWellCreate(window, c[0], c[1], c[2], c[3], boolInt(options.AllowAlpha))
+	native := gkGTKColorWellCreate(window, c[0], c[1], c[2], c[3], boolInt(options.AllowAlpha))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleColorPicker, result); err != nil {
 		return nil, err
 	}
@@ -1127,9 +1120,9 @@ func (c *colorPicker) Color() color.RGBA {
 	if native == nil {
 		return color.RGBA{}
 	}
-	var rgba [4]C.double
-	C.gkGTKColorWellColor(native, &rgba[0])
-	channel := func(value C.double) uint8 {
+	var rgba [4]cDouble
+	gkGTKColorWellColor(native, &rgba[0])
+	channel := func(value cDouble) uint8 {
 		return uint8(math.Round(math.Max(0, math.Min(1, float64(value))) * 255))
 	}
 	return color.RGBA{R: channel(rgba[0]), G: channel(rgba[1]), B: channel(rgba[2]), A: channel(rgba[3])}
@@ -1140,7 +1133,7 @@ func (c *colorPicker) SetColor(value color.Color) {
 		if !c.allowsAlpha {
 			components[3] = 1
 		}
-		C.gkGTKColorWellSet(native, components[0], components[1], components[2], components[3])
+		gkGTKColorWellSet(native, components[0], components[1], components[2], components[3])
 	}
 }
 func (c *colorPicker) AllowsAlpha() bool {
@@ -1150,7 +1143,7 @@ func (c *colorPicker) OnChange(handler ui.ColorChangeHandler) ui.Unsubscribe {
 	return subscribe(&c.changes, handler, handler == nil)
 }
 func (c *colorPicker) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_VALUE {
+	if event.kind == gkEventValue {
 		value := c.Color()
 		each(&c.changes, func(handler ui.ColorChangeHandler) {
 			handler(value)
@@ -1176,7 +1169,7 @@ func (w *Window) CreateFontPicker(options ui.FontPickerOptions) (ui.FontPicker, 
 	family := cString(options.Font.Family)
 	defer freeCString(family)
 	result := &fontPicker{font: options.Font}
-	native := C.gkGTKFontPickerCreate(window, family, C.double(options.Font.Size), C.int(options.Font.Weight),
+	native := gkGTKFontPickerCreate(window, family, cDouble(options.Font.Size), cInt(options.Font.Weight),
 		boolInt(options.Font.Italic))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleFontPicker, result); err != nil {
 		return nil, err
@@ -1197,7 +1190,7 @@ func (f *fontPicker) SetFont(font ui.Font) error {
 	}
 	family := cString(font.Family)
 	defer freeCString(family)
-	C.gkGTKFontPickerSet(native, family, C.double(font.Size), C.int(font.Weight), boolInt(font.Italic))
+	gkGTKFontPickerSet(native, family, cDouble(font.Size), cInt(font.Weight), boolInt(font.Italic))
 	f.font = font
 	return nil
 }
@@ -1205,16 +1198,16 @@ func (f *fontPicker) OnChange(handler ui.FontChangeHandler) ui.Unsubscribe {
 	return subscribe(&f.changes, handler, handler == nil)
 }
 func (f *fontPicker) gtkEvent(event gtkEvent) {
-	if event.kind != C.GK_EVENT_VALUE {
+	if event.kind != gkEventValue {
 		return
 	}
 	native := f.nativePointer()
 	if native == nil {
 		return
 	}
-	var size C.double
-	var weight, italic C.int
-	family := goStringFree(C.gkGTKFontPickerFont(native, &size, &weight, &italic))
+	var size cDouble
+	var weight, italic cInt
+	family := goStringFree(gkGTKFontPickerFont(native, &size, &weight, &italic))
 	f.font = ui.Font{Family: family, Size: float64(size), Weight: ui.FontWeight(weight), Italic: italic != 0}
 	font := f.font
 	each(&f.changes, func(handler ui.FontChangeHandler) {
@@ -1237,7 +1230,7 @@ func (w *Window) CreateKeyRecorder(options ui.KeyRecorderOptions) (ui.KeyRecorde
 		return nil, err
 	}
 	result := &keyRecorder{}
-	native := C.gkGTKKeyRecorderCreate(window)
+	native := gkGTKKeyRecorderCreate(window)
 	if result.widgetBase, err = w.newComponent(native, ui.RoleButton, result); err != nil {
 		return nil, err
 	}
@@ -1253,7 +1246,7 @@ func (k *keyRecorder) SetShortcut(shortcut ui.Shortcut) {
 	if native := k.nativePointer(); native != nil {
 		display := cString(shortcutText(shortcut))
 		defer freeCString(display)
-		C.gkGTKKeyRecorderSet(native, display)
+		gkGTKKeyRecorderSet(native, display)
 	}
 }
 func (k *keyRecorder) OnChange(handler ui.ShortcutChangeHandler) ui.Unsubscribe {
@@ -1267,7 +1260,7 @@ var keyNames = map[int]string{
 }
 
 func (k *keyRecorder) gtkEvent(event gtkEvent) {
-	if event.kind != C.GK_EVENT_VALUE {
+	if event.kind != gkEventValue {
 		return
 	}
 	shortcut := ui.Shortcut{}

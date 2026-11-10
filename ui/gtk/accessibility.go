@@ -2,13 +2,6 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-#include "window_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"strconv"
 	"strings"
@@ -33,7 +26,7 @@ func (w *Window) unregisterWidget(widget *widgetBase, handle uintptr) {
 	delete(w.widgets, widget)
 	w.mu.Unlock()
 	if window := w.nativeWindowPointer(); window != nil {
-		C.gkGTKForgetFocus(window, C.uintptr_t(handle))
+		gkGTKForgetFocus(window, cUintptr(handle))
 	}
 }
 
@@ -81,17 +74,17 @@ func (w *Window) closeWidgets() {
 // trackFocus reports focus changes since the last check.
 func (w *Window) trackFocus() {
 	if window := w.nativeWindowPointer(); window != nil {
-		C.gkGTKTrackFocus(window)
+		gkGTKTrackFocus(window)
 	}
 }
 
-// nativeWindowPointer returns the native window record of the GTK layer.
+// nativeWindowPointer returns the native GtkWindow pointer.
 func (w *Window) nativeWindowPointer() unsafe.Pointer {
 	native := w.nativePointer()
 	if native == nil {
 		return nil
 	}
-	return C.gkGTKWindowNativePointer(native)
+	return gkGTKWindowNativePointer(native)
 }
 
 // gtkRoles maps the nicks of GtkAccessibleRole values to ui roles.
@@ -177,13 +170,13 @@ func (w *Window) AccessibilityTree() ui.AccessibilityNode {
 	if window == nil {
 		return ui.AccessibilityNode{Role: ui.RoleWindow}
 	}
-	var size C.size_t
-	buffer := C.gkGTKAccessibilityTree(window, &size)
+	var size cSize
+	buffer := gkGTKAccessibilityTree(window, &size)
 	if buffer == nil {
 		return ui.AccessibilityNode{Role: ui.RoleWindow}
 	}
-	defer C.free(unsafe.Pointer(buffer))
-	return parseAccessibilityTree(C.GoStringN(buffer, C.int(size)))
+	defer gFree(unsafe.Pointer(buffer))
+	return parseAccessibilityTree(goStringN(buffer, cInt(size)))
 }
 
 // parseAccessibilityTree builds nodes from depth-first records separated by

@@ -2,11 +2,6 @@
 
 package gtk
 
-/*
-#include "widget_bridge.h"
-*/
-import "C"
-
 import (
 	"runtime/cgo"
 
@@ -23,7 +18,7 @@ type canvasPointer = pointerstate.State
 
 // canvasFromHandle resolves the handle a native canvas view reports with, or nil once
 // the canvas is closed (gkGTKUIClearAction zeroes the view's copy first).
-func canvasFromHandle(handle C.uintptr_t) *canvas {
+func canvasFromHandle(handle cUintptr) *canvas {
 	if handle == 0 {
 		return nil
 	}
@@ -31,8 +26,7 @@ func canvasFromHandle(handle C.uintptr_t) *canvas {
 	return result
 }
 
-//export gkGTKUIGoCanvasPointerButton
-func gkGTKUIGoCanvasPointerButton(handle C.uintptr_t, button, action, mods C.int) {
+func gkGTKUIGoCanvasPointerButton(handle cUintptr, button, action, mods cInt) {
 	if c := canvasFromHandle(handle); c != nil {
 		c.DispatchPointerButton(ui.PointerButtonEvent{
 			Button:    pointer.Button(button),
@@ -42,8 +36,7 @@ func gkGTKUIGoCanvasPointerButton(handle C.uintptr_t, button, action, mods C.int
 	}
 }
 
-//export gkGTKUIGoCanvasScroll
-func gkGTKUIGoCanvasScroll(handle C.uintptr_t, x, y C.double) {
+func gkGTKUIGoCanvasScroll(handle cUintptr, x, y cDouble) {
 	if c := canvasFromHandle(handle); c != nil {
 		c.DispatchScroll(ui.ScrollEvent{X: float64(x), Y: float64(y)})
 	}

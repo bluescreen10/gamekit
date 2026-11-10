@@ -2,11 +2,6 @@
 
 package gtk
 
-/*
-#include "window_bridge.h"
-*/
-import "C"
-
 import "github.com/bluescreen10/gamekit/pointer"
 
 // GetScroll returns the scroll offsets accumulated since the window was created.
@@ -17,8 +12,8 @@ import "github.com/bluescreen10/gamekit/pointer"
 // one read it first.
 func (w *Window) GetScroll() (x, y float64) {
 	if native := w.nativePointer(); native != nil {
-		var nativeX, nativeY C.double
-		C.gkGTKWindowGetScroll(native, &nativeX, &nativeY)
+		var nativeX, nativeY cDouble
+		gkGTKWindowGetScroll(native, &nativeX, &nativeY)
 		return float64(nativeX), float64(nativeY)
 	}
 	return 0, 0
@@ -27,14 +22,14 @@ func (w *Window) GetScroll() (x, y float64) {
 // SetPointerMode selects how the cursor behaves over this window.
 func (w *Window) SetPointerMode(mode pointer.Mode) {
 	if native := w.nativePointer(); native != nil {
-		C.gkGTKWindowSetCursorMode(native, C.int(mode))
+		gkGTKWindowSetCursorMode(native, cInt(mode))
 	}
 }
 
 // GetPointerMode returns the window's current cursor mode.
 func (w *Window) GetPointerMode() pointer.Mode {
 	if native := w.nativePointer(); native != nil {
-		return pointer.Mode(C.gkGTKWindowGetCursorMode(native))
+		return pointer.Mode(gkGTKWindowGetCursorMode(native))
 	}
 	return pointer.Normal
 }

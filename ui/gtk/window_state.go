@@ -2,13 +2,6 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-#include "window_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"errors"
 	"fmt"
@@ -62,7 +55,7 @@ type windowFlags struct {
 // attachExtensions connects the extended window contract after creation.
 func (w *Window) attachExtensions(options WindowOptions) error {
 	window := w.nativeWindowPointer()
-	C.gkGTKWindowAttach(window, C.uintptr_t(w.handle))
+	gkGTKWindowAttach(window, cUintptr(w.handle))
 	attachApplication()
 	w.flags = windowFlags{
 		resizable:   options.Resizable,
@@ -92,8 +85,8 @@ func (w *Window) attachExtensions(options WindowOptions) error {
 
 // detachNativeWindow disconnects the extended contract before destruction.
 func detachNativeWindow(native unsafe.Pointer) {
-	if window := C.gkGTKWindowNativePointer(native); window != nil {
-		C.gkGTKWindowDetach(window)
+	if window := gkGTKWindowNativePointer(native); window != nil {
+		gkGTKWindowDetach(window)
 	}
 }
 
@@ -135,8 +128,8 @@ func (w *Window) setSizeLimits(minimum, maximum ui.Size) error {
 	if window == nil {
 		return ui.ErrClosed
 	}
-	C.gkGTKWindowSetSizeLimits(window, C.int(minimum.Width), C.int(minimum.Height),
-		C.int(maximum.Width), C.int(maximum.Height))
+	gkGTKWindowSetSizeLimits(window, cInt(minimum.Width), cInt(minimum.Height),
+		cInt(maximum.Width), cInt(maximum.Height))
 	w.mu.Lock()
 	w.flags.minimum = minimum
 	w.flags.maximum = maximum
@@ -178,7 +171,7 @@ func (w *Window) SetBorderless(borderless bool) {
 
 func (w *Window) applyStyle(flags windowFlags) {
 	if window := w.nativeWindowPointer(); window != nil {
-		C.gkGTKWindowSetStyle(window, boolInt(flags.resizable), boolInt(flags.borderless))
+		gkGTKWindowSetStyle(window, boolInt(flags.resizable), boolInt(flags.borderless))
 	}
 }
 
@@ -195,13 +188,13 @@ func (w *Window) SetAlwaysOnTop(alwaysOnTop bool) {
 	if window == nil {
 		return
 	}
-	C.gkGTKWindowSetAlwaysOnTop(window, boolInt(alwaysOnTop))
+	gkGTKWindowSetAlwaysOnTop(window, boolInt(alwaysOnTop))
 	w.mu.Lock()
 	w.flags.alwaysOnTop = alwaysOnTop
 	w.mu.Unlock()
 }
 
-func (w *Window) windowCall(call func(unsafe.Pointer) C.int, failure string) error {
+func (w *Window) windowCall(call func(unsafe.Pointer) cInt, failure string) error {
 	window := w.nativeWindowPointer()
 	if window == nil {
 		return ui.ErrClosed
@@ -216,16 +209,16 @@ func (w *Window) windowCall(call func(unsafe.Pointer) C.int, failure string) err
 // window, which the window manager does not minimize. A hidden window is
 // shown first, because a window manager minimizes only mapped windows.
 func (w *Window) Minimize() error {
-	return w.windowCall(func(window unsafe.Pointer) C.int {
-		return C.gkGTKWindowMinimize(window)
+	return w.windowCall(func(window unsafe.Pointer) cInt {
+		return gkGTKWindowMinimize(window)
 	},
 		"the window could not be minimized")
 }
 
 // Maximize implements ui.Window.Maximize.
 func (w *Window) Maximize() error {
-	return w.windowCall(func(window unsafe.Pointer) C.int {
-		return C.gkGTKWindowMaximize(window)
+	return w.windowCall(func(window unsafe.Pointer) cInt {
+		return gkGTKWindowMaximize(window)
 	},
 		"the window could not be maximized")
 }
@@ -233,8 +226,8 @@ func (w *Window) Maximize() error {
 // Restore implements ui.Window.Restore. Leaving fullscreen completes
 // asynchronously.
 func (w *Window) Restore() error {
-	return w.windowCall(func(window unsafe.Pointer) C.int {
-		return C.gkGTKWindowRestore(window)
+	return w.windowCall(func(window unsafe.Pointer) cInt {
+		return gkGTKWindowRestore(window)
 	},
 		"the window could not be restored")
 }
@@ -242,20 +235,20 @@ func (w *Window) Restore() error {
 // IsMinimized implements ui.Window.IsMinimized.
 func (w *Window) IsMinimized() bool {
 	window := w.nativeWindowPointer()
-	return window != nil && C.gkGTKWindowIsMinimized(window) != 0
+	return window != nil && gkGTKWindowIsMinimized(window) != 0
 }
 
 // IsMaximized implements ui.Window.IsMaximized.
 func (w *Window) IsMaximized() bool {
 	window := w.nativeWindowPointer()
-	return window != nil && C.gkGTKWindowIsMaximized(window) != 0
+	return window != nil && gkGTKWindowIsMaximized(window) != 0
 }
 
 // IsFullscreen implements ui.Window.IsFullscreen. It reports a completed
 // transition into the fullscreen Space of the window.
 func (w *Window) IsFullscreen() bool {
 	window := w.nativeWindowPointer()
-	return window != nil && C.gkGTKWindowIsFullscreen(window) != 0
+	return window != nil && gkGTKWindowIsFullscreen(window) != 0
 }
 
 // OnFullscreenChange reports completed fullscreen transitions.
@@ -275,7 +268,7 @@ func (w *Window) SetFullscreen(fullscreen bool) error {
 	if window == nil {
 		return ui.ErrClosed
 	}
-	if C.gkGTKWindowSetFullscreen(window, boolInt(fullscreen)) == 0 {
+	if gkGTKWindowSetFullscreen(window, boolInt(fullscreen)) == 0 {
 		return fmt.Errorf("ui/gtk: fullscreen needs an unlocked, awake display: %w", ui.ErrUnavailable)
 	}
 	return nil
@@ -284,7 +277,7 @@ func (w *Window) SetFullscreen(fullscreen bool) error {
 // canBecomeKey reports whether GTK lets the window take keyboard focus.
 func (w *Window) canBecomeKey() bool {
 	window := w.nativeWindowPointer()
-	return window != nil && C.gkGTKWindowCanBecomeKey(window) != 0
+	return window != nil && gkGTKWindowCanBecomeKey(window) != 0
 }
 
 // Screen implements ui.Window.Screen.
@@ -293,9 +286,9 @@ func (w *Window) Screen() ui.Screen {
 	if window == nil {
 		return ui.Screen{}
 	}
-	var values [11]C.double
-	var name *C.char
-	C.gkGTKWindowScreen(window, &values[0], &name)
+	var values [11]cDouble
+	var name *cChar
+	gkGTKWindowScreen(window, &values[0], &name)
 	rect := func(offset int) ui.Rect {
 		return ui.Rect{
 			Position: ui.Point{X: int(values[offset]), Y: int(values[offset+1])},
@@ -318,10 +311,10 @@ func (w *Window) SystemPreferences() ui.SystemPreferences {
 }
 
 func systemPreferences(window unsafe.Pointer) ui.SystemPreferences {
-	var values [10]C.double
-	var locale *C.char
-	C.gkGTKSystemPreferences(window, &values[0], &locale)
-	channel := func(value C.double) uint8 {
+	var values [10]cDouble
+	var locale *cChar
+	gkGTKSystemPreferences(window, &values[0], &locale)
+	channel := func(value cDouble) uint8 {
 		return uint8(math.Round(math.Max(0, math.Min(1, float64(value))) * 255))
 	}
 	return ui.SystemPreferences{
@@ -387,7 +380,7 @@ func (w *Window) OnFileDrop(handler ui.FileDropHandler) ui.Unsubscribe {
 // updateFileDrops registers the window for file drops while it has handlers.
 func (w *Window) updateFileDrops() {
 	if window := w.nativeWindowPointer(); window != nil {
-		C.gkGTKWindowAcceptFiles(window, boolInt(len(w.events.fileDrops.snapshot()) > 0))
+		gkGTKWindowAcceptFiles(window, boolInt(len(w.events.fileDrops.snapshot()) > 0))
 	}
 }
 
@@ -469,17 +462,17 @@ func each[T any](list *listeners[T], call func(T)) {
 // gtkEvent receives window events from the GTK layer.
 func (w *Window) gtkEvent(event gtkEvent) {
 	switch event.kind {
-	case C.GK_EVENT_WINDOW_RESIZE:
+	case gkEventWindowResize:
 		size := ui.Size{Width: int(event.x), Height: int(event.y)}
 		each(&w.events.resizes, func(handler ui.ResizeHandler) {
 			handler(size)
 		})
-	case C.GK_EVENT_WINDOW_FULLSCREEN:
+	case gkEventWindowFullscreen:
 		fullscreen := event.a != 0
 		each(&w.events.fullscreens, func(handler ui.FullscreenHandler) {
 			handler(fullscreen)
 		})
-	case C.GK_EVENT_WINDOW_FOCUS:
+	case gkEventWindowFocus:
 		w.mu.RLock()
 		bar := w.menuBar
 		w.mu.RUnlock()
@@ -489,22 +482,22 @@ func (w *Window) gtkEvent(event gtkEvent) {
 		each(&w.events.focuses, func(handler ui.FocusHandler) {
 			handler()
 		})
-	case C.GK_EVENT_WINDOW_BLUR:
+	case gkEventWindowBlur:
 		each(&w.events.blurs, func(handler ui.FocusHandler) {
 			handler()
 		})
-	case C.GK_EVENT_WINDOW_THEME:
+	case gkEventWindowTheme:
 		theme := ui.Theme(event.a)
 		each(&w.events.themes, func(handler ui.ThemeChangeHandler) {
 			handler(theme)
 		})
 		w.dispatchPreferences()
-	case C.GK_EVENT_WINDOW_FILE_DROP:
+	case gkEventWindowFileDrop:
 		paths := strings.Split(event.text, "\x1e")
 		each(&w.events.fileDrops, func(handler ui.FileDropHandler) {
 			handler(append([]string(nil), paths...))
 		})
-	case C.GK_EVENT_POINTER_MOVE:
+	case gkEventPointerMove:
 		move := ui.PointerMoveEvent{
 			X: event.x, Y: event.y, DeltaX: event.z, DeltaY: event.w,
 			Modifiers: keyboard.ModifierKey(event.a),
@@ -512,17 +505,17 @@ func (w *Window) gtkEvent(event gtkEvent) {
 		each(&w.events.pointerMoves, func(handler ui.PointerMoveHandler) {
 			handler(move)
 		})
-	case C.GK_EVENT_POINTER_ENTER:
+	case gkEventPointerEnter:
 		crossing := ui.PointerCrossingEvent{X: event.x, Y: event.y}
 		each(&w.events.enters, func(handler ui.PointerCrossingHandler) {
 			handler(crossing)
 		})
-	case C.GK_EVENT_POINTER_LEAVE:
+	case gkEventPointerLeave:
 		crossing := ui.PointerCrossingEvent{X: event.x, Y: event.y}
 		each(&w.events.leaves, func(handler ui.PointerCrossingHandler) {
 			handler(crossing)
 		})
-	case C.GK_EVENT_IME:
+	case gkEventIme:
 		ime := ui.IMEEvent{
 			Kind:      ui.IMEEventKind(event.a),
 			Text:      event.text,
@@ -531,12 +524,12 @@ func (w *Window) gtkEvent(event gtkEvent) {
 		each(&w.events.imes, func(handler ui.IMEHandler) {
 			handler(ime)
 		})
-	case C.GK_EVENT_TOUCH:
+	case gkEventTouch:
 		touch := ui.TouchEvent{ID: event.a, Phase: ui.InputPhase(event.b), X: event.x, Y: event.y, Pressure: event.z}
 		each(&w.events.touches, func(handler ui.TouchHandler) {
 			handler(touch)
 		})
-	case C.GK_EVENT_PEN:
+	case gkEventPen:
 		pen := ui.PenEvent{
 			Phase: ui.InputPhase(event.a), X: event.x, Y: event.y, Pressure: event.z, Rotation: event.w,
 			Eraser: event.c&1 != 0, BarrelButton: event.c&2 != 0, DeviceID: event.b,
@@ -548,7 +541,7 @@ func (w *Window) gtkEvent(event gtkEvent) {
 		each(&w.events.pens, func(handler ui.PenHandler) {
 			handler(pen)
 		})
-	case C.GK_EVENT_GESTURE:
+	case gkEventGesture:
 		gesture := ui.GestureEvent{Kind: ui.GestureKind(event.a), Phase: ui.InputPhase(event.b), X: event.x, Y: event.y}
 		switch gesture.Kind {
 		case ui.GestureMagnify:
@@ -561,7 +554,7 @@ func (w *Window) gtkEvent(event gtkEvent) {
 		each(&w.events.gestures, func(handler ui.GestureHandler) {
 			handler(gesture)
 		})
-	case C.GK_EVENT_DEVICE:
+	case gkEventDevice:
 		w.dispatchDevice(deviceEvent(event))
 	}
 }
@@ -593,7 +586,7 @@ func (w *Window) dispatchPreferences() {
 
 // gtkQuery answers whether a user close request may proceed.
 func (w *Window) gtkQuery(event gtkEvent) bool {
-	if event.kind != C.GK_EVENT_WINDOW_CLOSE_REQUEST {
+	if event.kind != gkEventWindowCloseRequest {
 		return true
 	}
 	allow := true
@@ -636,7 +629,7 @@ var (
 func attachApplication() {
 	applicationOnce.Do(func() {
 		applicationHandle = cgo.NewHandle(&application{})
-		C.gkGTKAppAttach(C.uintptr_t(applicationHandle))
+		gkGTKAppAttach(cUintptr(applicationHandle))
 	})
 }
 
@@ -653,17 +646,17 @@ func liveWindows() []*Window {
 func (*application) gtkEvent(event gtkEvent) {
 	for _, window := range liveWindows() {
 		switch event.kind {
-		case C.GK_EVENT_APP_ACTIVE:
+		case gkEventAppActive:
 			each(&window.events.activated, func(handler ui.FocusHandler) {
 				handler()
 			})
-		case C.GK_EVENT_APP_INACTIVE:
+		case gkEventAppInactive:
 			each(&window.events.deactivated, func(handler ui.FocusHandler) {
 				handler()
 			})
-		case C.GK_EVENT_PREFERENCES:
+		case gkEventPreferences:
 			window.dispatchPreferences()
-		case C.GK_EVENT_DEVICE:
+		case gkEventDevice:
 			window.dispatchDevice(deviceEvent(event))
 		}
 	}

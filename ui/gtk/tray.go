@@ -2,15 +2,9 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-*/
-import "C"
-
 import (
 	"errors"
 	"fmt"
-	"runtime/cgo"
 	"sync"
 	"unsafe"
 
@@ -21,8 +15,7 @@ import (
 // shows in its notification area.
 type systemTray struct {
 	mu        sync.RWMutex
-	native    unsafe.Pointer
-	handle    cgo.Handle
+	native    *nativeTray
 	icon      ui.IconSource
 	title     string
 	tooltip   string
@@ -46,11 +39,12 @@ func (w *Window) CreateSystemTray(options ui.SystemTrayOptions) (ui.SystemTray, 
 		tooltip: options.Tooltip,
 		visible: true,
 	}
-	tray.handle = cgo.NewHandle(tray)
-	tray.native = C.gkGTKTrayCreate(C.uintptr_t(tray.handle))
-	if tray.native == nil {
-		tray.handle.Delete()
-		return nil, errors.New("ui/gtk: the menu bar could not create a status item")
+	var err error
+	tray.native, err = newNativeTray(func() {
+		each(&tray.activates, func(handler ui.FocusHandler) { handler() })
+	})
+	if err != nil {
+		return nil, err
 	}
 	tray.apply()
 	if options.Menu != nil {
@@ -63,7 +57,7 @@ func (w *Window) CreateSystemTray(options ui.SystemTrayOptions) (ui.SystemTray, 
 }
 
 func (t *systemTray) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_ACTIVATE {
+	if event.kind == gkEventActivate {
 		each(&t.activates, func(handler ui.FocusHandler) {
 			handler()
 		})
@@ -79,16 +73,10 @@ func (t *systemTray) apply() {
 	if native == nil {
 		return
 	}
-	image := nativeIcon(icon, 15)
-	defer C.gkGTKRelease(image)
-	titleValue := cString(title)
-	tooltipValue := cString(tooltip)
-	defer freeCString(titleValue)
-	defer freeCString(tooltipValue)
-	C.gkGTKTrayConfigure(native, image, boolInt(icon.SystemName != ""), titleValue, tooltipValue)
+	native.configure(icon, title, tooltip)
 }
 
-func (t *systemTray) nativeTray() unsafe.Pointer {
+func (t *systemTray) nativeTray() *nativeTray {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.native
@@ -102,8 +90,7 @@ func (t *systemTray) Close() {
 	if native == nil {
 		return
 	}
-	C.gkGTKTrayRemove(native)
-	t.handle.Delete()
+	native.close()
 }
 
 func (t *systemTray) Icon() ui.IconSource {
@@ -180,7 +167,7 @@ func (t *systemTray) SetMenu(menu ui.Menu) error {
 			return ui.ErrClosed
 		}
 	}
-	C.gkGTKTraySetMenu(native, nativeMenu)
+	native.setMenu(menuRecord(nativeMenu))
 	t.mu.Lock()
 	t.menu = menu
 	t.mu.Unlock()
@@ -198,7 +185,7 @@ func (t *systemTray) SetVisible(visible bool) {
 	if native == nil {
 		return
 	}
-	C.gkGTKTraySetVisible(native, boolInt(visible))
+	native.setVisible(visible)
 	t.mu.Lock()
 	t.visible = visible
 	t.mu.Unlock()
@@ -215,7 +202,8 @@ func (t *systemTray) SetAttention(attention bool) {
 	if native == nil {
 		return
 	}
-	C.gkGTKTraySetAttention(native, boolInt(attention))
+	native.attention = attention
+	native.setVisible(native.visible)
 	t.mu.Lock()
 	t.attention = attention
 	t.mu.Unlock()
@@ -226,15 +214,7 @@ func (t *systemTray) Bounds() (ui.Rect, error) {
 	if native == nil {
 		return ui.Rect{}, ui.ErrClosed
 	}
-	var x, y, width, height C.double
-	if C.gkGTKTrayBounds(native, &x, &y, &width, &height) == 0 {
-		return ui.Rect{}, fmt.Errorf("ui/gtk: StatusNotifierItem hosts do not report where they show an item: %w",
-			ui.ErrNotSupported)
-	}
-	return ui.Rect{
-		Position: ui.Point{X: int(x), Y: int(y)},
-		Size:     ui.Size{Width: int(width), Height: int(height)},
-	}, nil
+	return ui.Rect{}, fmt.Errorf("ui/gtk: StatusNotifierItem hosts do not report where they show an item: %w", ui.ErrNotSupported)
 }
 
 func (t *systemTray) OnActivate(handler ui.FocusHandler) ui.Unsubscribe {

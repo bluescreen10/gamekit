@@ -2,12 +2,6 @@
 
 package gtk
 
-/*
-#include "gtk_bridge.h"
-#include <stdlib.h>
-*/
-import "C"
-
 import (
 	"errors"
 	"slices"
@@ -20,12 +14,12 @@ import (
 // iconArray holds retained native icons for one call.
 type iconArray struct {
 	pointer unsafe.Pointer
-	icons   []unsafe.Pointer
+	icons   []*gdkPaintable
 }
 
 func newIconArray(sources []ui.IconSource, size float64) *iconArray {
-	array := &iconArray{pointer: C.malloc(C.size_t(max(1, len(sources))) * C.size_t(unsafe.Sizeof(uintptr(0))))}
-	array.icons = unsafe.Slice((*unsafe.Pointer)(array.pointer), max(1, len(sources)))[:len(sources)]
+	array := &iconArray{pointer: gMalloc(cSize(max(1, len(sources))) * cSize(unsafe.Sizeof(uintptr(0))))}
+	array.icons = unsafe.Slice((**gdkPaintable)(array.pointer), max(1, len(sources)))[:len(sources)]
 	for i, source := range sources {
 		array.icons[i] = nativeIcon(source, size)
 	}
@@ -38,9 +32,9 @@ func (a *iconArray) native() *unsafe.Pointer {
 
 func (a *iconArray) free() {
 	for _, icon := range a.icons {
-		C.gkGTKRelease(icon)
+		gkGTKRelease(unsafe.Pointer(icon))
 	}
-	C.free(a.pointer)
+	gFree(a.pointer)
 }
 
 // imageIcons converts images to icon sources.
@@ -52,10 +46,10 @@ func imageIcons(count int, image func(int) ui.IconSource) []ui.IconSource {
 	return sources
 }
 
-func readIDs(read func(*C.size_t) *C.char) []string {
-	var size C.size_t
+func readIDs(read func(*cSize) *cChar) []string {
+	var size cSize
 	buffer := read(&size)
-	defer C.free(unsafe.Pointer(buffer))
+	defer gFree(unsafe.Pointer(buffer))
 	return splitNul(unsafe.Pointer(buffer), size)
 }
 
@@ -81,19 +75,19 @@ func (w *Window) newTable(list bool, columns []ui.TableColumn, selection ui.Sele
 	}
 	ids := make([]string, len(columns))
 	titles := make([]string, len(columns))
-	widths := make([]C.int, len(columns))
-	sortable := make([]C.int, len(columns))
+	widths := make([]cInt, len(columns))
+	sortable := make([]cInt, len(columns))
 	for i, column := range columns {
 		ids[i], titles[i] = column.ID, column.Title
-		widths[i], sortable[i] = C.int(column.Width), boolInt(column.Sortable)
+		widths[i], sortable[i] = cInt(column.Width), boolInt(column.Sortable)
 	}
 	idBuffer, titleBuffer := joinNul(ids), joinNul(titles)
 	result := &table{columns: append([]ui.TableColumn(nil), columns...), selection: selection}
 	if owner == nil {
 		owner = result
 	}
-	native := C.gkGTKTableCreate(window, boolInt(list), bytesPointer(idBuffer), C.size_t(len(idBuffer)),
-		bytesPointer(titleBuffer), C.size_t(len(titleBuffer)), &widths[0], &sortable[0], C.int(selection))
+	native := gkGTKTableCreate(window, boolInt(list), bytesPointer(idBuffer), cSize(len(idBuffer)),
+		bytesPointer(titleBuffer), cSize(len(titleBuffer)), &widths[0], &sortable[0], cInt(selection))
 	role := ui.RoleTable
 	if list {
 		role = ui.RoleList
@@ -118,9 +112,9 @@ func (t *table) setRows(ids []string, cells []string, details []string, icons []
 		defer array.free()
 		iconPointer = array.native()
 	}
-	C.gkGTKTableSetRows(native, bytesPointer(idBuffer), C.size_t(len(idBuffer)), bytesPointer(cellBuffer),
-		C.size_t(len(cellBuffer)), bytesPointer(detailBuffer), C.size_t(len(detailBuffer)), iconPointer,
-		C.int(max(1, len(t.columns))))
+	gkGTKTableSetRows(native, bytesPointer(idBuffer), cSize(len(idBuffer)), bytesPointer(cellBuffer),
+		cSize(len(cellBuffer)), bytesPointer(detailBuffer), cSize(len(detailBuffer)), iconPointer,
+		cInt(max(1, len(t.columns))))
 	t.rowIDs = append([]string(nil), ids...)
 	kept := slices.DeleteFunc(selected, func(id string) bool {
 		return !slices.Contains(ids, id)
@@ -134,15 +128,15 @@ func (t *table) SelectedIDs() []string {
 	if native == nil {
 		return nil
 	}
-	return readIDs(func(size *C.size_t) *C.char {
-		return C.gkGTKTableSelection(native, size)
+	return readIDs(func(size *cSize) *cChar {
+		return gkGTKTableSelection(native, size)
 	})
 }
 
 func (t *table) selectIDs(ids []string) {
 	if native := t.nativePointer(); native != nil {
 		buffer := joinNul(ids)
-		C.gkGTKTableSelect(native, bytesPointer(buffer), C.size_t(len(buffer)))
+		gkGTKTableSelect(native, bytesPointer(buffer), cSize(len(buffer)))
 	}
 }
 
@@ -164,7 +158,7 @@ func (t *table) ScrollToItem(id string) error {
 	}
 	value := cString(id)
 	defer freeCString(value)
-	if C.gkGTKTableScrollTo(native, value) == 0 {
+	if gkGTKTableScrollTo(native, value) == 0 {
 		return errors.New("ui: item does not exist")
 	}
 	return nil
@@ -180,17 +174,17 @@ func (t *table) OnActivate(handler ui.ActionHandler) ui.Unsubscribe {
 
 func (t *table) gtkEvent(event gtkEvent) {
 	switch event.kind {
-	case C.GK_EVENT_SELECTION:
+	case gkEventSelection:
 		ids := t.SelectedIDs()
 		each(&t.selects, func(handler ui.SelectionIDsHandler) {
 			handler(append([]string(nil), ids...))
 		})
-	case C.GK_EVENT_ACTIVATE:
+	case gkEventActivate:
 		id := event.text
 		each(&t.activates, func(handler ui.ActionHandler) {
 			handler(id)
 		})
-	case C.GK_EVENT_SORT:
+	case gkEventSort:
 		t.sort = ui.SortDescriptor{ColumnID: event.text, Ascending: event.a != 0}
 		sort := t.sort
 		each(&t.sorts, func(handler func(ui.SortDescriptor)) {
@@ -346,7 +340,7 @@ func (w *Window) newOutline(navigation bool, selection ui.SelectionMode, role ui
 		return nil, err
 	}
 	result := &outline{selection: selection}
-	native := C.gkGTKOutlineCreate(window, boolInt(navigation), boolInt(selection == ui.SelectionMultiple))
+	native := gkGTKOutlineCreate(window, boolInt(navigation), boolInt(selection == ui.SelectionMultiple))
 	if result.widgetBase, err = w.newComponent(native, role, owner); err != nil {
 		return nil, err
 	}
@@ -358,14 +352,14 @@ func (o *outline) setNodes(parent *string, nodes []outlineNode) error {
 	if native == nil {
 		return ui.ErrClosed
 	}
-	depths := make([]C.int, max(1, len(nodes)))
-	flags := make([]C.int, max(1, len(nodes)))
+	depths := make([]cInt, max(1, len(nodes)))
+	flags := make([]cInt, max(1, len(nodes)))
 	ids := make([]string, len(nodes))
 	texts := make([]string, len(nodes))
 	badges := make([]string, len(nodes))
 	icons := make([]ui.IconSource, len(nodes))
 	for i, node := range nodes {
-		depths[i] = C.int(node.depth)
+		depths[i] = cInt(node.depth)
 		if node.hasChildren {
 			flags[i] |= 1
 		}
@@ -377,14 +371,14 @@ func (o *outline) setNodes(parent *string, nodes []outlineNode) error {
 	idBuffer, textBuffer, badgeBuffer := joinNul(ids), joinNul(texts), joinNul(badges)
 	array := newIconArray(icons, 16)
 	defer array.free()
-	var parentValue *C.char
+	var parentValue *cChar
 	if parent != nil {
 		parentValue = cString(*parent)
 		defer freeCString(parentValue)
 	}
-	C.gkGTKOutlineSetNodes(native, parentValue, &depths[0], &flags[0], bytesPointer(idBuffer), C.size_t(len(idBuffer)),
-		bytesPointer(textBuffer), C.size_t(len(textBuffer)), bytesPointer(badgeBuffer), C.size_t(len(badgeBuffer)),
-		array.native(), C.int(len(nodes)))
+	gkGTKOutlineSetNodes(native, parentValue, &depths[0], &flags[0], bytesPointer(idBuffer), cSize(len(idBuffer)),
+		bytesPointer(textBuffer), cSize(len(textBuffer)), bytesPointer(badgeBuffer), cSize(len(badgeBuffer)),
+		array.native(), cInt(len(nodes)))
 	return nil
 }
 
@@ -393,8 +387,8 @@ func (o *outline) SelectedIDs() []string {
 	if native == nil {
 		return nil
 	}
-	return readIDs(func(size *C.size_t) *C.char {
-		return C.gkGTKOutlineSelection(native, size)
+	return readIDs(func(size *cSize) *cChar {
+		return gkGTKOutlineSelection(native, size)
 	})
 }
 
@@ -407,7 +401,7 @@ func (o *outline) SetSelectedIDs(ids []string) error {
 		return ui.ErrClosed
 	}
 	buffer := joinNul(ids)
-	C.gkGTKOutlineSelect(native, bytesPointer(buffer), C.size_t(len(buffer)))
+	gkGTKOutlineSelect(native, bytesPointer(buffer), cSize(len(buffer)))
 	return nil
 }
 
@@ -417,12 +411,12 @@ func (o *outline) OnSelectionChange(handler ui.SelectionIDsHandler) ui.Unsubscri
 
 func (o *outline) gtkEvent(event gtkEvent) {
 	switch event.kind {
-	case C.GK_EVENT_SELECTION:
+	case gkEventSelection:
 		ids := o.SelectedIDs()
 		each(&o.selects, func(handler ui.SelectionIDsHandler) {
 			handler(append([]string(nil), ids...))
 		})
-	case C.GK_EVENT_EXPAND:
+	case gkEventExpand:
 		id := event.text
 		each(&o.expands, func(handler ui.ActionHandler) {
 			handler(id)
@@ -543,7 +537,7 @@ func (t *treeView) IsExpanded(id string) bool {
 	}
 	value := cString(id)
 	defer freeCString(value)
-	return C.gkGTKOutlineExpanded(native, value) != 0
+	return gkGTKOutlineExpanded(native, value) != 0
 }
 
 func (t *treeView) SetExpanded(id string, expanded bool) error {
@@ -553,7 +547,7 @@ func (t *treeView) SetExpanded(id string, expanded bool) error {
 	}
 	value := cString(id)
 	defer freeCString(value)
-	if C.gkGTKOutlineSetExpanded(native, value, boolInt(expanded)) == 0 {
+	if gkGTKOutlineSetExpanded(native, value, boolInt(expanded)) == 0 {
 		return errors.New("ui: tree node does not exist")
 	}
 	return nil
@@ -592,7 +586,7 @@ func (w *Window) CreateNavigationList(options ui.NavigationListOptions) (ui.Navi
 
 func (n *navigationList) gtkEvent(event gtkEvent) {
 	n.outline.gtkEvent(event)
-	if event.kind == C.GK_EVENT_SELECTION {
+	if event.kind == gkEventSelection {
 		id := n.SelectedID()
 		each(&n.changes, func(handler ui.ActionHandler) {
 			handler(id)
@@ -666,7 +660,7 @@ func (w *Window) CreateCollectionView(options ui.CollectionViewOptions) (ui.Coll
 		return nil, err
 	}
 	result := &collectionView{selection: options.Selection}
-	native := C.gkGTKCollectionCreate(window, C.int(options.ItemSize.Width), C.int(options.ItemSize.Height), C.int(options.Selection))
+	native := gkGTKCollectionCreate(window, cInt(options.ItemSize.Width), cInt(options.ItemSize.Height), cInt(options.Selection))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleGrid, result); err != nil {
 		return nil, err
 	}
@@ -712,8 +706,8 @@ func (c *collectionView) SetItems(items []ui.CollectionItem) error {
 	array := newIconArray(icons, 0)
 	defer array.free()
 	idBuffer, textBuffer := joinNul(ids), joinNul(texts)
-	C.gkGTKCollectionSetItems(native, bytesPointer(idBuffer), C.size_t(len(idBuffer)), bytesPointer(textBuffer),
-		C.size_t(len(textBuffer)), array.native(), C.int(len(items)))
+	gkGTKCollectionSetItems(native, bytesPointer(idBuffer), cSize(len(idBuffer)), bytesPointer(textBuffer),
+		cSize(len(textBuffer)), array.native(), cInt(len(items)))
 	c.items = append([]ui.CollectionItem(nil), items...)
 	return nil
 }
@@ -723,8 +717,8 @@ func (c *collectionView) SelectedIDs() []string {
 	if native == nil {
 		return nil
 	}
-	return readIDs(func(size *C.size_t) *C.char {
-		return C.gkGTKCollectionSelection(native, size)
+	return readIDs(func(size *cSize) *cChar {
+		return gkGTKCollectionSelection(native, size)
 	})
 }
 
@@ -737,7 +731,7 @@ func (c *collectionView) SetSelectedIDs(ids []string) error {
 		return ui.ErrClosed
 	}
 	buffer := joinNul(ids)
-	C.gkGTKCollectionSelect(native, bytesPointer(buffer), C.size_t(len(buffer)))
+	gkGTKCollectionSelect(native, bytesPointer(buffer), cSize(len(buffer)))
 	return nil
 }
 
@@ -750,7 +744,7 @@ func (c *collectionView) OnActivate(handler ui.ActionHandler) ui.Unsubscribe {
 }
 
 func (c *collectionView) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_SELECTION {
+	if event.kind == gkEventSelection {
 		ids := c.SelectedIDs()
 		each(&c.selects, func(handler ui.SelectionIDsHandler) {
 			handler(append([]string(nil), ids...))
@@ -777,7 +771,7 @@ func (w *Window) CreateBreadcrumbs(options ui.BreadcrumbsOptions) (ui.Breadcrumb
 		return nil, err
 	}
 	result := &breadcrumbs{}
-	if result.widgetBase, err = w.newComponent(C.gkGTKBreadcrumbsCreate(window), ui.RoleNavigation, result); err != nil {
+	if result.widgetBase, err = w.newComponent(gkGTKBreadcrumbsCreate(window), ui.RoleNavigation, result); err != nil {
 		return nil, err
 	}
 	if err := result.SetItems(options.Items); err != nil {
@@ -806,7 +800,7 @@ func (b *breadcrumbs) SetItems(items []ui.BreadcrumbItem) error {
 		return ui.ErrClosed
 	}
 	buffer := joinNul(titles)
-	C.gkGTKBreadcrumbsSetItems(native, bytesPointer(buffer), C.size_t(len(buffer)))
+	gkGTKBreadcrumbsSetItems(native, bytesPointer(buffer), cSize(len(buffer)))
 	b.items = append([]ui.BreadcrumbItem(nil), items...)
 	return nil
 }
@@ -816,7 +810,7 @@ func (b *breadcrumbs) OnActivate(handler ui.ActionHandler) ui.Unsubscribe {
 }
 
 func (b *breadcrumbs) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_ACTIVATE && event.a >= 0 && event.a < len(b.items) {
+	if event.kind == gkEventActivate && event.a >= 0 && event.a < len(b.items) {
 		id := b.items[event.a].ID
 		each(&b.activates, func(handler ui.ActionHandler) {
 			handler(id)
@@ -842,7 +836,7 @@ func (w *Window) CreatePagination(options ui.PaginationOptions) (ui.Pagination, 
 		return nil, err
 	}
 	result := &pagination{count: options.PageCount, selected: options.SelectedPage}
-	native := C.gkGTKPaginationCreate(window, C.int(options.PageCount), C.int(options.SelectedPage), boolInt(options.Compact))
+	native := gkGTKPaginationCreate(window, cInt(options.PageCount), cInt(options.SelectedPage), boolInt(options.Compact))
 	if result.widgetBase, err = w.newComponent(native, ui.RoleNavigation, result); err != nil {
 		return nil, err
 	}
@@ -857,7 +851,7 @@ func (p *pagination) SelectedPage() int {
 }
 func (p *pagination) apply() {
 	if native := p.nativePointer(); native != nil {
-		C.gkGTKPaginationSet(native, C.int(p.count), C.int(p.selected))
+		gkGTKPaginationSet(native, cInt(p.count), cInt(p.selected))
 	}
 }
 func (p *pagination) SetPageCount(count int) error {
@@ -881,7 +875,7 @@ func (p *pagination) OnChange(handler ui.SelectionChangeHandler) ui.Unsubscribe 
 	return subscribe(&p.changes, handler, handler == nil)
 }
 func (p *pagination) gtkEvent(event gtkEvent) {
-	if event.kind == C.GK_EVENT_SELECTION {
+	if event.kind == gkEventSelection {
 		p.selected = event.a
 		page := p.selected
 		each(&p.changes, func(handler ui.SelectionChangeHandler) {
